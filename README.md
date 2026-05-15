@@ -61,6 +61,13 @@ data/booking-data.json
 
 下一階段若要改用 Firebase，建議使用 Firestore 保存 `categories`、`courses`、`sessions`、`reservations`，並用 server-side 寫入避免學生端直接看到完整名單。
 
+程式資料來源由 `BOOKING_DATA_SOURCE` 控制：
+
+- `json`：使用本機 `data/booking-data.json`，適合目前 MVP 測試。
+- `firestore`：使用 Firestore，但需要先設定 Firebase Admin 憑證。
+
+目前已把無個資的 `categories`、`courses`、`sessions` 種到 Firestore；`reservations` 尚未搬入 Firestore，避免在沒有後台登入與管理員憑證前處理真實個資。
+
 ## 開發指令
 
 ```bash
@@ -108,3 +115,4 @@ powershell -ExecutionPolicy Bypass -File "C:\Users\User\codex-projects\union-cou
 - 建立 Excel 匯出
 - 接正式資料庫
 - 接 Firebase / Firestore，取代本機 JSON MVP
+- 建立 Firebase Admin 憑證，將 `BOOKING_DATA_SOURCE` 切到 `firestore`

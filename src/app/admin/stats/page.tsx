@@ -1,9 +1,9 @@
 import { AdminShell } from "@/components/page-shell";
-import { readBookingData } from "@/lib/data-store";
+import { getBookingData } from "@/lib/booking-repository";
 import { getCategoryName } from "@/lib/course-utils";
 
-export default function AdminStatsPage() {
-  const { courses, reservations } = readBookingData();
+export default async function AdminStatsPage() {
+  const { categories, courses, reservations } = await getBookingData();
   const attended = reservations.filter((reservation) => reservation.attendanceStatus === "attended").length;
   const absent = reservations.filter((reservation) => reservation.attendanceStatus === "absent").length;
   const rate = reservations.length > 0 ? Math.round((attended / reservations.length) * 100) : 0;
@@ -57,7 +57,7 @@ export default function AdminStatsPage() {
           return (
             <div key={course.id} className="grid min-w-[760px] grid-cols-[1fr_130px_120px_120px_120px_120px] border-b border-zinc-100 px-4 py-4 text-sm last:border-0">
               <span className="font-medium text-zinc-950">{course.title}</span>
-              <span>{getCategoryName(course.categoryId)}</span>
+              <span>{getCategoryName(course.categoryId, categories)}</span>
               <span>{courseReservations.length}</span>
               <span>{courseAttended}</span>
               <span>{courseAbsent}</span>

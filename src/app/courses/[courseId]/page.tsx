@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CourseStatusBadge } from "@/components/status-badge";
 import { StudentShell } from "@/components/page-shell";
+import { getBookingData } from "@/lib/booking-repository";
 import { getCategoryName, getCourse, getRemainingSeats, getSessionStatus } from "@/lib/course-utils";
 
 type PageProps = {
@@ -10,7 +11,8 @@ type PageProps = {
 
 export default async function CourseDetailPage({ params }: PageProps) {
   const { courseId } = await params;
-  const course = getCourse(courseId);
+  const { categories, courses } = await getBookingData();
+  const course = getCourse(courseId, courses);
 
   if (!course) {
     notFound();
@@ -24,7 +26,7 @@ export default async function CourseDetailPage({ params }: PageProps) {
 
       <section className="mb-8 grid gap-6 lg:grid-cols-[1fr_320px]">
         <div>
-          <p className="mb-2 text-sm font-medium text-sky-700">{getCategoryName(course.categoryId)}</p>
+          <p className="mb-2 text-sm font-medium text-sky-700">{getCategoryName(course.categoryId, categories)}</p>
           <h1 className="text-3xl font-semibold text-zinc-950">{course.title}</h1>
           <p className="mt-4 max-w-3xl leading-7 text-zinc-600">{course.description}</p>
         </div>

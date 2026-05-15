@@ -98,6 +98,18 @@ npm run build
 - 程式尚未建立 Firebase 初始化檔。
 - 本機直接執行 `firebase` 指令不可用；請依教學檔使用 `npx.cmd -y firebase-tools@latest ...`。
 - `C:\Users\User\.codex\config.toml` 已加入 Firebase MCP server，需重啟 Codex Desktop 後才會載入 Firebase MCP 工具。
+- 專案已安裝 `firebase-admin`，資料層可用 `BOOKING_DATA_SOURCE=firestore` 切換到 Firestore。
+- 若沒有 Firebase Admin 憑證，資料層會回落使用本機 JSON，避免本機開發壞掉。
+- 無個資的 `categories`、`courses`、`sessions` 已種到 Firestore；`reservations` 尚未搬入 Firestore。
+
+啟用 Firestore 資料來源需要 `.env.local`：
+
+```text
+BOOKING_DATA_SOURCE=firestore
+FIREBASE_PROJECT_ID=...
+FIREBASE_CLIENT_EMAIL=...
+FIREBASE_PRIVATE_KEY=...
+```
 
 接 Firebase 時，優先使用伺服器端資料存取，避免學生端下載或查到完整預約名單。學生查詢只能回傳符合「完整姓名 + 手機末三碼」的本人資料，以及去個資化統計。
 

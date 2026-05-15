@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { AdminShell } from "@/components/page-shell";
-import { readBookingData } from "@/lib/data-store";
+import { getBookingData } from "@/lib/booking-repository";
 
-export default function AdminHomePage() {
-  const { courses, reservations } = readBookingData();
+export default async function AdminHomePage() {
+  const { courses, reservations } = await getBookingData();
   const totalSessions = courses.reduce((total, course) => total + course.sessions.length, 0);
   const totalCapacity = courses.flatMap((course) => course.sessions).reduce((total, session) => total + session.capacity, 0);
   const totalBooked = courses.flatMap((course) => course.sessions).reduce((total, session) => total + session.bookedCount, 0);

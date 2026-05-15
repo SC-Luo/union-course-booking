@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AdminShell } from "@/components/page-shell";
 import { CourseStatusBadge } from "@/components/status-badge";
+import { getBookingData } from "@/lib/booking-repository";
 import { getCategoryName, getCourse, getRemainingSeats, getSessionStatus } from "@/lib/course-utils";
 
 type PageProps = {
@@ -10,7 +11,8 @@ type PageProps = {
 
 export default async function AdminSessionsPage({ params }: PageProps) {
   const { courseId } = await params;
-  const course = getCourse(courseId);
+  const { categories, courses } = await getBookingData();
+  const course = getCourse(courseId, courses);
 
   if (!course) {
     notFound();
@@ -23,7 +25,7 @@ export default async function AdminSessionsPage({ params }: PageProps) {
           <Link href="/admin/courses" className="mb-4 inline-flex text-sm font-medium text-zinc-600 hover:text-zinc-950">
             返回課程管理
           </Link>
-          <p className="text-sm font-medium text-emerald-700">{getCategoryName(course.categoryId)}</p>
+          <p className="text-sm font-medium text-emerald-700">{getCategoryName(course.categoryId, categories)}</p>
           <h1 className="mt-2 text-3xl font-semibold text-zinc-950">{course.title}</h1>
           <p className="mt-2 text-sm text-zinc-600">預設地點：{course.defaultLocation}</p>
         </div>

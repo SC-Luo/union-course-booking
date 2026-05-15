@@ -1,18 +1,14 @@
-import { readBookingData } from "./data-store";
 import type { Course, CourseSession, CourseStatus } from "./types";
 
-export function getCategoryName(categoryId: string) {
-  const { categories } = readBookingData();
+export function getCategoryName(categoryId: string, categories: { id: string; name: string }[]) {
   return categories.find((category) => category.id === categoryId)?.name ?? "未分類";
 }
 
-export function getCourse(courseId: string) {
-  const { courses } = readBookingData();
+export function getCourse(courseId: string, courses: Course[]) {
   return courses.find((course) => course.id === courseId);
 }
 
-export function getSession(sessionId: string) {
-  const { courses } = readBookingData();
+export function getSession(sessionId: string, courses: Course[]) {
   return courses
     .flatMap((course) => course.sessions)
     .find((session) => session.id === sessionId);

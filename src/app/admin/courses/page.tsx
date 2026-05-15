@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { AdminShell } from "@/components/page-shell";
 import { CourseStatusBadge } from "@/components/status-badge";
-import { readBookingData } from "@/lib/data-store";
+import { getBookingData } from "@/lib/booking-repository";
 import { getCategoryName, getCourseStatus } from "@/lib/course-utils";
 
-export default function AdminCoursesPage() {
-  const { courses } = readBookingData();
+export default async function AdminCoursesPage() {
+  const { categories, courses } = await getBookingData();
 
   return (
     <AdminShell>
@@ -45,7 +45,7 @@ export default function AdminCoursesPage() {
         {courses.map((course) => (
           <div key={course.id} className="grid min-w-[880px] grid-cols-[1.4fr_120px_100px_100px_130px_220px] items-center border-b border-zinc-100 px-4 py-4 text-sm last:border-0">
             <span className="font-medium text-zinc-950">{course.title}</span>
-            <span className="text-zinc-600">{getCategoryName(course.categoryId)}</span>
+            <span className="text-zinc-600">{getCategoryName(course.categoryId, categories)}</span>
             <span><CourseStatusBadge status={getCourseStatus(course)} /></span>
             <span>{course.sessions.length}</span>
             <span>{course.sessions.reduce((total, session) => total + session.bookedCount, 0)}</span>

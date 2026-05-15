@@ -1,8 +1,8 @@
 import { AdminShell } from "@/components/page-shell";
-import { readBookingData } from "@/lib/data-store";
+import { getBookingData } from "@/lib/booking-repository";
 
-export default function AdminCategoriesPage() {
-  const { categories } = readBookingData();
+export default async function AdminCategoriesPage() {
+  const { categories } = await getBookingData();
 
   return (
     <AdminShell>

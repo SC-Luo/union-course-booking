@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { AttendanceStatusBadge, ReservationStatusBadge } from "@/components/status-badge";
 import { StudentShell } from "@/components/page-shell";
-import { readBookingData } from "@/lib/data-store";
+import { getBookingData } from "@/lib/booking-repository";
 import { getCategoryName, getCourse, getSession } from "@/lib/course-utils";
 
 type PageProps = {
@@ -10,7 +10,7 @@ type PageProps = {
 
 export default async function BookingSearchPage({ searchParams }: PageProps) {
   const { name = "", phone = "" } = await searchParams;
-  const { reservations } = readBookingData();
+  const { categories, courses, reservations } = await getBookingData();
   const normalizedName = name.trim();
   const normalizedPhone = phone.replace(/\D/g, "").slice(0, 3);
   const hasQuery = normalizedName.length > 0 || normalizedPhone.length > 0;
@@ -80,8 +80,8 @@ export default async function BookingSearchPage({ searchParams }: PageProps) {
           <article className="rounded-lg border border-zinc-200 bg-white p-5 text-zinc-600">查無符合條件的本人預約紀錄。</article>
         ) : null}
         {filteredReservations.map((reservation) => {
-          const course = getCourse(reservation.courseId);
-          const session = getSession(reservation.sessionId);
+          const course = getCourse(reservation.courseId, courses);
+          const session = getSession(reservation.sessionId, courses);
 
           if (!course || !session) {
             return null;
@@ -94,7 +94,7 @@ export default async function BookingSearchPage({ searchParams }: PageProps) {
                 <AttendanceStatusBadge status={reservation.attendanceStatus} />
               </div>
               <h2 className="text-lg font-semibold text-zinc-950">{course.title}</h2>
-              <p className="mt-1 text-sm text-sky-700">{getCategoryName(course.categoryId)}</p>
+              <p className="mt-1 text-sm text-sky-700">{getCategoryName(course.categoryId, categories)}</p>
               <div className="mt-4 grid gap-2 text-sm text-zinc-700 sm:grid-cols-2">
                 <p>日期：{session.date}</p>
                 <p>時間：{session.startTime}-{session.endTime}</p>

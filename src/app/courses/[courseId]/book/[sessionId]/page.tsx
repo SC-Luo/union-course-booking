@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createReservationAction } from "@/app/actions";
 import { StudentShell } from "@/components/page-shell";
+import { getBookingData } from "@/lib/booking-repository";
 import { getCourse, getRemainingSeats, getSession } from "@/lib/course-utils";
 
 type PageProps = {
@@ -18,8 +19,9 @@ const errorMessage: Record<string, string> = {
 export default async function BookingPage({ params, searchParams }: PageProps) {
   const { courseId, sessionId } = await params;
   const { error } = await searchParams;
-  const course = getCourse(courseId);
-  const session = getSession(sessionId);
+  const { courses } = await getBookingData();
+  const course = getCourse(courseId, courses);
+  const session = getSession(sessionId, courses);
 
   if (!course || !session || session.courseId !== course.id) {
     notFound();

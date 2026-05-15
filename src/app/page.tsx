@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { CourseStatusBadge } from "@/components/status-badge";
 import { StudentShell } from "@/components/page-shell";
-import { readBookingData } from "@/lib/data-store";
+import { getBookingData } from "@/lib/booking-repository";
 import { getCategoryName, getCourseStatus, getRemainingSeats } from "@/lib/course-utils";
 
-export default function Home() {
-  const { categories, courses } = readBookingData();
+export default async function Home() {
+  const { categories, courses } = await getBookingData();
 
   return (
     <StudentShell>
@@ -34,7 +34,7 @@ export default function Home() {
             <Link key={course.id} href={`/courses/${course.id}`} className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm transition hover:border-zinc-300 hover:shadow-md">
               <div className="mb-4 flex items-start justify-between gap-4">
                 <div>
-                  <p className="mb-2 text-sm font-medium text-sky-700">{getCategoryName(course.categoryId)}</p>
+                  <p className="mb-2 text-sm font-medium text-sky-700">{getCategoryName(course.categoryId, categories)}</p>
                   <h2 className="text-xl font-semibold text-zinc-950">{course.title}</h2>
                 </div>
                 <CourseStatusBadge status={status} />

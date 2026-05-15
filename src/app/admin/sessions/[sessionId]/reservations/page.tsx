@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AdminShell } from "@/components/page-shell";
 import { AttendanceStatusBadge, ReservationStatusBadge } from "@/components/status-badge";
-import { readBookingData } from "@/lib/data-store";
+import { getBookingData } from "@/lib/booking-repository";
 import { getCourse, getRemainingSeats, getSession } from "@/lib/course-utils";
 
 type PageProps = {
@@ -11,9 +11,9 @@ type PageProps = {
 
 export default async function AdminReservationsPage({ params }: PageProps) {
   const { sessionId } = await params;
-  const session = getSession(sessionId);
-  const course = session ? getCourse(session.courseId) : undefined;
-  const { reservations } = readBookingData();
+  const { courses, reservations } = await getBookingData();
+  const session = getSession(sessionId, courses);
+  const course = session ? getCourse(session.courseId, courses) : undefined;
 
   if (!session || !course) {
     notFound();
