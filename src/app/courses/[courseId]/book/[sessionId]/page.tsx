@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { BookingForm } from "@/components/booking-form";
 import { StudentShell } from "@/components/page-shell";
 import { getBookingData } from "@/lib/booking-repository";
-import { getCourse, getRemainingSeats, getSession } from "@/lib/course-utils";
+import { formatReservationCutoff, getCourse, getRemainingSeats, getSession, getWeekday } from "@/lib/course-utils";
 
 type PageProps = {
   params: Promise<{ courseId: string; sessionId: string }>;
@@ -33,9 +33,12 @@ export default async function BookingPage({ params, searchParams }: PageProps) {
           <h1 className="text-3xl font-semibold text-zinc-950">{course.title}</h1>
           <div className="mt-6 grid gap-3 rounded-lg border border-zinc-200 bg-white p-5 text-sm text-zinc-700">
             <p>日期：{session.date}</p>
+            <p>星期：{getWeekday(session.date)}</p>
+            <p>單元：{session.topic ?? "未設定"}</p>
             <p>時間：{session.startTime}-{session.endTime}</p>
             <p>地點：{session.location}</p>
             <p>剩餘名額：{getRemainingSeats(session)}</p>
+            <p>預約與取消截止：{formatReservationCutoff(session)}</p>
           </div>
         </div>
 

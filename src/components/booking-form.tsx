@@ -12,7 +12,7 @@ type BookingFormProps = {
 const errorMessage: Record<string, string> = {
   invalid: "請確認姓名與手機末三碼都已填寫。",
   duplicate: "這位學員已預約過同一門課程，不能重複預約其他時段。",
-  closed: "這個時段目前無法預約，可能已額滿或已關閉。",
+  closed: "這個時段目前無法預約，可能已額滿、已關閉，或已超過前一天 18:00 的截止時間。",
 };
 
 export function BookingForm({ courseId, sessionId, error }: BookingFormProps) {
