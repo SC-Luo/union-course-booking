@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AttendanceStatusBadge, ReservationStatusBadge } from "@/components/status-badge";
 import { StudentShell } from "@/components/page-shell";
+import { SearchForm } from "@/components/search-form";
 import { getBookingData } from "@/lib/booking-repository";
 import { getCategoryName, getCourse, getSession } from "@/lib/course-utils";
 
@@ -51,19 +52,7 @@ export default async function BookingSearchPage({ searchParams }: PageProps) {
         </div>
       </section>
 
-      <form className="mb-8 rounded-lg border border-zinc-200 bg-white p-5">
-        <div className="grid gap-4 md:grid-cols-[1fr_180px_120px] md:items-end">
-          <label>
-            <span className="mb-2 block text-sm font-medium text-zinc-700">姓名</span>
-            <input name="name" defaultValue={name} className="w-full rounded-md border border-zinc-300 px-3 py-3" placeholder="請輸入姓名" />
-          </label>
-          <label>
-            <span className="mb-2 block text-sm font-medium text-zinc-700">手機末三碼</span>
-            <input name="phone" defaultValue={phone} className="w-full rounded-md border border-zinc-300 px-3 py-3" placeholder="168" maxLength={3} />
-          </label>
-          <button type="submit" className="rounded-md bg-zinc-900 px-4 py-3 text-sm font-medium text-white hover:bg-zinc-700">查詢</button>
-        </div>
-      </form>
+      <SearchForm name={name} phone={phone} />
 
       <section className="grid gap-4">
         {!hasQuery ? (

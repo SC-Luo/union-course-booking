@@ -1,6 +1,13 @@
 import Link from "next/link";
+import { adminLoginAction } from "./actions";
 
-export default function AdminLoginPage() {
+type PageProps = {
+  searchParams: Promise<{ error?: string }>;
+};
+
+export default async function AdminLoginPage({ searchParams }: PageProps) {
+  const { error } = await searchParams;
+
   return (
     <main className="flex min-h-screen items-center justify-center bg-[#f4f6f8] px-4">
       <section className="w-full max-w-md rounded-lg border border-zinc-200 bg-white p-6">
@@ -9,18 +16,15 @@ export default function AdminLoginPage() {
         </Link>
         <p className="mb-2 text-sm font-medium text-emerald-700">工作人員後台</p>
         <h1 className="text-2xl font-semibold text-zinc-950">登入管理系統</h1>
-        <form className="mt-6 grid gap-4">
+        {error ? <p className="mt-4 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">密碼不正確，請重新輸入。</p> : null}
+        <form action={adminLoginAction} className="mt-6 grid gap-4">
           <label>
-            <span className="mb-2 block text-sm font-medium text-zinc-700">帳號</span>
-            <input className="w-full rounded-md border border-zinc-300 px-3 py-3" placeholder="admin" />
+            <span className="mb-2 block text-base font-semibold text-zinc-800">後台密碼</span>
+            <input name="password" className="w-full rounded-md border border-zinc-300 px-4 py-4 text-base" type="password" autoComplete="current-password" />
           </label>
-          <label>
-            <span className="mb-2 block text-sm font-medium text-zinc-700">密碼</span>
-            <input className="w-full rounded-md border border-zinc-300 px-3 py-3" type="password" />
-          </label>
-          <Link href="/admin" className="rounded-md bg-zinc-900 px-4 py-3 text-center text-sm font-medium text-white hover:bg-zinc-700">
+          <button type="submit" className="rounded-md bg-zinc-900 px-4 py-4 text-center text-base font-semibold text-white hover:bg-zinc-700">
             登入
-          </Link>
+          </button>
         </form>
       </section>
     </main>

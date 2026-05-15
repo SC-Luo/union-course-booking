@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readBookingData, writeBookingData } from "./data-store";
 import { getAdminDb } from "./firebase-admin";
-import type { BookingData, Course, CourseCategory, CourseSession, Reservation } from "./types";
+import type { AttendanceStatus, BookingData, Course, CourseCategory, CourseSession, Reservation, Student } from "./types";
 
 function shouldUseFirestore() {
   return process.env.BOOKING_DATA_SOURCE === "firestore";
@@ -22,16 +22,18 @@ export async function getBookingData(): Promise<BookingData> {
     return readBookingData();
   }
 
-  const [categorySnapshot, courseSnapshot, sessionSnapshot, reservationSnapshot] = await Promise.all([
+  const [categorySnapshot, courseSnapshot, sessionSnapshot, reservationSnapshot, studentSnapshot] = await Promise.all([
     db.collection("categories").orderBy("sortOrder", "asc").get(),
     db.collection("courses").get(),
     db.collection("sessions").get(),
     db.collection("reservations").get(),
+    db.collection("students").orderBy("seatNumber", "asc").get(),
   ]);
 
   const categories = categorySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CourseCategory);
   const sessions = sessionSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CourseSession);
   const reservations = reservationSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Reservation);
+  const students = studentSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Student);
   const courses = courseSnapshot.docs.map((doc) => {
     const course = { id: doc.id, ...doc.data() } as Omit<Course, "sessions">;
 
@@ -41,7 +43,7 @@ export async function getBookingData(): Promise<BookingData> {
     };
   });
 
-  return { categories, courses, reservations };
+  return { categories, courses, reservations, students };
 }
 
 type CreateReservationInput = {
@@ -127,6 +129,26 @@ export async function createReservation(input: CreateReservationInput) {
 
     return { ok: true as const, reservation, courseId: course.id, sessionId: session.id };
   });
+}
+
+export async function updateReservationAttendance(reservationId: string, attendanceStatus: AttendanceStatus) {
+  if (!["pending", "attended", "absent"].includes(attendanceStatus)) {
+    return;
+  }
+
+  const db = getFirestoreDb();
+
+  if (!db) {
+    const data = readBookingData();
+    const reservation = data.reservations.find((item) => item.id === reservationId);
+    if (reservation) {
+      reservation.attendanceStatus = attendanceStatus;
+      writeBookingData(data);
+    }
+    return;
+  }
+
+  await db.collection("reservations").doc(reservationId).update({ attendanceStatus });
 }
 
 function buildReservation(input: CreateReservationInput): Reservation {

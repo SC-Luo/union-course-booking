@@ -14,23 +14,11 @@ export default async function AdminCoursesPage() {
           <p className="text-sm font-medium text-emerald-700">課程管理</p>
           <h1 className="mt-2 text-3xl font-semibold text-zinc-950">課程列表</h1>
         </div>
-        <button className="rounded-md bg-zinc-900 px-4 py-3 text-sm font-medium text-white">新增課程</button>
+        <span className="rounded-md border border-zinc-300 px-4 py-3 text-sm font-medium text-zinc-500">新增課程待開放</span>
       </section>
 
-      <section className="mb-5 grid gap-3 md:grid-cols-[180px_180px_1fr]">
-        <select className="rounded-md border border-zinc-300 bg-white px-3 py-3 text-sm">
-          <option>目前開放</option>
-          <option>即將開始</option>
-          <option>已結束</option>
-          <option>已關閉</option>
-        </select>
-        <select className="rounded-md border border-zinc-300 bg-white px-3 py-3 text-sm">
-          <option>全部分類</option>
-          <option>職訓課程</option>
-          <option>證照課</option>
-          <option>講座</option>
-        </select>
-        <input className="rounded-md border border-zinc-300 bg-white px-3 py-3 text-sm" placeholder="搜尋課程" />
+      <section className="mb-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+        目前課程新增與編輯先由資料匯入處理；後台已可查看時段、預約名單、出席狀態與匯出名單。
       </section>
 
       <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
@@ -51,7 +39,7 @@ export default async function AdminCoursesPage() {
             <span>{course.sessions.reduce((total, session) => total + session.bookedCount, 0)}</span>
             <span className="flex gap-2">
               <Link href={`/admin/courses/${course.id}/sessions`} className="rounded-md border border-zinc-300 px-3 py-2 hover:bg-zinc-50">時段</Link>
-              <button className="rounded-md border border-zinc-300 px-3 py-2 hover:bg-zinc-50">編輯</button>
+              <span className="rounded-md border border-zinc-200 px-3 py-2 text-zinc-400">編輯待開放</span>
             </span>
           </div>
         ))}

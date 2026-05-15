@@ -46,8 +46,19 @@ export type Reservation = {
   attendanceStatus: AttendanceStatus;
 };
 
+export type Student = {
+  id: string;
+  examGroup: string;
+  seatNumber: number;
+  name: string;
+  source: string;
+  note?: string;
+  needsReview?: boolean;
+};
+
 export type BookingData = {
   categories: CourseCategory[];
   courses: Course[];
   reservations: Reservation[];
+  students?: Student[];
 };

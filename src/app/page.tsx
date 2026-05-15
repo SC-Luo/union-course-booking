@@ -6,12 +6,13 @@ import { getCategoryName, getCourseStatus, getRemainingSeats } from "@/lib/cours
 
 export default async function Home() {
   const { categories, courses } = await getBookingData();
+  const activeCourses = courses.filter((course) => course.isActive);
 
   return (
     <StudentShell>
       <section className="mb-8 flex flex-col gap-3">
         <p className="text-sm font-medium text-emerald-700">課程預約</p>
-        <h1 className="text-3xl font-semibold text-zinc-950">選擇你要預約的課程</h1>
+        <h1 className="text-3xl font-semibold text-zinc-950 sm:text-4xl">選擇你要預約的課程</h1>
         <p className="max-w-2xl text-zinc-600">請先選擇課程，再挑選可預約的日期與時段。額滿課程仍會顯示，但不能送出預約。</p>
       </section>
 
@@ -25,7 +26,7 @@ export default async function Home() {
       </section>
 
       <section className="grid gap-4 md:grid-cols-2">
-        {courses.map((course) => {
+        {activeCourses.map((course) => {
           const status = getCourseStatus(course);
           const remainingSeats = course.sessions.reduce((total, session) => total + getRemainingSeats(session), 0);
           const nextSession = course.sessions[0];
@@ -45,6 +46,7 @@ export default async function Home() {
                 <p>剩餘名額：{remainingSeats}</p>
                 <p className="sm:col-span-2">地點：{nextSession.location}</p>
               </div>
+              <p className="mt-5 rounded-md bg-emerald-700 px-4 py-3 text-center text-sm font-semibold text-white">查看可預約時段</p>
             </Link>
           );
         })}

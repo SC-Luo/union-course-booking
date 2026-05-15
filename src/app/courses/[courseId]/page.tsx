@@ -61,7 +61,7 @@ export default async function CourseDetailPage({ params }: PageProps) {
                   </p>
                 </div>
                 {canBook ? (
-                  <Link href={`/courses/${course.id}/book/${session.id}`} className="rounded-md bg-zinc-900 px-4 py-3 text-center text-sm font-medium text-white hover:bg-zinc-700">
+                  <Link href={`/courses/${course.id}/book/${session.id}`} className="rounded-md bg-emerald-700 px-5 py-4 text-center text-base font-semibold text-white shadow-sm hover:bg-emerald-800">
                     預約此時段
                   </Link>
                 ) : (

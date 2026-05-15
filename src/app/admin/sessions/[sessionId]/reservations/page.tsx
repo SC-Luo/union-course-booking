@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { updateAttendanceAction } from "@/app/admin/actions";
 import { AdminShell } from "@/components/page-shell";
 import { AttendanceStatusBadge, ReservationStatusBadge } from "@/components/status-badge";
 import { getBookingData } from "@/lib/booking-repository";
@@ -34,7 +35,9 @@ export default async function AdminReservationsPage({ params }: PageProps) {
           <h1 className="mt-2 text-3xl font-semibold text-zinc-950">{course.title}</h1>
           <p className="mt-2 text-sm text-zinc-600">{session.date} {session.startTime}-{session.endTime}｜{session.location}</p>
         </div>
-        <button className="rounded-md bg-zinc-900 px-4 py-3 text-sm font-medium text-white">匯出 Excel</button>
+        <Link href={`/admin/sessions/${session.id}/reservations/export`} className="rounded-md bg-zinc-900 px-4 py-3 text-center text-sm font-medium text-white hover:bg-zinc-700">
+          匯出 CSV
+        </Link>
       </section>
 
       <section className="mb-6 grid gap-4 md:grid-cols-5">
@@ -69,8 +72,18 @@ export default async function AdminReservationsPage({ params }: PageProps) {
             <span><ReservationStatusBadge status={reservation.status} /></span>
             <span><AttendanceStatusBadge status={reservation.attendanceStatus} /></span>
             <span className="flex gap-2">
-              <button className="rounded-md border border-zinc-300 px-3 py-2 hover:bg-zinc-50">已到</button>
-              <button className="rounded-md border border-zinc-300 px-3 py-2 hover:bg-zinc-50">未到</button>
+              <form action={updateAttendanceAction}>
+                <input type="hidden" name="reservationId" value={reservation.id} />
+                <input type="hidden" name="sessionId" value={session.id} />
+                <input type="hidden" name="attendanceStatus" value="attended" />
+                <button className="rounded-md border border-zinc-300 px-3 py-2 hover:bg-zinc-50">已到</button>
+              </form>
+              <form action={updateAttendanceAction}>
+                <input type="hidden" name="reservationId" value={reservation.id} />
+                <input type="hidden" name="sessionId" value={session.id} />
+                <input type="hidden" name="attendanceStatus" value="absent" />
+                <button className="rounded-md border border-zinc-300 px-3 py-2 hover:bg-zinc-50">未到</button>
+              </form>
             </span>
           </div>
         ))}

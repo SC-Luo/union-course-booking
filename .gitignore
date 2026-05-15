@@ -35,6 +35,8 @@ yarn-error.log*
 firebase-admin-key.json
 *service-account*.json
 *firebase-admin*.json
+data/beauty-june-*.json
+extracted_*.jpg
 
 # vercel
 .vercel

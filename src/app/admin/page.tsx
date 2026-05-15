@@ -4,9 +4,11 @@ import { getBookingData } from "@/lib/booking-repository";
 
 export default async function AdminHomePage() {
   const { courses, reservations } = await getBookingData();
-  const totalSessions = courses.reduce((total, course) => total + course.sessions.length, 0);
-  const totalCapacity = courses.flatMap((course) => course.sessions).reduce((total, session) => total + session.capacity, 0);
-  const totalBooked = courses.flatMap((course) => course.sessions).reduce((total, session) => total + session.bookedCount, 0);
+  const activeCourses = courses.filter((course) => course.isActive);
+  const activeSessions = activeCourses.flatMap((course) => course.sessions);
+  const totalSessions = activeSessions.length;
+  const totalCapacity = activeSessions.reduce((total, session) => total + session.capacity, 0);
+  const totalBooked = activeSessions.reduce((total, session) => total + session.bookedCount, 0);
 
   return (
     <AdminShell>
@@ -22,7 +24,7 @@ export default async function AdminHomePage() {
 
       <section className="mb-8 grid gap-4 md:grid-cols-4">
         {[
-          ["開放課程", courses.length],
+          ["開放課程", activeCourses.length],
           ["課程時段", totalSessions],
           ["已預約", totalBooked],
           ["總名額", totalCapacity],
@@ -38,7 +40,7 @@ export default async function AdminHomePage() {
         <div className="rounded-lg border border-zinc-200 bg-white p-5">
           <h2 className="mb-4 text-lg font-semibold text-zinc-950">近期課程</h2>
           <div className="grid gap-3">
-            {courses.map((course) => (
+            {activeCourses.map((course) => (
               <Link key={course.id} href={`/admin/courses/${course.id}/sessions`} className="rounded-md border border-zinc-200 p-4 hover:bg-zinc-50">
                 <p className="font-medium text-zinc-950">{course.title}</p>
                 <p className="mt-1 text-sm text-zinc-500">{course.sessions.length} 個時段</p>

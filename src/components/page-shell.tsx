@@ -5,15 +5,15 @@ export function StudentShell({ children }: { children: ReactNode }) {
   return (
     <main className="min-h-screen bg-[#f7f7f4]">
       <header className="border-b border-zinc-200 bg-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
+        <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <Link href="/" className="text-lg font-semibold text-zinc-900">
             工會課程預約
           </Link>
-          <div className="flex items-center gap-3 text-sm">
-            <Link href="/booking/search" className="rounded-md border border-zinc-300 px-3 py-2 text-zinc-700 hover:bg-zinc-50">
+          <div className="grid w-full grid-cols-2 gap-2 text-sm sm:flex sm:w-auto sm:items-center sm:gap-3">
+            <Link href="/booking/search" className="rounded-md border border-zinc-300 px-3 py-3 text-center font-medium text-zinc-700 hover:bg-zinc-50">
               查詢預約
             </Link>
-            <Link href="/admin/login" className="rounded-md bg-zinc-900 px-3 py-2 text-white hover:bg-zinc-700">
+            <Link href="/admin/login" className="rounded-md bg-zinc-900 px-3 py-3 text-center font-medium text-white hover:bg-zinc-700">
               後台
             </Link>
           </div>
@@ -29,6 +29,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
     { href: "/admin", label: "首頁" },
     { href: "/admin/courses", label: "課程" },
     { href: "/admin/categories", label: "分類" },
+    { href: "/admin/students", label: "名冊" },
     { href: "/admin/stats", label: "統計" },
   ];
 
