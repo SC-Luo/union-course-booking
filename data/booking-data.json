@@ -1,0 +1,122 @@
+{
+  "categories": [
+    { "id": "vocational", "name": "職訓課程", "sortOrder": 1, "isActive": true },
+    { "id": "license", "name": "證照課", "sortOrder": 2, "isActive": true },
+    { "id": "lecture", "name": "講座", "sortOrder": 3, "isActive": true }
+  ],
+  "courses": [
+    {
+      "id": "beauty-basic",
+      "title": "美容基礎實作班",
+      "categoryId": "vocational",
+      "description": "適合初學者的美容實作課程，包含工具認識、流程演練與現場操作。",
+      "defaultLocation": "永康分會 301 教室",
+      "notes": "請提前 10 分鐘報到，課程需自備筆記用品。",
+      "isActive": true,
+      "sessions": [
+        {
+          "id": "beauty-basic-0518-am",
+          "courseId": "beauty-basic",
+          "date": "2026-05-18",
+          "startTime": "09:00",
+          "endTime": "12:00",
+          "location": "永康分會 301 教室",
+          "capacity": 20,
+          "bookedCount": 14,
+          "bookingDeadline": "2026-05-17 18:00",
+          "isActive": true
+        },
+        {
+          "id": "beauty-basic-0520-pm",
+          "courseId": "beauty-basic",
+          "date": "2026-05-20",
+          "startTime": "13:30",
+          "endTime": "16:30",
+          "location": "永康分會 302 教室",
+          "capacity": 18,
+          "bookedCount": 18,
+          "bookingDeadline": "2026-05-19 18:00",
+          "isActive": true
+        }
+      ]
+    },
+    {
+      "id": "license-review",
+      "title": "丙級證照考前複習",
+      "categoryId": "license",
+      "description": "針對證照檢定重點整理，搭配常見失分提醒與實作練習。",
+      "defaultLocation": "技能教室 A",
+      "notes": "請攜帶個人練習工具。",
+      "isActive": true,
+      "sessions": [
+        {
+          "id": "license-review-0522-night",
+          "courseId": "license-review",
+          "date": "2026-05-22",
+          "startTime": "18:30",
+          "endTime": "21:00",
+          "location": "技能教室 A",
+          "capacity": 16,
+          "bookedCount": 9,
+          "bookingDeadline": "2026-05-21 18:00",
+          "isActive": true
+        }
+      ]
+    },
+    {
+      "id": "career-talk",
+      "title": "職涯發展講座",
+      "categoryId": "lecture",
+      "description": "分享產業趨勢、職涯轉換與課後進修方向。",
+      "defaultLocation": "多功能會議室",
+      "notes": "座位有限，額滿後無法現場加座。",
+      "isActive": true,
+      "sessions": [
+        {
+          "id": "career-talk-0516",
+          "courseId": "career-talk",
+          "date": "2026-05-16",
+          "startTime": "10:00",
+          "endTime": "11:30",
+          "location": "多功能會議室",
+          "capacity": 30,
+          "bookedCount": 30,
+          "bookingDeadline": "2026-05-15 18:00",
+          "isActive": true
+        }
+      ]
+    }
+  ],
+  "reservations": [
+    {
+      "id": "r-001",
+      "courseId": "beauty-basic",
+      "sessionId": "beauty-basic-0518-am",
+      "studentName": "王小美",
+      "phoneLastThree": "168",
+      "bookedAt": "2026-05-14 09:12",
+      "status": "booked",
+      "attendanceStatus": "pending"
+    },
+    {
+      "id": "r-002",
+      "courseId": "beauty-basic",
+      "sessionId": "beauty-basic-0518-am",
+      "studentName": "陳怡君",
+      "phoneLastThree": "522",
+      "bookedAt": "2026-05-14 10:30",
+      "status": "booked",
+      "attendanceStatus": "attended"
+    },
+    {
+      "id": "r-003",
+      "courseId": "career-talk",
+      "sessionId": "career-talk-0516",
+      "studentName": "林志明",
+      "phoneLastThree": "907",
+      "bookedAt": "2026-05-13 16:48",
+      "status": "booked",
+      "attendanceStatus": "absent"
+    }
+  ]
+}
