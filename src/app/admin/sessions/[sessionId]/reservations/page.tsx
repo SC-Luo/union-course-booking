@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AdminShell } from "@/components/page-shell";
 import { AttendanceStatusBadge, ReservationStatusBadge } from "@/components/status-badge";
@@ -26,6 +27,9 @@ export default async function AdminReservationsPage({ params }: PageProps) {
     <AdminShell>
       <section className="mb-6 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
+          <Link href={`/admin/courses/${course.id}/sessions`} className="mb-4 inline-flex text-sm font-medium text-zinc-600 hover:text-zinc-950">
+            返回時段管理
+          </Link>
           <p className="text-sm font-medium text-emerald-700">預約名單</p>
           <h1 className="mt-2 text-3xl font-semibold text-zinc-950">{course.title}</h1>
           <p className="mt-2 text-sm text-zinc-600">{session.date} {session.startTime}-{session.endTime}｜{session.location}</p>

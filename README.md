@@ -47,6 +47,17 @@ data/booking-data.json
 
 這是第一版本機可用資料檔，方便快速驗證流程。正式上線前仍需替換成真正資料庫，並避免把真實個資提交到公開或共享 repo。
 
+## Firebase 狀態
+
+目前程式尚未連接 Firebase / Firestore。現有狀態是：
+
+- secondbrain 根目錄有 Firebase 設定檔與專案 ID。
+- 這個 Next.js 程式專案尚未安裝 Firebase SDK。
+- 程式目前沒有 Firebase 初始化檔，也沒有 Firestore 讀寫邏輯。
+- 本機目前找不到 `firebase` CLI 指令。
+
+下一階段若要改用 Firebase，建議使用 Firestore 保存 `categories`、`courses`、`sessions`、`reservations`，並用 server-side 寫入避免學生端直接看到完整名單。
+
 ## 開發指令
 
 ```bash
@@ -93,3 +104,4 @@ powershell -ExecutionPolicy Bypass -File "C:\Users\User\codex-projects\union-cou
 - 建立後台登入驗證
 - 建立 Excel 匯出
 - 接正式資料庫
+- 接 Firebase / Firestore，取代本機 JSON MVP

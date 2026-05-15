@@ -86,6 +86,19 @@ npm run build
 - `src/lib/data-store.ts`
 - `src/app/actions.ts`
 
+## Firebase 狀態
+
+目前尚未連接 Firebase / Firestore。不要誤以為 `data/booking-data.json` 是正式資料庫。
+
+已知狀態：
+
+- secondbrain 根目錄有 `.firebaserc`、`firebase.json`、`firestore.rules`，預設 project id 為 `my-teaching-tools-1126-f8fc9`。
+- 程式專案尚未安裝 Firebase SDK 或 Firebase Admin SDK。
+- 程式尚未建立 Firebase 初始化檔。
+- 本機目前找不到 `firebase` CLI 指令。
+
+接 Firebase 時，優先使用伺服器端資料存取，避免學生端下載或查到完整預約名單。學生查詢只能回傳符合「完整姓名 + 手機末三碼」的本人資料，以及去個資化統計。
+
 目前已建立主要頁面：
 
 - `/`：學生端課程列表

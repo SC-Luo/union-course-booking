@@ -20,6 +20,9 @@ export default async function AdminSessionsPage({ params }: PageProps) {
     <AdminShell>
       <section className="mb-6 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
+          <Link href="/admin/courses" className="mb-4 inline-flex text-sm font-medium text-zinc-600 hover:text-zinc-950">
+            返回課程管理
+          </Link>
           <p className="text-sm font-medium text-emerald-700">{getCategoryName(course.categoryId)}</p>
           <h1 className="mt-2 text-3xl font-semibold text-zinc-950">{course.title}</h1>
           <p className="mt-2 text-sm text-zinc-600">預設地點：{course.defaultLocation}</p>
