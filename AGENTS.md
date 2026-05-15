@@ -88,14 +88,16 @@ npm run build
 
 ## Firebase 狀態
 
-目前尚未連接 Firebase / Firestore。不要誤以為 `data/booking-data.json` 是正式資料庫。
+目前尚未把應用程式資料讀寫改接 Firebase / Firestore。不要誤以為 `data/booking-data.json` 是正式資料庫。
 
 已知狀態：
 
-- secondbrain 根目錄有 `.firebaserc`、`firebase.json`、`firestore.rules`，預設 project id 為 `my-teaching-tools-1126-f8fc9`。
+- 專案內已有 `.firebaserc`、`firebase.json`、`firestore.rules`，預設 project id 為 `my-teaching-tools-1126-f8fc9`。
+- Firestore rules 已部署成功。
 - 程式專案尚未安裝 Firebase SDK 或 Firebase Admin SDK。
 - 程式尚未建立 Firebase 初始化檔。
-- 本機目前找不到 `firebase` CLI 指令。
+- 本機直接執行 `firebase` 指令不可用；請依教學檔使用 `npx.cmd -y firebase-tools@latest ...`。
+- `C:\Users\User\.codex\config.toml` 已加入 Firebase MCP server，需重啟 Codex Desktop 後才會載入 Firebase MCP 工具。
 
 接 Firebase 時，優先使用伺服器端資料存取，避免學生端下載或查到完整預約名單。學生查詢只能回傳符合「完整姓名 + 手機末三碼」的本人資料，以及去個資化統計。
 

@@ -51,10 +51,13 @@ data/booking-data.json
 
 目前程式尚未連接 Firebase / Firestore。現有狀態是：
 
-- secondbrain 根目錄有 Firebase 設定檔與專案 ID。
+- 專案內已有 `.firebaserc`、`firebase.json`、`firestore.rules`。
+- Firebase 專案 ID：`my-teaching-tools-1126-f8fc9`。
+- 已用 `npx.cmd -y firebase-tools@latest deploy --only firestore:rules` 成功部署 Firestore rules。
 - 這個 Next.js 程式專案尚未安裝 Firebase SDK。
 - 程式目前沒有 Firebase 初始化檔，也沒有 Firestore 讀寫邏輯。
-- 本機目前找不到 `firebase` CLI 指令。
+- 本機直接執行 `firebase` 指令不可用；依教學檔使用 `npx.cmd -y firebase-tools@latest ...`。
+- Codex Firebase MCP 已寫入 `C:\Users\User\.codex\config.toml`，需要重啟 Codex Desktop 後才會載入工具。
 
 下一階段若要改用 Firebase，建議使用 Firestore 保存 `categories`、`courses`、`sessions`、`reservations`，並用 server-side 寫入避免學生端直接看到完整名單。
 
