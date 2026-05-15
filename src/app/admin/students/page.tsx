@@ -1,6 +1,8 @@
 import { AdminShell } from "@/components/page-shell";
 import { getBookingData } from "@/lib/booking-repository";
 
+export const dynamic = "force-dynamic";
+
 export default async function AdminStudentsPage() {
   const { students = [] } = await getBookingData();
   const reviewCount = students.filter((student) => student.needsReview).length;

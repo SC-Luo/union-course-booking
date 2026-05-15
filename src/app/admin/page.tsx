@@ -2,6 +2,8 @@ import Link from "next/link";
 import { AdminShell } from "@/components/page-shell";
 import { getBookingData } from "@/lib/booking-repository";
 
+export const dynamic = "force-dynamic";
+
 export default async function AdminHomePage() {
   const { courses, reservations } = await getBookingData();
   const activeCourses = courses.filter((course) => course.isActive);

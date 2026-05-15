@@ -2,6 +2,8 @@ import { AdminShell } from "@/components/page-shell";
 import { getBookingData } from "@/lib/booking-repository";
 import { getCategoryName } from "@/lib/course-utils";
 
+export const dynamic = "force-dynamic";
+
 export default async function AdminStatsPage() {
   const { categories, courses, reservations } = await getBookingData();
   const attended = reservations.filter((reservation) => reservation.attendanceStatus === "attended").length;

@@ -4,6 +4,8 @@ import { CourseStatusBadge } from "@/components/status-badge";
 import { getBookingData } from "@/lib/booking-repository";
 import { getCategoryName, getCourseStatus } from "@/lib/course-utils";
 
+export const dynamic = "force-dynamic";
+
 export default async function AdminCoursesPage() {
   const { categories, courses } = await getBookingData();
 
