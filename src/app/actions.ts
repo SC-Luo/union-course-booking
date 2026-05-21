@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { cancelReservation, createReservation } from "@/lib/booking-repository";
 
-function cleanPhoneLastThree(value: FormDataEntryValue | null) {
+function cleanIdNumberLast3(value: FormDataEntryValue | null) {
   return String(value ?? "").replace(/\D/g, "").slice(0, 3);
 }
 
@@ -12,8 +12,17 @@ export async function createReservationAction(formData: FormData) {
   const courseId = String(formData.get("courseId") ?? "");
   const sessionId = String(formData.get("sessionId") ?? "");
   const studentName = String(formData.get("studentName") ?? "").trim();
-  const phoneLastThree = cleanPhoneLastThree(formData.get("phoneLastThree"));
-  const result = await createReservation({ courseId, sessionId, studentName, phoneLastThree });
+  const idNumberLast3 = cleanIdNumberLast3(
+    formData.get("idNumberLast3") ?? formData.get("phoneLastThree"),
+  );
+
+  // booking-repository 目前仍用 phoneLastThree 做相容欄位；這裡改由身分證末三碼填入。
+  const result = await createReservation({
+    courseId,
+    sessionId,
+    studentName,
+    phoneLastThree: idNumberLast3,
+  });
 
   if (!result.ok) {
     redirect(`/courses/${courseId}/book/${sessionId}?error=${result.reason}`);
@@ -33,9 +42,11 @@ export async function createReservationAction(formData: FormData) {
 export async function cancelReservationAction(formData: FormData) {
   const reservationId = String(formData.get("reservationId") ?? "");
   const studentName = String(formData.get("studentName") ?? "").trim();
-  const phoneLastThree = cleanPhoneLastThree(formData.get("phoneLastThree"));
-  const result = await cancelReservation(reservationId, studentName, phoneLastThree);
-  const query = new URLSearchParams({ name: studentName, phone: phoneLastThree });
+  const idNumberLast3 = cleanIdNumberLast3(
+    formData.get("idNumberLast3") ?? formData.get("phoneLastThree"),
+  );
+  const result = await cancelReservation(reservationId, studentName, idNumberLast3);
+  const query = new URLSearchParams({ name: studentName, phone: idNumberLast3 });
 
   if (!result.ok) {
     query.set("error", result.reason);
@@ -50,6 +61,5 @@ export async function cancelReservationAction(formData: FormData) {
   revalidatePath(`/admin/courses/${result.courseId}/sessions`);
   revalidatePath(`/admin/sessions/${result.sessionId}/reservations`);
 
-  query.set("cancelled", "1");
   redirect(`/booking/search?${query.toString()}`);
 }

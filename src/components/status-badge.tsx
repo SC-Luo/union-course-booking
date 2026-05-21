@@ -18,9 +18,19 @@ const reservationStatusText: Record<ReservationStatus, string> = {
 };
 
 const attendanceStatusText: Record<AttendanceStatus, string> = {
-  pending: "待確認",
+  pending: "未點名",
+  unchecked: "未點名",
   attended: "已到",
   absent: "未到",
+  leave: "請假",
+};
+
+const attendanceStatusClass: Record<AttendanceStatus, string> = {
+  pending: "border-zinc-200 bg-zinc-100 text-zinc-600",
+  unchecked: "border-zinc-200 bg-zinc-100 text-zinc-600",
+  attended: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  absent: "border-rose-200 bg-rose-50 text-rose-700",
+  leave: "border-sky-200 bg-sky-50 text-sky-700",
 };
 
 export function CourseStatusBadge({ status }: { status: CourseStatus }) {
@@ -40,15 +50,8 @@ export function ReservationStatusBadge({ status }: { status: ReservationStatus }
 }
 
 export function AttendanceStatusBadge({ status }: { status: AttendanceStatus }) {
-  const className =
-    status === "attended"
-      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-      : status === "absent"
-        ? "border-rose-200 bg-rose-50 text-rose-700"
-        : "border-zinc-200 bg-zinc-100 text-zinc-600";
-
   return (
-    <span className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${className}`}>
+    <span className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${attendanceStatusClass[status]}`}>
       {attendanceStatusText[status]}
     </span>
   );

@@ -2,21 +2,28 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { inferCategoryFromCode, inferCourseTypeFromCode } from "@/lib/course-coding";
+import {
+  inferCategoryFromCode,
+  inferCourseTypeFromCode,
+} from "@/lib/course-coding";
 import {
   buildSessionDeadline,
   cancelReservationByStaff,
   deleteCourseSessionsAndReservations,
+  deleteSessionAndReservations,
   getBookingData,
   setDocumentActive,
   updateReservationAttendance,
   upsertCategory,
   upsertCourse,
-  upsertEnrollment,
   upsertSession,
   upsertStudent,
 } from "@/lib/booking-repository";
-import type { AttendanceStatus, CourseCategory, CourseSession } from "@/lib/types";
+import type {
+  AttendanceStatus,
+  CourseCategory,
+  CourseSession,
+} from "@/lib/types";
 
 function slugify(input: string) {
   return input
@@ -32,7 +39,21 @@ function normalizeHexColor(value: FormDataEntryValue | null) {
   return /^#[0-9A-Fa-f]{6}$/.test(color) ? color : undefined;
 }
 
-function generateCourseCode(courseType: string, categoryId: string, existingCodes: Array<string | undefined>) {
+function normalizeAdminRedirect(
+  value: FormDataEntryValue | null,
+  fallback: string,
+) {
+  const path = String(value ?? "").trim();
+  if (!path.startsWith("/admin")) return fallback;
+  if (path.includes(":") || path.startsWith("//")) return fallback;
+  return path || fallback;
+}
+
+function generateCourseCode(
+  courseType: string,
+  categoryId: string,
+  existingCodes: Array<string | undefined>,
+) {
   const prefix = `${courseType}-${categoryId}`;
   const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const pattern = new RegExp(`^${escapedPrefix}(\\d{3})$`);
@@ -45,7 +66,12 @@ function generateCourseCode(courseType: string, categoryId: string, existingCode
   return `${prefix}${String(maxSequence + 1).padStart(3, "0")}`;
 }
 
-function buildSessionId(courseId: string, date: string, startTime: string, topic: string) {
+function buildSessionId(
+  courseId: string,
+  date: string,
+  startTime: string,
+  topic: string,
+) {
   const time = startTime.replace(":", "");
   const topicSlug = slugify(topic || "session");
   return `${courseId}-${date}-${time}-${topicSlug}`;
@@ -61,27 +87,22 @@ function formatDate(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
-function normalizeAdminRedirect(value: FormDataEntryValue | null, fallback: string) {
-  const raw = String(value ?? "").trim();
-  if (!raw.startsWith("/admin")) return fallback;
-  if (raw.startsWith("//")) return fallback;
-  return raw;
-}
-
 export async function updateAttendanceAction(formData: FormData) {
   const reservationId = String(formData.get("reservationId") ?? "");
   const sessionId = String(formData.get("sessionId") ?? "");
-  const attendanceStatus = String(formData.get("attendanceStatus") ?? "") as AttendanceStatus;
   const redirectTo = normalizeAdminRedirect(
     formData.get("redirectTo"),
     `/admin/sessions/${sessionId}/reservations`,
   );
+  const attendanceStatus = String(
+    formData.get("attendanceStatus") ?? "",
+  ) as AttendanceStatus;
 
   await updateReservationAttendance(reservationId, attendanceStatus);
   revalidatePath("/admin");
   revalidatePath("/admin/stats");
+  revalidatePath(redirectTo);
   revalidatePath(`/admin/sessions/${sessionId}/reservations`);
-  revalidatePath(redirectTo.split("#")[0] || "/admin");
   redirect(redirectTo);
 }
 
@@ -103,7 +124,9 @@ export async function cancelReservationByStaffAction(formData: FormData) {
 }
 
 export async function saveCategoryAction(formData: FormData) {
-  const id = String(formData.get("id") ?? "").trim().toUpperCase();
+  const id = String(formData.get("id") ?? "")
+    .trim()
+    .toUpperCase();
   const name = String(formData.get("name") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
   const color = normalizeHexColor(formData.get("color"));
@@ -112,7 +135,9 @@ export async function saveCategoryAction(formData: FormData) {
     redirect("/admin/categories?error=invalid");
   }
 
-  const existing = (await getBookingData()).categories.find((category) => category.id === id);
+  const existing = (await getBookingData()).categories.find(
+    (category) => category.id === id,
+  );
 
   const category: CourseCategory = {
     id,
@@ -120,7 +145,9 @@ export async function saveCategoryAction(formData: FormData) {
     name,
     description,
     sortOrder: existing?.sortOrder ?? 0,
-    isActive: formData.get("isActive") ? formData.get("isActive") !== "false" : (existing?.isActive ?? true),
+    isActive: formData.get("isActive")
+      ? formData.get("isActive") !== "false"
+      : (existing?.isActive ?? true),
     color: color ?? existing?.color,
   };
 
@@ -145,26 +172,57 @@ export async function disableCategoryAction(formData: FormData) {
 
 export async function saveCourseAction(formData: FormData) {
   const currentId = String(formData.get("id") ?? "").trim();
-  const redirectTo = normalizeAdminRedirect(formData.get("redirectTo"), currentId ? `/admin/courses/${currentId}` : "/admin/courses");
-  const currentCode = String(formData.get("code") ?? "").trim().toUpperCase();
+  const currentCode = String(formData.get("code") ?? "")
+    .trim()
+    .toUpperCase();
   const title = String(formData.get("title") ?? "").trim();
-  const categoryId = String(formData.get("categoryId") ?? inferCategoryFromCode(currentCode)).trim().toUpperCase();
-  const courseType = String(formData.get("courseType") ?? inferCourseTypeFromCode(currentCode) ?? "SF").trim().toUpperCase();
+  const categoryId = String(
+    formData.get("categoryId") ?? inferCategoryFromCode(currentCode),
+  )
+    .trim()
+    .toUpperCase();
+  const courseType = String(
+    formData.get("courseType") ?? inferCourseTypeFromCode(currentCode) ?? "SF",
+  )
+    .trim()
+    .toUpperCase();
   const color = normalizeHexColor(formData.get("color"));
 
+  const redirectTo = normalizeAdminRedirect(
+    formData.get("redirectTo"),
+    "/admin/courses",
+  );
+
   if (!title || !categoryId || !courseType) {
-    redirect("/admin/courses?error=invalid");
+    redirect(`${redirectTo}?error=invalid`);
   }
 
   const data = await getBookingData();
-  const existingCourse = currentId ? data.courses.find((course) => course.id === currentId) : undefined;
-  const capacityMode = String(formData.get("capacityMode") ?? existingCourse?.capacityMode ?? "course") === "session" ? "session" : "course";
-  const parsedTotalCapacity = Number(formData.get("totalCapacity") ?? existingCourse?.totalCapacity ?? 0);
-  const totalCapacity = Number.isFinite(parsedTotalCapacity) && parsedTotalCapacity > 0 ? parsedTotalCapacity : undefined;
+  const existingCourse = currentId
+    ? data.courses.find((course) => course.id === currentId)
+    : undefined;
+  const capacityMode =
+    String(
+      formData.get("capacityMode") ?? existingCourse?.capacityMode ?? "course",
+    ) === "session"
+      ? "session"
+      : "course";
+  const parsedTotalCapacity = Number(
+    formData.get("totalCapacity") ?? existingCourse?.totalCapacity ?? 0,
+  );
+  const totalCapacity =
+    Number.isFinite(parsedTotalCapacity) && parsedTotalCapacity > 0
+      ? parsedTotalCapacity
+      : undefined;
 
   const code =
     existingCourse?.code ??
-    (currentCode || generateCourseCode(courseType, categoryId, data.courses.map((course) => course.code)));
+    (currentCode ||
+      generateCourseCode(
+        courseType,
+        categoryId,
+        data.courses.map((course) => course.code),
+      ));
   const id = currentId || `${code.toLowerCase()}-${slugify(title)}`;
 
   await upsertCourse({
@@ -186,8 +244,7 @@ export async function saveCourseAction(formData: FormData) {
   revalidatePath("/admin");
   revalidatePath("/admin/courses");
   revalidatePath(`/admin/courses/${id}`);
-  revalidatePath(redirectTo.split("#")[0] || `/admin/courses/${id}`);
-  redirect(redirectTo.includes("?") ? `${redirectTo}&saved=1` : `${redirectTo}?saved=1`);
+  redirect(`${redirectTo}?saved=1&courseId=${encodeURIComponent(id)}`);
 }
 
 export async function disableCourseAction(formData: FormData) {
@@ -204,7 +261,8 @@ export async function disableCourseAction(formData: FormData) {
 export async function saveSessionAction(formData: FormData) {
   const courseId = String(formData.get("courseId") ?? "").trim();
   const redirectTo = String(formData.get("redirectTo") ?? "").trim();
-  const id = String(formData.get("id") ?? "").trim() || `session-${crypto.randomUUID()}`;
+  const id =
+    String(formData.get("id") ?? "").trim() || `session-${crypto.randomUUID()}`;
   const date = String(formData.get("date") ?? "").trim();
   const startTime = String(formData.get("startTime") ?? "").trim();
   const endTime = String(formData.get("endTime") ?? "").trim();
@@ -215,8 +273,13 @@ export async function saveSessionAction(formData: FormData) {
   }
 
   const data = await getBookingData();
-  const existingSession = data.courses.flatMap((course) => course.sessions).find((session) => session.id === id);
-  const bookedCount = Math.max(Number(formData.get("bookedCount") ?? existingSession?.bookedCount ?? 0), 0);
+  const existingSession = data.courses
+    .flatMap((course) => course.sessions)
+    .find((session) => session.id === id);
+  const bookedCount = Math.max(
+    Number(formData.get("bookedCount") ?? existingSession?.bookedCount ?? 0),
+    0,
+  );
   const session: CourseSession = {
     id,
     courseId,
@@ -227,7 +290,9 @@ export async function saveSessionAction(formData: FormData) {
     location: String(formData.get("location") ?? "").trim(),
     capacity: Math.max(capacity, bookedCount),
     bookedCount,
-    bookingDeadline: String(formData.get("bookingDeadline") ?? "").trim() || buildSessionDeadline(date),
+    bookingDeadline:
+      String(formData.get("bookingDeadline") ?? "").trim() ||
+      buildSessionDeadline(date),
     isActive: formData.get("isActive") !== "false",
   };
 
@@ -243,7 +308,7 @@ export async function saveSessionAction(formData: FormData) {
 
 export async function bulkCreateSessionsAction(formData: FormData) {
   const courseId = String(formData.get("courseId") ?? "").trim();
-  const redirectTo = normalizeAdminRedirect(formData.get("redirectTo"), courseId ? `/admin/courses/${courseId}` : "/admin/courses");
+  const redirectTo = String(formData.get("redirectTo") ?? "").trim();
   const startDate = String(formData.get("startDate") ?? "").trim();
   const endDate = String(formData.get("endDate") ?? "").trim();
   const weekdays = formData.getAll("weekdays").map((value) => Number(value));
@@ -255,8 +320,16 @@ export async function bulkCreateSessionsAction(formData: FormData) {
   const bookingDeadline = String(formData.get("bookingDeadline") ?? "").trim();
   const isActive = formData.get("isActive") !== "false";
 
-  if (!courseId || !startDate || !endDate || weekdays.length === 0 || !startTime || !endTime || capacity < 0) {
-    redirect(`${redirectTo}${redirectTo.includes("?") ? "&" : "?"}error=invalid`);
+  if (
+    !courseId ||
+    !startDate ||
+    !endDate ||
+    weekdays.length === 0 ||
+    !startTime ||
+    !endTime ||
+    capacity < 0
+  ) {
+    redirect(redirectTo || `/admin/courses/${courseId}/sessions?error=invalid`);
   }
 
   const data = await getBookingData();
@@ -265,7 +338,11 @@ export async function bulkCreateSessionsAction(formData: FormData) {
     redirect("/admin/courses?error=invalid");
   }
 
-  const existingKeys = new Set(course.sessions.map((session) => `${session.courseId}|${session.date}|${session.startTime}`));
+  const existingKeys = new Set(
+    course.sessions.map(
+      (session) => `${session.courseId}|${session.date}|${session.startTime}`,
+    ),
+  );
   const start = new Date(`${startDate}T00:00:00`);
   const end = new Date(`${endDate}T00:00:00`);
   const created: CourseSession[] = [];
@@ -295,7 +372,7 @@ export async function bulkCreateSessionsAction(formData: FormData) {
   }
 
   if (created.length === 0) {
-    redirect(`${redirectTo}${redirectTo.includes("?") ? "&" : "?"}error=invalid`);
+    redirect(redirectTo || `/admin/courses/${courseId}/sessions?error=invalid`);
   }
 
   for (const session of created) {
@@ -308,7 +385,7 @@ export async function bulkCreateSessionsAction(formData: FormData) {
   revalidatePath("/admin/courses");
   revalidatePath(`/admin/courses/${courseId}`);
   revalidatePath(`/admin/courses/${courseId}/sessions`);
-  redirect(`${redirectTo}${redirectTo.includes("?") ? "&" : "?"}saved=1`);
+  redirect(redirectTo || `/admin/courses/${courseId}/sessions?saved=1`);
 }
 
 export async function disableSessionAction(formData: FormData) {
@@ -316,23 +393,27 @@ export async function disableSessionAction(formData: FormData) {
   const courseId = String(formData.get("courseId") ?? "").trim();
   const redirectTo = normalizeAdminRedirect(
     formData.get("redirectTo"),
-    courseId ? `/admin/courses/${courseId}/sessions` : "/admin",
+    `/admin/courses/${courseId}`,
   );
-  const nextActive = String(formData.get("isActive") ?? "false") === "true";
-  await setDocumentActive("sessions", id, nextActive);
+
+  if (!id || !courseId) {
+    redirect("/admin?error=invalid");
+  }
+
+  await deleteSessionAndReservations(id);
   revalidatePath("/");
   revalidatePath(`/courses/${courseId}`);
   revalidatePath("/admin");
   revalidatePath(`/admin/courses/${courseId}`);
   revalidatePath(`/admin/courses/${courseId}/sessions`);
-  redirect(`${redirectTo}${redirectTo.includes("?") ? "&" : "?"}saved=1`);
+  redirect(redirectTo);
 }
 
 export async function bulkDisableSessionsAction(formData: FormData) {
   const courseId = String(formData.get("courseId") ?? "").trim();
   const redirectTo = normalizeAdminRedirect(
     formData.get("redirectTo"),
-    courseId ? `/admin/courses/${courseId}` : "/admin",
+    `/admin/courses/${courseId}`,
   );
 
   if (!courseId) {
@@ -350,7 +431,8 @@ export async function bulkDisableSessionsAction(formData: FormData) {
 }
 
 export async function saveStudentAction(formData: FormData) {
-  const id = String(formData.get("id") ?? "").trim() || `student-${crypto.randomUUID()}`;
+  const id =
+    String(formData.get("id") ?? "").trim() || `student-${crypto.randomUUID()}`;
   const name = String(formData.get("name") ?? "").trim();
   const classId = String(formData.get("classId") ?? "").trim();
   const seatNumber = Number(formData.get("seatNumber") ?? 0);
@@ -359,40 +441,16 @@ export async function saveStudentAction(formData: FormData) {
     redirect("/admin/students?error=invalid");
   }
 
-  const data = await getBookingData();
-  const course = data.courses.find((item) => item.id === classId);
-  const offeringId = course?.offeringId ?? classId;
-  const seriesId = course?.seriesId ?? course?.courseMasterId ?? `series-${classId}`;
-  const now = new Date().toISOString();
-  const existingStudent = data.students.find((student) => student.id === id);
-
   await upsertStudent({
-    ...(existingStudent ?? {}),
     id,
+    classId,
     name,
-    source: existingStudent?.source ?? "後台手動維護",
+    examGroup: String(formData.get("examGroup") ?? "").trim(),
+    seatNumber,
+    source: "後台手動維護",
     note: String(formData.get("note") ?? "").trim(),
     needsReview: formData.get("needsReview") === "true",
     isActive: formData.get("isActive") !== "false",
-    updatedAt: now,
-    createdAt: existingStudent?.createdAt ?? now,
-  });
-
-  await upsertEnrollment({
-    id: `enroll-${id}-${offeringId}`,
-    studentId: id,
-    courseId: classId,
-    offeringId,
-    courseOfferingId: offeringId,
-    seriesId,
-    seatNumber,
-    seatNo: String(seatNumber),
-    groupLabel: String(formData.get("examGroup") ?? "").trim(),
-    source: "manual",
-    status: "active",
-    joinedAt: now,
-    updatedAt: now,
-    createdAt: now,
   });
 
   revalidatePath("/admin/students");

@@ -1,15 +1,25 @@
-import Link from "next/link";
-import { CourseStatusBadge } from "@/components/status-badge";
+/* eslint-disable @next/next/no-html-link-for-pages */
+import { CourseViewSwitcher } from "@/components/course-view-switcher";
+import { LastReservationCard } from "@/components/last-reservation-card";
 import { StudentShell } from "@/components/page-shell";
-import { getBookingData } from "@/lib/booking-repository";
-import { getCategoryName, getCourseStatus, getRemainingSeats } from "@/lib/course-utils";
+import { getCourseCatalog } from "@/lib/booking-repository";
 
-export default async function Home() {
-  const { categories, courses } = await getBookingData();
-  const activeCourses = courses.filter((course) => course.isActive);
+type PageProps = {
+  searchParams: Promise<{ category?: string }>;
+};
+
+export default async function Home({ searchParams }: PageProps) {
+  const { category = "" } = await searchParams;
+  const { categories, courses } = await getCourseCatalog();
+  const activeCourses = courses.filter((course) => course.isActive && course.sessions.length > 0);
+  const activeCategoryIds = new Set(activeCourses.map((course) => course.categoryId));
+  const activeCategories = categories.filter((item) => item.isActive && activeCategoryIds.has(item.id));
+  const filteredCourses = category ? activeCourses.filter((course) => course.categoryId === category) : activeCourses;
+  const selectedCategoryName = activeCategories.find((item) => item.id === category)?.name;
 
   return (
     <StudentShell>
+      <LastReservationCard />
       <section className="mb-8 flex flex-col gap-3">
         <p className="text-sm font-medium text-emerald-700">課程預約</p>
         <h1 className="text-3xl font-semibold text-zinc-950 sm:text-4xl">選擇你要預約的課程</h1>
@@ -17,40 +27,19 @@ export default async function Home() {
       </section>
 
       <section className="mb-6 flex flex-wrap gap-2">
-        <button className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white">全部</button>
-        {categories.map((category) => (
-          <button key={category.id} className="rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-50">
-            {category.name}
-          </button>
+        <a href="/" className={`rounded-md px-4 py-2 text-sm font-medium ${category ? "border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50" : "bg-zinc-900 text-white"}`}>
+          全部
+        </a>
+        {activeCategories.map((item) => (
+          <a key={item.id} href={`/?category=${encodeURIComponent(item.id)}`} className={`rounded-md px-4 py-2 text-sm font-medium ${category === item.id ? "bg-zinc-900 text-white" : "border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50"}`}>
+            {item.name}
+          </a>
         ))}
       </section>
 
-      <section className="grid gap-4 md:grid-cols-2">
-        {activeCourses.map((course) => {
-          const status = getCourseStatus(course);
-          const remainingSeats = course.sessions.reduce((total, session) => total + getRemainingSeats(session), 0);
-          const nextSession = course.sessions[0];
+      {selectedCategoryName ? <p className="mb-4 text-sm text-zinc-600">目前顯示：{selectedCategoryName}</p> : null}
 
-          return (
-            <Link key={course.id} href={`/courses/${course.id}`} className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm transition hover:border-zinc-300 hover:shadow-md">
-              <div className="mb-4 flex items-start justify-between gap-4">
-                <div>
-                  <p className="mb-2 text-sm font-medium text-sky-700">{getCategoryName(course.categoryId, categories)}</p>
-                  <h2 className="text-xl font-semibold text-zinc-950">{course.title}</h2>
-                </div>
-                <CourseStatusBadge status={status} />
-              </div>
-              <p className="mb-5 line-clamp-2 text-sm leading-6 text-zinc-600">{course.description}</p>
-              <div className="grid gap-2 text-sm text-zinc-700 sm:grid-cols-2">
-                <p>最近時段：{nextSession.date} {nextSession.startTime}</p>
-                <p>剩餘名額：{remainingSeats}</p>
-                <p className="sm:col-span-2">地點：{nextSession.location}</p>
-              </div>
-              <p className="mt-5 rounded-md bg-emerald-700 px-4 py-3 text-center text-sm font-semibold text-white">查看可預約時段</p>
-            </Link>
-          );
-        })}
-      </section>
+      <CourseViewSwitcher courses={filteredCourses} categories={categories} />
     </StudentShell>
   );
 }

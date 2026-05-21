@@ -9,7 +9,7 @@ import { getCategoryName, getCourseStatus, resolveCourseColor } from "@/lib/cour
 export const dynamic = "force-dynamic";
 
 type PageProps = {
-  searchParams: Promise<{ saved?: string; error?: string; courseId?: string }>;
+  searchParams: Promise<{ saved?: string; error?: string }>;
 };
 
 const colorPresets = [
@@ -24,17 +24,13 @@ const colorPresets = [
   { value: "#f59e0b", label: "金色" },
 ];
 
+
 export default async function AdminCoursesPage({ searchParams }: PageProps) {
-  const { saved, error, courseId } = await searchParams;
+  const { saved, error } = await searchParams;
   const { categories, courses } = await getBookingData();
   const activeCategories = professionalCategories.filter((category) => {
     const savedCategory = categories.find((item) => item.id === category.id);
     return savedCategory?.isActive ?? true;
-  });
-  const sortedCourses = courses.slice().sort((a, b) => {
-    if (courseId && a.id === courseId) return -1;
-    if (courseId && b.id === courseId) return 1;
-    return (a.code ?? a.id).localeCompare(b.code ?? b.id);
   });
 
   return (
@@ -47,54 +43,47 @@ export default async function AdminCoursesPage({ searchParams }: PageProps) {
         </p>
       </section>
 
-      {saved ? <p className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">已建立或更新課程。</p> : null}
+      {saved ? <p className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">已更新課程。</p> : null}
       {error ? <p className="mb-4 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">請填寫方案、分類與課程名稱。</p> : null}
 
-      <details className="group mb-6 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm sm:p-5">
-        <summary className="flex cursor-pointer list-none items-center justify-between rounded-md bg-zinc-900 px-4 py-3 text-sm font-semibold text-white hover:bg-zinc-700">
-          <span>新增課程</span>
-          <span className="text-xs group-open:hidden">展開</span>
-          <span className="hidden text-xs group-open:inline">收合</span>
-        </summary>
-        <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-          <p className="text-sm text-zinc-600">課程代碼會依「方案 + 分類 + 流水號」自動建立，不需要人工輸入。</p>
-          <form action={saveCourseAction} className="mt-4 grid gap-3">
-            <input type="hidden" name="redirectTo" value="/admin/courses" />
-            <div className="grid gap-3 lg:grid-cols-[160px_180px_1fr]">
-              <label>
-                <span className="mb-2 block text-sm font-medium text-zinc-700">方案</span>
-                <select name="courseType" className="w-full rounded-md border border-zinc-300 bg-white px-3 py-3">
-                  {courseTypes.map((type) => <option key={type.id} value={type.id}>{type.id} {type.name}</option>)}
-                </select>
-              </label>
-              <label>
-                <span className="mb-2 block text-sm font-medium text-zinc-700">分類</span>
-                <select name="categoryId" className="w-full rounded-md border border-zinc-300 bg-white px-3 py-3">
-                  {activeCategories.map((category) => <option key={category.id} value={category.id}>{category.id} {category.name}</option>)}
-                </select>
-              </label>
-              <label>
-                <span className="mb-2 block text-sm font-medium text-zinc-700">課程 / 班級名稱</span>
-                <input name="title" className="w-full rounded-md border border-zinc-300 px-3 py-3" placeholder="美容丙級保證班 6月課表" />
-              </label>
-            </div>
+      <section className="mb-6 rounded-xl border border-zinc-200 bg-white p-4 sm:p-5">
+        <h2 className="text-lg font-semibold text-zinc-950">新增課程或班級</h2>
+        <p className="mt-1 text-sm text-zinc-600">課程代碼會依「方案 + 分類 + 流水號」自動建立，不需要人工輸入。</p>
+        <form action={saveCourseAction} className="mt-4 grid gap-3">
+          <div className="grid gap-3 lg:grid-cols-[160px_180px_1fr]">
+            <label>
+              <span className="mb-2 block text-sm font-medium text-zinc-700">方案</span>
+              <select name="courseType" className="w-full rounded-md border border-zinc-300 bg-white px-3 py-3">
+                {courseTypes.map((type) => <option key={type.id} value={type.id}>{type.id} {type.name}</option>)}
+              </select>
+            </label>
+            <label>
+              <span className="mb-2 block text-sm font-medium text-zinc-700">分類</span>
+              <select name="categoryId" className="w-full rounded-md border border-zinc-300 bg-white px-3 py-3">
+                {activeCategories.map((category) => <option key={category.id} value={category.id}>{category.id} {category.name}</option>)}
+              </select>
+            </label>
+            <label>
+              <span className="mb-2 block text-sm font-medium text-zinc-700">課程 / 班級名稱</span>
+              <input name="title" className="w-full rounded-md border border-zinc-300 px-3 py-3" placeholder="美容丙級保證班 6月課表" />
+            </label>
+          </div>
 
-            <div className="grid gap-3 lg:grid-cols-[1fr_1fr_180px]">
-              <input name="defaultLocation" className="rounded-md border border-zinc-300 px-3 py-3" placeholder="上課地點" />
-              <input name="description" className="rounded-md border border-zinc-300 px-3 py-3" placeholder="課程說明" />
-              <label>
-                <span className="sr-only">課程顏色</span>
-                <select name="color" className="w-full rounded-md border border-zinc-300 bg-white px-3 py-3">
-                  {colorPresets.map((item) => <option key={item.label} value={item.value}>{item.label}</option>)}
-                </select>
-              </label>
-            </div>
+          <div className="grid gap-3 lg:grid-cols-[1fr_1fr_180px]">
+            <input name="defaultLocation" className="rounded-md border border-zinc-300 px-3 py-3" placeholder="上課地點" />
+            <input name="description" className="rounded-md border border-zinc-300 px-3 py-3" placeholder="課程說明" />
+            <label>
+              <span className="sr-only">課程顏色</span>
+              <select name="color" className="w-full rounded-md border border-zinc-300 bg-white px-3 py-3">
+                {colorPresets.map((item) => <option key={item.label} value={item.value}>{item.label}</option>)}
+              </select>
+            </label>
+          </div>
 
-            <textarea name="notes" className="min-h-20 rounded-md border border-zinc-300 px-3 py-3" placeholder="注意事項" />
-            <button className="rounded-md bg-zinc-900 px-4 py-3 text-sm font-semibold text-white hover:bg-zinc-700 sm:w-40">儲存課程</button>
-          </form>
-        </div>
-      </details>
+          <textarea name="notes" className="min-h-20 rounded-md border border-zinc-300 px-3 py-3" placeholder="注意事項" />
+          <button className="rounded-md bg-zinc-900 px-4 py-3 text-sm font-semibold text-white hover:bg-zinc-700 sm:w-40">儲存課程</button>
+        </form>
+      </section>
 
       <section className="rounded-xl border border-zinc-200 bg-white p-4 sm:p-5">
         <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -106,14 +95,14 @@ export default async function AdminCoursesPage({ searchParams }: PageProps) {
         </div>
 
         <div className="grid gap-4">
-          {sortedCourses.map((course) => {
+          {courses.map((course) => {
             const category = categories.find((item) => item.id === course.categoryId);
             const color = resolveCourseColor(course, category);
             const activeSessions = course.sessions.filter((session) => session.isActive);
             const nextSession = activeSessions.slice().sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`))[0];
 
             return (
-              <article key={course.id} className={`rounded-xl border p-4 ${courseId === course.id ? "border-emerald-400 bg-emerald-50 ring-2 ring-emerald-100" : course.isActive ? "border-zinc-200 bg-zinc-50" : "border-zinc-200 bg-zinc-100 opacity-70"}`} style={{ borderLeftColor: color, borderLeftWidth: 4 }}>
+              <article key={course.id} className={`rounded-xl border p-4 ${course.isActive ? "border-zinc-200 bg-zinc-50" : "border-zinc-200 bg-zinc-100 opacity-70"}`}>
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -137,7 +126,6 @@ export default async function AdminCoursesPage({ searchParams }: PageProps) {
                         編輯基本資料
                       </summary>
                       <form action={saveCourseAction} className="mt-3 grid gap-3 rounded-lg border border-zinc-200 bg-white p-4">
-                        <input type="hidden" name="redirectTo" value="/admin/courses" />
                         <input type="hidden" name="id" value={course.id} />
                         <input type="hidden" name="code" value={course.code ?? ""} />
                         <label>

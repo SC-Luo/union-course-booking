@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { readBookingData, writeBookingData } from "./data-store";
+import { normalizeBookingData, readBookingData, writeBookingData } from "./data-store";
 import { getAdminDb } from "./firebase-admin";
 import { canChangeReservation, getReservationCutoff } from "./course-utils";
-import type { AttendanceStatus, BookingData, Course, CourseCategory, CourseSession, Reservation, Student } from "./types";
+import type { AttendanceStatus, BookingData, Course, CourseCategory, CourseSession, Enrollment, Reservation, Student } from "./types";
 
 function shouldUseFirestore() {
   return process.env.BOOKING_DATA_SOURCE === "firestore";
@@ -13,7 +13,12 @@ function getFirestoreDb() {
     return null;
   }
 
-  return getAdminDb();
+  try {
+    return getAdminDb();
+  } catch (error) {
+    console.warn("Firestore initialization failed, falling back to local booking data.", error);
+    return null;
+  }
 }
 
 export async function getBookingData(): Promise<BookingData> {
@@ -45,10 +50,76 @@ export async function getBookingData(): Promise<BookingData> {
       };
     });
 
-    return { categories, courses, reservations, students };
+    return normalizeBookingData({ categories, courses, reservations, students });
   } catch (error) {
-    console.error("Firestore read failed, falling back to local booking data.", error);
+    console.warn("Firestore read failed, falling back to local booking data.", error);
     return readBookingData();
+  }
+}
+
+export async function getCourseCatalog(): Promise<Pick<BookingData, "categories" | "courses">> {
+  const db = getFirestoreDb();
+
+  if (!db) {
+    const data = readBookingData();
+    return { categories: data.categories, courses: data.courses };
+  }
+
+  try {
+    const [categorySnapshot, courseSnapshot, sessionSnapshot] = await Promise.all([
+      db.collection("categories").orderBy("sortOrder", "asc").get(),
+      db.collection("courses").get(),
+      db.collection("sessions").get(),
+    ]);
+
+    const categories = categorySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CourseCategory);
+    const sessions = sessionSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CourseSession);
+    const courses = courseSnapshot.docs.map((doc) => {
+      const course = { id: doc.id, ...doc.data() } as Omit<Course, "sessions">;
+
+      return {
+        ...course,
+        sessions: sessions.filter((session) => session.courseId === course.id),
+      };
+    });
+
+    const normalized = normalizeBookingData({ categories, courses, reservations: [], students: [] });
+    return { categories: normalized.categories, courses: normalized.courses };
+  } catch (error) {
+    console.warn("Firestore catalog read failed, falling back to local booking data.", error);
+    const data = readBookingData();
+    return { categories: data.categories, courses: data.courses };
+  }
+}
+
+export async function findReservationsByStudent(studentName: string, phoneLastThree: string): Promise<Reservation[]> {
+  if (!studentName || phoneLastThree.length !== 3) {
+    return [];
+  }
+
+  const db = getFirestoreDb();
+
+  if (!db) {
+    const data = readBookingData();
+    return data.reservations.filter(
+      (reservation) => reservation.studentName === studentName && reservation.phoneLastThree === phoneLastThree,
+    );
+  }
+
+  try {
+    const snapshot = await db
+      .collection("reservations")
+      .where("studentName", "==", studentName)
+      .where("phoneLastThree", "==", phoneLastThree)
+      .get();
+
+    return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Reservation);
+  } catch (error) {
+    console.warn("Firestore reservation search failed, falling back to local booking data.", error);
+    const data = readBookingData();
+    return data.reservations.filter(
+      (reservation) => reservation.studentName === studentName && reservation.phoneLastThree === phoneLastThree,
+    );
   }
 }
 
@@ -108,7 +179,7 @@ export async function createReservation(input: CreateReservationInput) {
       return { ok: true as const, reservation, courseId: course.id, sessionId: session.id };
     });
   } catch (error) {
-    console.error("Firestore reservation write failed, falling back to local booking data.", error);
+    console.warn("Firestore reservation write failed, falling back to local booking data.", error);
     return createReservationInJson(input);
   }
 }
@@ -130,7 +201,17 @@ export async function updateReservationAttendance(reservationId: string, attenda
     return;
   }
 
-  await db.collection("reservations").doc(reservationId).update({ attendanceStatus });
+  try {
+    await db.collection("reservations").doc(reservationId).update({ attendanceStatus });
+  } catch (error) {
+    console.warn("Firestore attendance update failed, falling back to local booking data.", error);
+    const data = readBookingData();
+    const reservation = data.reservations.find((item) => item.id === reservationId);
+    if (reservation) {
+      reservation.attendanceStatus = attendanceStatus;
+      writeBookingData(data);
+    }
+  }
 }
 
 export async function cancelReservation(reservationId: string, studentName: string, phoneLastThree: string) {
@@ -174,8 +255,73 @@ export async function cancelReservation(reservationId: string, studentName: stri
     return { ok: true as const, courseId: reservation.courseId, sessionId: reservation.sessionId };
     });
   } catch (error) {
-    console.error("Firestore reservation cancel failed, falling back to local booking data.", error);
+    console.warn("Firestore reservation cancel failed, falling back to local booking data.", error);
     return cancelReservationInJson(reservationId, studentName, phoneLastThree);
+  }
+}
+
+export async function cancelReservationByStaff(reservationId: string) {
+  const db = getFirestoreDb();
+
+  if (!db) {
+    const data = readBookingData();
+    const reservation = data.reservations.find((item) => item.id === reservationId);
+    const session = data.courses.flatMap((course) => course.sessions).find((item) => item.id === reservation?.sessionId);
+
+    if (!reservation || !session || reservation.status !== "booked") {
+      return { ok: false as const, reason: "invalid" };
+    }
+
+    reservation.status = "cancelled";
+    reservation.cancelledAt = buildTimestamp();
+    session.bookedCount = Math.max(session.bookedCount - 1, 0);
+    writeBookingData(data);
+    return { ok: true as const, courseId: reservation.courseId, sessionId: reservation.sessionId };
+  }
+
+  try {
+    return await db.runTransaction(async (transaction) => {
+      const reservationRef = db.collection("reservations").doc(reservationId);
+      const reservationDoc = await transaction.get(reservationRef);
+
+      if (!reservationDoc.exists) {
+        return { ok: false as const, reason: "invalid" };
+      }
+
+      const reservation = { id: reservationDoc.id, ...reservationDoc.data() } as Reservation;
+
+      if (reservation.status !== "booked") {
+        return { ok: false as const, reason: "invalid" };
+      }
+
+      const sessionRef = db.collection("sessions").doc(reservation.sessionId);
+      const sessionDoc = await transaction.get(sessionRef);
+
+      if (!sessionDoc.exists) {
+        return { ok: false as const, reason: "invalid" };
+      }
+
+      const session = { id: sessionDoc.id, ...sessionDoc.data() } as CourseSession;
+      transaction.update(reservationRef, { status: "cancelled", cancelledAt: buildTimestamp() });
+      transaction.update(sessionRef, { bookedCount: Math.max(session.bookedCount - 1, 0) });
+
+      return { ok: true as const, courseId: reservation.courseId, sessionId: reservation.sessionId };
+    });
+  } catch (error) {
+    console.warn("Firestore staff reservation cancel failed, falling back to local booking data.", error);
+    const data = readBookingData();
+    const reservation = data.reservations.find((item) => item.id === reservationId);
+    const session = data.courses.flatMap((course) => course.sessions).find((item) => item.id === reservation?.sessionId);
+
+    if (!reservation || !session || reservation.status !== "booked") {
+      return { ok: false as const, reason: "invalid" };
+    }
+
+    reservation.status = "cancelled";
+    reservation.cancelledAt = buildTimestamp();
+    session.bookedCount = Math.max(session.bookedCount - 1, 0);
+    writeBookingData(data);
+    return { ok: true as const, courseId: reservation.courseId, sessionId: reservation.sessionId };
   }
 }
 
@@ -248,7 +394,7 @@ export async function upsertCategory(category: CourseCategory) {
   try {
     await db.collection("categories").doc(category.id).set(category, { merge: true });
   } catch (error) {
-    console.error("Firestore category write failed, falling back to local booking data.", error);
+    console.warn("Firestore category write failed, falling back to local booking data.", error);
     const data = readBookingData();
     const index = data.categories.findIndex((item) => item.id === category.id);
     if (index >= 0) data.categories[index] = category;
@@ -271,11 +417,42 @@ export async function upsertCourse(course: Omit<Course, "sessions">) {
   try {
     await db.collection("courses").doc(course.id).set(course, { merge: true });
   } catch (error) {
-    console.error("Firestore course write failed, falling back to local booking data.", error);
+    console.warn("Firestore course write failed, falling back to local booking data.", error);
     const data = readBookingData();
     const index = data.courses.findIndex((item) => item.id === course.id);
     if (index >= 0) data.courses[index] = { ...data.courses[index], ...course };
     else data.courses.push({ ...course, sessions: [] });
+    writeBookingData(data);
+  }
+}
+
+export async function upsertSession(session: CourseSession) {
+  const db = getFirestoreDb();
+  if (!db) {
+    const data = readBookingData();
+    const course = data.courses.find((item) => item.id === session.courseId);
+    if (!course) return;
+
+    const index = course.sessions.findIndex((item) => item.id === session.id);
+    if (index >= 0) course.sessions[index] = session;
+    else course.sessions.push(session);
+    course.sessions.sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`));
+    writeBookingData(data);
+    return;
+  }
+
+  try {
+    await db.collection("sessions").doc(session.id).set(session, { merge: true });
+  } catch (error) {
+    console.warn("Firestore session write failed, falling back to local booking data.", error);
+    const data = readBookingData();
+    const course = data.courses.find((item) => item.id === session.courseId);
+    if (!course) return;
+
+    const index = course.sessions.findIndex((item) => item.id === session.id);
+    if (index >= 0) course.sessions[index] = session;
+    else course.sessions.push(session);
+    course.sessions.sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`));
     writeBookingData(data);
   }
 }
@@ -295,7 +472,7 @@ export async function upsertStudent(student: Student) {
   try {
     await db.collection("students").doc(student.id).set(student, { merge: true });
   } catch (error) {
-    console.error("Firestore student write failed, falling back to local booking data.", error);
+    console.warn("Firestore student write failed, falling back to local booking data.", error);
     const data = readBookingData();
     const students = data.students ?? [];
     const index = students.findIndex((item) => item.id === student.id);
@@ -305,7 +482,32 @@ export async function upsertStudent(student: Student) {
   }
 }
 
-export async function setDocumentActive(collection: "categories" | "courses" | "students", id: string, isActive: boolean) {
+export async function upsertEnrollment(enrollment: Enrollment) {
+  const db = getFirestoreDb();
+  if (!db) {
+    const data = readBookingData();
+    const enrollments = data.enrollments ?? [];
+    const index = enrollments.findIndex((item) => item.id === enrollment.id);
+    if (index >= 0) enrollments[index] = { ...enrollments[index], ...enrollment };
+    else enrollments.push(enrollment);
+    writeBookingData({ ...data, enrollments });
+    return;
+  }
+
+  try {
+    await db.collection("enrollments").doc(enrollment.id).set(enrollment, { merge: true });
+  } catch (error) {
+    console.warn("Firestore enrollment write failed, falling back to local booking data.", error);
+    const data = readBookingData();
+    const enrollments = data.enrollments ?? [];
+    const index = enrollments.findIndex((item) => item.id === enrollment.id);
+    if (index >= 0) enrollments[index] = { ...enrollments[index], ...enrollment };
+    else enrollments.push(enrollment);
+    writeBookingData({ ...data, enrollments });
+  }
+}
+
+export async function setDocumentActive(collection: "categories" | "courses" | "sessions" | "students", id: string, isActive: boolean) {
   const db = getFirestoreDb();
   if (!db) {
     const data = readBookingData();
@@ -316,6 +518,10 @@ export async function setDocumentActive(collection: "categories" | "courses" | "
     if (collection === "courses") {
       const course = data.courses.find((item) => item.id === id);
       if (course) course.isActive = isActive;
+    }
+    if (collection === "sessions") {
+      const session = data.courses.flatMap((course) => course.sessions).find((item) => item.id === id);
+      if (session) session.isActive = isActive;
     }
     if (collection === "students") {
       const student = data.students?.find((item) => item.id === id);
@@ -328,7 +534,7 @@ export async function setDocumentActive(collection: "categories" | "courses" | "
   try {
     await db.collection(collection).doc(id).set({ isActive }, { merge: true });
   } catch (error) {
-    console.error("Firestore active-state write failed, falling back to local booking data.", error);
+    console.warn("Firestore active-state write failed, falling back to local booking data.", error);
     const data = readBookingData();
     if (collection === "categories") {
       const category = data.categories.find((item) => item.id === id);
@@ -338,10 +544,142 @@ export async function setDocumentActive(collection: "categories" | "courses" | "
       const course = data.courses.find((item) => item.id === id);
       if (course) course.isActive = isActive;
     }
+    if (collection === "sessions") {
+      const session = data.courses.flatMap((course) => course.sessions).find((item) => item.id === id);
+      if (session) session.isActive = isActive;
+    }
     if (collection === "students") {
       const student = data.students?.find((item) => item.id === id);
       if (student) student.isActive = isActive;
     }
+    writeBookingData(data);
+  }
+}
+
+
+export async function deleteSessionAndReservations(sessionId: string) {
+  const db = getFirestoreDb();
+
+  if (!db) {
+    const data = readBookingData();
+
+    for (const course of data.courses) {
+      course.sessions = course.sessions.filter((session) => session.id !== sessionId);
+    }
+
+    data.reservations = data.reservations.filter((reservation) => reservation.sessionId !== sessionId);
+    data.courseSessions = data.courseSessions?.filter((session) => session.id !== sessionId) ?? [];
+    data.attendanceRecords = data.attendanceRecords?.filter((record) => record.sessionId !== sessionId) ?? [];
+
+    writeBookingData(data);
+    return;
+  }
+
+  try {
+    const [reservationSnapshot, attendanceSnapshot] = await Promise.all([
+      db.collection("reservations").where("sessionId", "==", sessionId).get(),
+      db.collection("attendanceRecords").where("sessionId", "==", sessionId).get(),
+    ]);
+
+    const docs = [
+      ...reservationSnapshot.docs,
+      ...attendanceSnapshot.docs,
+      db.collection("sessions").doc(sessionId),
+      db.collection("courseSessions").doc(sessionId),
+    ];
+
+    for (let index = 0; index < docs.length; index += 450) {
+      const batch = db.batch();
+      docs.slice(index, index + 450).forEach((docOrRef) => {
+        const ref = "ref" in docOrRef ? docOrRef.ref : docOrRef;
+        batch.delete(ref);
+      });
+      await batch.commit();
+    }
+  } catch (error) {
+    console.warn("Firestore session delete failed, falling back to local booking data.", error);
+    const data = readBookingData();
+
+    for (const course of data.courses) {
+      course.sessions = course.sessions.filter((session) => session.id !== sessionId);
+    }
+
+    data.reservations = data.reservations.filter((reservation) => reservation.sessionId !== sessionId);
+    data.courseSessions = data.courseSessions?.filter((session) => session.id !== sessionId) ?? [];
+    data.attendanceRecords = data.attendanceRecords?.filter((record) => record.sessionId !== sessionId) ?? [];
+
+    writeBookingData(data);
+  }
+}
+
+export async function deleteCourseSessionsAndReservations(courseId: string) {
+  const db = getFirestoreDb();
+
+  if (!db) {
+    const data = readBookingData();
+    const course = data.courses.find((item) => item.id === courseId);
+    const sessionIds = new Set([
+      ...(course?.sessions.map((session) => session.id) ?? []),
+      ...(data.courseSessions?.filter((session) => session.offeringId === courseId || session.legacyCourseId === courseId).map((session) => session.id) ?? []),
+    ]);
+
+    if (course) course.sessions = [];
+
+    data.reservations = data.reservations.filter(
+      (reservation) => reservation.courseId !== courseId && !sessionIds.has(reservation.sessionId),
+    );
+    data.courseSessions = data.courseSessions?.filter(
+      (session) => session.offeringId !== courseId && session.legacyCourseId !== courseId && !sessionIds.has(session.id),
+    ) ?? [];
+    data.attendanceRecords = data.attendanceRecords?.filter(
+      (record) => record.offeringId !== courseId && !sessionIds.has(record.sessionId),
+    ) ?? [];
+
+    writeBookingData(data);
+    return;
+  }
+
+  try {
+    const [sessionSnapshot, courseSessionSnapshot, reservationSnapshot, attendanceSnapshot] = await Promise.all([
+      db.collection("sessions").where("courseId", "==", courseId).get(),
+      db.collection("courseSessions").where("offeringId", "==", courseId).get(),
+      db.collection("reservations").where("courseId", "==", courseId).get(),
+      db.collection("attendanceRecords").where("offeringId", "==", courseId).get(),
+    ]);
+
+    const docs = [
+      ...sessionSnapshot.docs,
+      ...courseSessionSnapshot.docs,
+      ...reservationSnapshot.docs,
+      ...attendanceSnapshot.docs,
+    ];
+
+    for (let index = 0; index < docs.length; index += 450) {
+      const batch = db.batch();
+      docs.slice(index, index + 450).forEach((doc) => batch.delete(doc.ref));
+      await batch.commit();
+    }
+  } catch (error) {
+    console.warn("Firestore course sessions delete failed, falling back to local booking data.", error);
+    const data = readBookingData();
+    const course = data.courses.find((item) => item.id === courseId);
+    const sessionIds = new Set([
+      ...(course?.sessions.map((session) => session.id) ?? []),
+      ...(data.courseSessions?.filter((session) => session.offeringId === courseId || session.legacyCourseId === courseId).map((session) => session.id) ?? []),
+    ]);
+
+    if (course) course.sessions = [];
+
+    data.reservations = data.reservations.filter(
+      (reservation) => reservation.courseId !== courseId && !sessionIds.has(reservation.sessionId),
+    );
+    data.courseSessions = data.courseSessions?.filter(
+      (session) => session.offeringId !== courseId && session.legacyCourseId !== courseId && !sessionIds.has(session.id),
+    ) ?? [];
+    data.attendanceRecords = data.attendanceRecords?.filter(
+      (record) => record.offeringId !== courseId && !sessionIds.has(record.sessionId),
+    ) ?? [];
+
     writeBookingData(data);
   }
 }

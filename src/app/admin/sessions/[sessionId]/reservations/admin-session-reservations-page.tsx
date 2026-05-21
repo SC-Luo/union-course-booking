@@ -57,6 +57,7 @@ export default async function AdminReservationsPage({ params, searchParams }: Pa
   const cancelled = sessionReservations.filter((reservation) => reservation.status === "cancelled").length;
   const attended = bookedReservations.filter((reservation) => reservation.attendanceStatus === "attended").length;
   const absent = bookedReservations.filter((reservation) => reservation.attendanceStatus === "absent").length;
+  const pending = bookedReservations.filter((reservation) => reservation.attendanceStatus === "pending").length;
   const capacityMode = course.capacityMode ?? "course";
   const remainingSeats = capacityMode === "course"
     ? Math.max((course.totalCapacity ?? session.capacity) - bookedReservations.length, 0)
@@ -97,19 +98,20 @@ export default async function AdminReservationsPage({ params, searchParams }: Pa
         </Link>
       </section>
 
-      <section className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <section className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         {[
           ["有效預約", bookedReservations.length],
           ["已取消", cancelled],
           ["已到", attended],
           ["未到", absent],
+          ["未點名", pending],
         ].map(([label, value]) => (
           <div key={label} className="rounded-lg border border-zinc-200 bg-white p-4">
             <p className="text-sm text-zinc-500">{label}</p>
             <p className="mt-2 text-2xl font-semibold text-zinc-950">{value}</p>
           </div>
         ))}
-        <div className="rounded-lg border border-zinc-200 bg-white p-4 sm:col-span-2 lg:col-span-4">
+        <div className="rounded-lg border border-zinc-200 bg-white p-4 sm:col-span-2 lg:col-span-5">
           <p className="text-sm text-zinc-500">{capacityMode === "course" ? "整門課剩餘招生名額" : "本場次剩餘名額"}</p>
           <p className="mt-2 text-2xl font-semibold text-zinc-950">{remainingSeats}</p>
         </div>

@@ -15,6 +15,10 @@
 
 ## 重要上下文來源
 
+每次開工先讀短版接續摘要，避免一開始載入完整長文件：
+
+`H:\我的雲端硬碟\secondbrain\10-專案\工會課程預約系統開發\docs\session-handoff.md`
+
 產品規格以 Obsidian 筆記為準：
 
 `H:\我的雲端硬碟\secondbrain\10-專案\工會課程預約系統開發\specs\工會課程預約系統.md`
@@ -30,9 +34,13 @@
 - 第一版開發任務拆解
 - 驗收清單
 
+但不要在每次開工時全文讀取規格、踩坑紀錄或決策紀錄。只有本次任務牽涉特定產品規則、環境問題或重大架構判斷時，才讀相關段落。
+
 如果程式需求和產品規格衝突，先以產品規格為準，並回報需要同步調整哪一份文件。
 
 如果開發中遇到可重複避免的問題，請把「現象、判斷、解法、後續改進」寫入踩坑記錄。
+
+收工時優先更新 `docs/session-handoff.md` 的短摘要；只有重大決策才寫入 `docs/decisions.md`，只有可重複避免的坑才寫入 `notes/踩坑過程.md`。
 
 ## 專案位置與環境
 
@@ -76,7 +84,7 @@ npm run build
 
 ## 目前技術狀態
 
-目前是 Next.js MVP，使用本機 JSON 檔保存課程、時段與預約資料。學生端可以完成預約送出，後台與查詢頁會讀同一份資料。
+目前是 Next.js 預約系統，正式資料來源已可用 Firestore，並保留本機 JSON 作為開發與配額異常時的備援。學生端可以完成預約、查詢與截止前取消；後台可管理分類、課程、時段、名冊、預約名單、出席狀態、取消與 CSV 匯出。
 
 目前資料位置：
 
@@ -88,19 +96,16 @@ npm run build
 
 ## Firebase 狀態
 
-目前尚未把應用程式資料讀寫改接 Firebase / Firestore。不要誤以為 `data/booking-data.json` 是正式資料庫。
+應用程式資料讀寫已改接 Firebase / Firestore。正式資料來源由環境變數 `BOOKING_DATA_SOURCE=firestore` 控制；若沒有 Firebase Admin 憑證或 Firestore 讀寫失敗，資料層會回落使用本機 JSON，避免本機開發完全中斷。
 
 已知狀態：
 
-- 專案內已有 `.firebaserc`、`firebase.json`、`firestore.rules`，預設 project id 為 `my-teaching-tools-1126-f8fc9`。
-- Firestore rules 已部署成功。
-- 程式專案尚未安裝 Firebase SDK 或 Firebase Admin SDK。
-- 程式尚未建立 Firebase 初始化檔。
-- 本機直接執行 `firebase` 指令不可用；請依教學檔使用 `npx.cmd -y firebase-tools@latest ...`。
-- `C:\Users\User\.codex\config.toml` 已加入 Firebase MCP server，需重啟 Codex Desktop 後才會載入 Firebase MCP 工具。
-- 專案已安裝 `firebase-admin`，資料層可用 `BOOKING_DATA_SOURCE=firestore` 切換到 Firestore。
-- 若沒有 Firebase Admin 憑證，資料層會回落使用本機 JSON，避免本機開發壞掉。
-- 無個資的 `categories`、`courses`、`sessions` 已種到 Firestore；`reservations` 尚未搬入 Firestore。
+- Firebase 專案為 `my-teaching-tools-1126-f8fc9`。
+- 專案已安裝 `firebase-admin`，伺服器端透過 `src/lib/firebase-admin.ts` 初始化。
+- Firestore 已有正式 `categories`、`courses`、`sessions`、`students`、`reservations` 集合。
+- 真實名冊與預約屬於個資，不可提交 GitHub。
+- Firebase Spark 方案曾接近 Firestore 讀取上限；公開學生端頁面已改用窄讀取，避免首頁與課程頁讀完整預約與名冊。
+- 本機直接執行 `firebase` 指令可能不可用；需要 Firebase CLI 時優先使用 `npx.cmd -y firebase-tools@latest ...`。
 
 啟用 Firestore 資料來源需要 `.env.local`：
 
@@ -111,7 +116,7 @@ FIREBASE_CLIENT_EMAIL=...
 FIREBASE_PRIVATE_KEY=...
 ```
 
-接 Firebase 時，優先使用伺服器端資料存取，避免學生端下載或查到完整預約名單。學生查詢只能回傳符合「完整姓名 + 手機末三碼」的本人資料，以及去個資化統計。
+資料存取優先使用伺服器端，避免學生端下載或查到完整預約名單。學生查詢只能回傳符合「完整姓名 + 手機末三碼」的本人資料。公開課程頁應優先使用 `getCourseCatalog()`，不要呼叫後台用的完整 `getBookingData()`。
 
 目前已建立主要頁面：
 
@@ -171,17 +176,13 @@ FIREBASE_PRIVATE_KEY=...
 
 ## 建議下一步
 
-下一個主要階段是把本機 JSON MVP 換成正式資料流程：
+下一個主要階段是正式發布前的穩定化：
 
-1. 建立資料庫方案
-2. 建立資料表與 migration
-3. 建立課程分類 CRUD
-4. 建立課程 CRUD
-5. 建立時段 CRUD
-6. 將預約 server action 改接正式資料庫
-7. 將查詢預約改接正式資料庫
-8. 建立後台登入驗證
-9. 建立 Excel 匯出
+1. 觀察 Firestore 讀取用量是否因窄讀取回落。
+2. 完成 Vercel GitHub integration 自動部署。
+3. 核對 9 筆 `needsReview` 名冊資料。
+4. 補正式驗收清單，尤其是手機端學生預約、查詢、取消與後台名單操作。
+5. 視用量決定是否加首頁快取、公開課程彙總資料或後台分頁查詢。
 
 每完成一個階段，請執行：
 

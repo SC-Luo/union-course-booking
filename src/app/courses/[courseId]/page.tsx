@@ -1,8 +1,8 @@
-import Link from "next/link";
+/* eslint-disable @next/next/no-html-link-for-pages */
 import { notFound } from "next/navigation";
 import { CourseStatusBadge } from "@/components/status-badge";
 import { StudentShell } from "@/components/page-shell";
-import { getBookingData } from "@/lib/booking-repository";
+import { getCourseCatalog } from "@/lib/booking-repository";
 import { formatReservationCutoff, getCategoryName, getCourse, getRemainingSeats, getSessionStatus, getWeekday } from "@/lib/course-utils";
 import { getCourseTypeName } from "@/lib/course-coding";
 
@@ -12,7 +12,7 @@ type PageProps = {
 
 export default async function CourseDetailPage({ params }: PageProps) {
   const { courseId } = await params;
-  const { categories, courses } = await getBookingData();
+  const { categories, courses } = await getCourseCatalog();
   const course = getCourse(courseId, courses);
 
   if (!course) {
@@ -27,9 +27,9 @@ export default async function CourseDetailPage({ params }: PageProps) {
 
   return (
     <StudentShell>
-      <Link href="/" className="mb-6 inline-flex text-sm font-medium text-zinc-600 hover:text-zinc-950">
+      <a href="/" className="mb-6 inline-flex text-sm font-medium text-zinc-600 hover:text-zinc-950">
         返回課程列表
-      </Link>
+      </a>
 
       <section className="mb-8 grid gap-6 lg:grid-cols-[1fr_320px]">
         <div>
@@ -82,9 +82,9 @@ export default async function CourseDetailPage({ params }: PageProps) {
                         <p className="mt-1 text-sm text-zinc-600">剩餘 {getRemainingSeats(session)} 位</p>
                       </div>
                       {canBook ? (
-                        <Link href={`/courses/${course.id}/book/${session.id}`} className="rounded-md bg-emerald-700 px-5 py-4 text-center text-base font-semibold text-white shadow-sm hover:bg-emerald-800">
+                        <a href={`/courses/${course.id}/book/${session.id}`} className="rounded-md bg-emerald-700 px-5 py-4 text-center text-base font-semibold text-white shadow-sm hover:bg-emerald-800">
                           預約這堂
-                        </Link>
+                        </a>
                       ) : (
                         <button disabled className="rounded-md bg-zinc-200 px-4 py-3 text-sm font-medium text-zinc-500">
                           無法預約

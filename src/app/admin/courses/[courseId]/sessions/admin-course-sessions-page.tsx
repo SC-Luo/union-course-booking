@@ -68,25 +68,10 @@ export default async function AdminSessionsPage({ params, searchParams }: PagePr
           <p className="mt-2 text-sm text-zinc-600">預設地點：{course.defaultLocation || "未設定"}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <details className="relative">
-            <summary className="cursor-pointer rounded-md bg-zinc-900 px-4 py-3 text-sm font-semibold text-white hover:bg-zinc-700">
-              修改時間
-            </summary>
-            <div className="absolute right-0 z-20 mt-2 grid w-[320px] gap-3 rounded-xl border border-zinc-200 bg-white p-3 shadow-lg sm:w-[420px]">
-              <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-                <summary className="cursor-pointer font-semibold text-zinc-950">單堂修改時間</summary>
-                <p className="mt-2 text-sm text-zinc-500">在日曆中點選課堂卡片，即可直接展開修改表單，不會跳到其他頁面。</p>
-              </details>
-              <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-                <summary className="cursor-pointer font-semibold text-zinc-950">批次修改時間</summary>
-                <p className="mt-2 text-sm text-zinc-500">使用下方「建立 / 批次修改時段」區塊，一次建立整期課表。</p>
-              </details>
-            </div>
-          </details>
-          <Link href={`/admin/courses/${course.id}/sessions`} className={`rounded-md px-4 py-3 text-sm font-semibold ${isCardView ? "border border-zinc-300 text-zinc-700 hover:bg-zinc-50" : "border border-zinc-300 text-zinc-700 hover:bg-zinc-50"}`}>
+          <Link href={`/admin/courses/${course.id}/sessions`} className={`rounded-md px-4 py-2 text-sm font-semibold ${isCardView ? "border border-zinc-300 text-zinc-700 hover:bg-zinc-50" : "bg-zinc-900 text-white"}`}>
             日曆檢視
           </Link>
-          <Link href={`/admin/courses/${course.id}/sessions?view=cards`} className={`rounded-md px-4 py-3 text-sm font-semibold ${isCardView ? "bg-zinc-900 text-white" : "border border-zinc-300 text-zinc-700 hover:bg-zinc-50"}`}>
+          <Link href={`/admin/courses/${course.id}/sessions?view=cards`} className={`rounded-md px-4 py-2 text-sm font-semibold ${isCardView ? "bg-zinc-900 text-white" : "border border-zinc-300 text-zinc-700 hover:bg-zinc-50"}`}>
             卡片檢視
           </Link>
         </div>
@@ -156,7 +141,7 @@ export default async function AdminSessionsPage({ params, searchParams }: PagePr
       )}
 
       <details className="mt-6 rounded-xl border border-zinc-200 bg-white p-4 sm:p-5">
-        <summary className="cursor-pointer text-lg font-semibold text-zinc-950">建立 / 批次修改時段</summary>
+        <summary className="cursor-pointer text-lg font-semibold text-zinc-950">建立 / 批量建立時段</summary>
         <div className="mt-4 grid gap-6">
           <section className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4">
             <h2 className="text-base font-semibold text-zinc-950">批量建立時段</h2>
