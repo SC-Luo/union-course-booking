@@ -177,17 +177,21 @@ function parseDateTimeValue(value: string) {
 }
 
 export function getReservationCutoff(session: Pick<CourseSession, "date"> & Partial<Pick<CourseSession, "bookingDeadline">>) {
-  if (session.bookingDeadline) {
-    const parsedDeadline = parseDateTimeValue(session.bookingDeadline);
-    if (parsedDeadline) return parsedDeadline;
-  }
-
   const courseDate = parseDateTimeValue(`${session.date}T00:00:00`);
   if (!courseDate) return new Date(0);
 
-  courseDate.setDate(courseDate.getDate() - 1);
-  courseDate.setHours(18, 0, 0, 0);
-  return courseDate;
+  const weeklyLockDeadline = new Date(courseDate);
+  weeklyLockDeadline.setDate(weeklyLockDeadline.getDate() - 7);
+  weeklyLockDeadline.setHours(18, 0, 0, 0);
+
+  if (session.bookingDeadline) {
+    const parsedDeadline = parseDateTimeValue(session.bookingDeadline);
+    if (parsedDeadline) {
+      return parsedDeadline.getTime() < weeklyLockDeadline.getTime() ? parsedDeadline : weeklyLockDeadline;
+    }
+  }
+
+  return weeklyLockDeadline;
 }
 
 export function canChangeReservation(session: Pick<CourseSession, "date"> & Partial<Pick<CourseSession, "bookingDeadline">>) {
@@ -203,7 +207,7 @@ export function formatReservationCutoff(session: Pick<CourseSession, "date"> & P
   const day = String(cutoff.getDate()).padStart(2, "0");
   const hour = String(cutoff.getHours()).padStart(2, "0");
   const minute = String(cutoff.getMinutes()).padStart(2, "0");
-  return `截止：${year}-${month}-${day} ${hour}:${minute}`;
+  return `鎖定：${year}-${month}-${day} ${hour}:${minute}`;
 }
 
 export function getSession(sessionId: string, courses: Course[]): CourseSession | undefined;
@@ -213,11 +217,13 @@ export function getSession(
   second: Course[] | string,
 ): CourseSession | undefined {
   if (typeof first === "string" && Array.isArray(second)) {
-    return second.flatMap((course) => course.sessions).find((session) => session.id === first);
+    const lookup = normalizeLookupValue(first);
+    return second.flatMap((course) => course.sessions).find((session) => session.id === first || normalizeLookupValue(session.id) === lookup);
   }
 
   if (typeof second === "string" && first && typeof first !== "string") {
-    return first.sessions.find((session) => session.id === second);
+    const lookup = normalizeLookupValue(second);
+    return first.sessions.find((session) => session.id === second || normalizeLookupValue(session.id) === lookup);
   }
 
   return undefined;

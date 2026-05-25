@@ -6,7 +6,7 @@ import { getCategoryName, resolveCourseColor } from "@/lib/course-utils";
 export const dynamic = "force-dynamic";
 
 type PageProps = {
-  searchParams: Promise<{ courseId?: string; group?: string; report?: string }>;
+  searchParams: Promise<{ courseId?: string; group?: string }>;
 };
 
 type SessionSummary = {
@@ -78,7 +78,7 @@ function isWithinRange(date: string, start: string, end: string) {
 }
 
 export default async function AdminStatsPage({ searchParams }: PageProps) {
-  const { courseId, group, report } = await searchParams;
+  const { courseId, group } = await searchParams;
   const { categories, courses, reservations } = await getBookingData();
   const activeCourses = courses.filter((course) => course.isActive);
   const selectedCourse =
@@ -234,12 +234,7 @@ export default async function AdminStatsPage({ searchParams }: PageProps) {
     })
     .sort((a, b) => b.booked - a.booked);
 
-  const currentSection =
-    report === "booking"
-      ? "reports.booking"
-      : report === "course"
-        ? "reports.course"
-        : "reports.attendance";
+  const currentSection = group === "inservice" ? "attendance.inservice" : group === "prejob" ? "attendance.prejob" : group === "skill" ? "attendance.skill" : group === "other" ? "attendance.other" : "attendance.dashboard";
 
   return (
     <AdminShell currentSection={currentSection}>

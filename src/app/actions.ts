@@ -8,24 +8,27 @@ function cleanIdNumberLast3(value: FormDataEntryValue | null) {
   return String(value ?? "").replace(/\D/g, "").slice(0, 3);
 }
 
-export async function createReservationAction(formData: FormData) {
+export type CreateReservationFormState = {
+  error?: string;
+};
+
+export async function createReservationAction(
+  _prevState: CreateReservationFormState,
+  formData: FormData,
+): Promise<CreateReservationFormState> {
   const courseId = String(formData.get("courseId") ?? "");
   const sessionId = String(formData.get("sessionId") ?? "");
   const studentName = String(formData.get("studentName") ?? "").trim();
-  const idNumberLast3 = cleanIdNumberLast3(
-    formData.get("idNumberLast3") ?? formData.get("phoneLastThree"),
-  );
-
-  // booking-repository 目前仍用 phoneLastThree 做相容欄位；這裡改由身分證末三碼填入。
   const result = await createReservation({
     courseId,
     sessionId,
     studentName,
-    phoneLastThree: idNumberLast3,
+    // 前台預約改為只用姓名比對課程名單；身分證後三碼不再作為預約資格輸入。
+    phoneLastThree: "",
   });
 
   if (!result.ok) {
-    redirect(`/courses/${courseId}/book/${sessionId}?error=${result.reason}`);
+    return { error: result.reason };
   }
 
   revalidatePath("/");
@@ -36,17 +39,15 @@ export async function createReservationAction(formData: FormData) {
   revalidatePath(`/admin/courses/${result.courseId}/sessions`);
   revalidatePath(`/admin/sessions/${result.sessionId}/reservations`);
 
-  redirect(`/booking/success?id=${result.reservation.id}`);
+  redirect(`/booking/success?id=${encodeURIComponent(result.reservation.id)}`);
 }
 
 export async function cancelReservationAction(formData: FormData) {
   const reservationId = String(formData.get("reservationId") ?? "");
   const studentName = String(formData.get("studentName") ?? "").trim();
-  const idNumberLast3 = cleanIdNumberLast3(
-    formData.get("idNumberLast3") ?? formData.get("phoneLastThree"),
-  );
+  const idNumberLast3 = cleanIdNumberLast3(formData.get("idNumberLast3") ?? formData.get("phoneLastThree"));
   const result = await cancelReservation(reservationId, studentName, idNumberLast3);
-  const query = new URLSearchParams({ name: studentName, phone: idNumberLast3 });
+  const query = new URLSearchParams({ name: studentName });
 
   if (!result.ok) {
     query.set("error", result.reason);

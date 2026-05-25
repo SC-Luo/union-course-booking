@@ -10,6 +10,49 @@ type PageProps = {
   params: Promise<{ courseId: string }>;
 };
 
+type SessionStatus = ReturnType<typeof getSessionStatus> | "locked";
+type CourseSessionForStatus = Parameters<typeof getSessionStatus>[0];
+
+function parseTaiwanDateTime(value?: string) {
+  const normalized = value?.trim();
+  if (!normalized) return null;
+
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/);
+  if (!match) {
+    const fallback = new Date(normalized);
+    return Number.isNaN(fallback.getTime()) ? null : fallback;
+  }
+
+  const [, year, month, day, hour = "23", minute = "59"] = match;
+  return new Date(`${year}-${month}-${day}T${hour}:${minute}:00+08:00`);
+}
+
+function getFrontSessionStatus(session: CourseSessionForStatus): SessionStatus {
+  const baseStatus = getSessionStatus(session);
+
+  if (baseStatus !== "available") {
+    return baseStatus;
+  }
+
+  const bookingDeadline = parseTaiwanDateTime(session.bookingDeadline);
+  if (bookingDeadline && Date.now() > bookingDeadline.getTime()) {
+    return "locked";
+  }
+
+  const classEndTime = parseTaiwanDateTime(`${session.date} ${session.endTime || "23:59"}`);
+  if (classEndTime && Date.now() > classEndTime.getTime()) {
+    return "locked";
+  }
+
+  return baseStatus;
+}
+
+function getDisabledButtonText(status: SessionStatus) {
+  if (status === "locked") return "已鎖定";
+  if (status === "full") return "已額滿";
+  return "無法預約";
+}
+
 export default async function CourseDetailPage({ params }: PageProps) {
   const { courseId } = await params;
   const { categories, courses } = await getCourseCatalog();
@@ -51,7 +94,7 @@ export default async function CourseDetailPage({ params }: PageProps) {
         <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h2 className="text-xl font-semibold text-zinc-950">選擇上課單元與時段</h2>
-            <p className="mt-1 text-sm text-zinc-600">先看單元，再選日期。可預約按鈕會以綠色顯示。</p>
+            <p className="mt-1 text-sm text-zinc-600">先看單元，再選日期。可預約按鈕會以綠色顯示；已過預約截止時間會自動鎖定。</p>
           </div>
         </div>
         <div className="grid gap-6">
@@ -63,7 +106,7 @@ export default async function CourseDetailPage({ params }: PageProps) {
               </div>
               <div className="grid gap-3">
                 {sessions.map((session) => {
-                  const status = getSessionStatus(session);
+                  const status = getFrontSessionStatus(session);
                   const canBook = status === "available";
 
                   return (
@@ -87,7 +130,7 @@ export default async function CourseDetailPage({ params }: PageProps) {
                         </a>
                       ) : (
                         <button disabled className="rounded-md bg-zinc-200 px-4 py-3 text-sm font-medium text-zinc-500">
-                          無法預約
+                          {getDisabledButtonText(status)}
                         </button>
                       )}
                     </div>

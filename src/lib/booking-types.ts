@@ -1,4 +1,4 @@
-export type CourseStatus = "available" | "full" | "closed" | "locked";
+export type CourseStatus = "available" | "full" | "closed";
 
 export type AttendanceStatus = "pending" | "unchecked" | "attended" | "absent" | "leave";
 
@@ -392,20 +392,6 @@ export type ImportBatch = {
   createdAt?: string;
 };
 
-export type Instructor = {
-  id: string;
-  name: string;
-  phone?: string;
-  specialties?: string[];
-  courseSeriesIds?: string[];
-  courseOfferingIds?: string[];
-  note?: string;
-  source?: string;
-  isActive?: boolean;
-  createdAt?: string;
-  updatedAt?: string;
-};
-
 export type BookingData = {
   categories: CourseCategory[];
   /** Legacy compatibility layer for older front/admin routes. */
@@ -420,5 +406,4 @@ export type BookingData = {
   attendanceRecords: AttendanceRecord[];
   entitlements: Entitlement[];
   importBatches: ImportBatch[];
-  instructors?: Instructor[];
 };

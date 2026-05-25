@@ -1,991 +1,2115 @@
 import Link from "next/link";
-import { disableStudentAction, saveStudentAction } from "@/app/admin/actions";
+import {
+  assignStudentsToCourseEligibilityAction,
+  bulkImportStudentIdentitiesAction,
+  bulkUpdateStudentCourseEligibilityAction,
+  hardDeleteStudentIdentityAction,
+  updateStudentIdentityStatusAction,
+  saveStudentIdentityAction,
+  updateStudentCourseEligibilityAction,
+  saveInstructorIdentityAction,
+  deleteInstructorIdentityAction,
+} from "@/app/admin/actions";
 import { AdminShell } from "@/components/page-shell";
 import { getBookingData } from "@/lib/booking-repository";
-import {
-  getEnrollmentOfferingId,
-  getEnrollmentSeatLabel,
-  getOfferingForCourse,
-  getOfferingPeriodLabel,
-  getSeriesForCourse,
-  getStudentEnrollments,
-  resolveCourseColor,
-} from "@/lib/course-utils";
+import type {
+  CourseOffering,
+  CourseSeries,
+  Instructor,
+  Student,
+  StudentCourseRecord,
+} from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 type PageProps = {
   searchParams: Promise<{
-    classId?: string;
+    mode?: string;
     seriesId?: string;
     year?: string;
-    term?: string;
+    offeringId?: string;
+    status?: string;
+    q?: string;
     saved?: string;
     error?: string;
-    q?: string;
-    status?: string;
+    imported?: string;
+    skipped?: string;
+    linked?: string;
+    enrolled?: string;
   }>;
 };
 
-function normalizeText(value: unknown) {
-  return String(value ?? "")
-    .trim()
-    .toLowerCase();
-}
-
-function getCoursePeriodLabel(
-  course:
-    | {
-        year?: number;
-        termLabel?: string;
-        displayTitle?: string;
-        title?: string;
-      }
-    | undefined,
-) {
-  if (!course) return "未指定";
-  const parts = [
-    course.year ? `${course.year}年` : "",
-    course.termLabel ?? "",
-  ].filter(Boolean);
-  if (parts.length > 0) return parts.join("｜");
-  return course.displayTitle ?? course.title ?? "未設定期別";
-}
-
-function getStudentClassStatus(student: {
-  classId?: string;
-  needsReview?: boolean;
+type CourseOption = {
+  id: string;
+  title: string;
+  color?: string;
+  categoryId?: string;
   isActive?: boolean;
-}) {
-  if (student.isActive === false) {
+};
+
+const ELIGIBILITY_STATUSES = ["上課中", "已結訓"];
+const ELIGIBILITY_ROW_STATUSES = ["未加入", "上課中", "已結訓"];
+
+type ActiveClassChip = {
+  offeringId: string;
+  seriesId: string;
+  year: string;
+  label: string;
+};
+
+const IMPORT_ELIGIBILITY_STATUSES = ELIGIBILITY_STATUSES;
+const MODES = [
+  ["students", "學員總表", "匯入與新增學員基本資料"],
+  ["eligibility", "課程名單", "設定學員在指定期別的課程狀態"],
+  ["instructors", "講師名冊", "建立講師基本資料與授課專長"],
+  ["history", "學習履歷", "彙整學員資格、梯次、報名與出席紀錄"],
+] as const;
+
+function text(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function norm(value: unknown) {
+  return text(value).replace(/\s+/g, "").toLowerCase();
+}
+
+function looksLikeMemberNo(value: unknown) {
+  return /^ST\d{2,}-\d{3,}$/i.test(text(value));
+}
+
+function looksLikeChineseName(value: unknown) {
+  return /^[\u4e00-\u9fa5·・]{2,8}$/.test(text(value));
+}
+
+function isLikelyMisalignedStudent(student: Student) {
+  return (
+    looksLikeMemberNo(student.name) ||
+    looksLikeChineseName(student.birthday) ||
+    /^0\d{8,9}$/.test(text(student.memberNo).replace(/\D/g, ""))
+  );
+}
+
+function getRosterStatus(student: Student) {
+  if (isLikelyMisalignedStudent(student)) {
     return {
-      label: "已停用 / 封存",
-      className: "bg-zinc-100 text-zinc-600 border-zinc-200",
-    };
-  }
-  if (!student.classId) {
-    return {
-      label: "未指定年度期別班級",
-      className: "bg-amber-50 text-amber-700 border-amber-200",
+      key: "misaligned",
+      label: "疑似錯位",
+      className: "border-amber-200 bg-amber-50 text-amber-700",
     };
   }
   if (student.needsReview) {
     return {
-      label: "需人工確認",
-      className: "bg-amber-50 text-amber-700 border-amber-200",
+      key: "review",
+      label: "待確認",
+      className: "border-amber-200 bg-amber-50 text-amber-700",
+    };
+  }
+  if (student.isActive === false) {
+    return {
+      key: "inactive",
+      label: "停用",
+      className: "border-zinc-200 bg-zinc-50 text-zinc-500",
     };
   }
   return {
-    label: "名冊有效",
-    className: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    key: "active",
+    label: "啟用",
+    className: "border-emerald-200 bg-emerald-50 text-emerald-700",
   };
 }
 
-function getStudentRegistryNumber(student: {
-  externalMemberNo?: string;
-  memberId?: string;
-  id: string;
-}) {
-  return student.externalMemberNo || student.memberId || student.id;
+const STUDENT_STATUS_FILTERS = [
+  ["all", "全部"],
+  ["active", "啟用"],
+  ["inactive", "停用"],
+  ["review", "待確認"],
+  ["misaligned", "疑似錯位"],
+] as const;
+
+function statusTone(status: string) {
+  if (status === "已結訓")
+    return "border-sky-200 bg-sky-50 text-sky-700";
+  if (["未加入", ""].includes(status))
+    return "border-zinc-200 bg-zinc-50 text-zinc-500";
+  return "border-emerald-200 bg-emerald-50 text-emerald-700";
+}
+
+function canBook(status: string) {
+  return status === "上課中";
+}
+
+function getCourseRosterStatus(record?: StudentCourseRecord) {
+  const value = text(record?.normalizedValue || record?.rawValue || "上課中");
+  if (["上課中", "已分配梯次"].includes(value)) return "上課中";
+  if (["已結訓", "通過", "completed"].includes(value)) return "已結訓";
+  return value;
+}
+
+function isEligibilityRecord(record: StudentCourseRecord) {
+  const sourceColumn = norm(record.sourceColumn);
+  return (
+    record.recordType === "roster" ||
+    sourceColumn.includes("課程資格") ||
+    sourceColumn.includes("課程狀態") ||
+    sourceColumn.includes("上課資格") ||
+    sourceColumn.includes("eligibility") ||
+    sourceColumn.includes("美容丙級")
+  );
+}
+
+function optionKeyFromOffering(offering: CourseOffering) {
+  return text(
+    offering.seriesId || offering.courseMasterId || offering.courseSeriesId,
+  );
+}
+
+function offeringBelongsToOption(offering: CourseOffering, optionId: string) {
+  return [offering.seriesId, offering.courseMasterId, offering.courseSeriesId]
+    .map(text)
+    .includes(optionId);
+}
+
+function normalizeCourseTitleForMatch(value: unknown) {
+  return norm(cleanCourseTitle(text(value)));
+}
+
+function offeringMatchesCourseOption(
+  offering: CourseOffering,
+  option?: CourseOption,
+) {
+  if (!option) return false;
+  if (offeringBelongsToOption(offering, option.id)) return true;
+
+  const optionTitle = normalizeCourseTitleForMatch(option.title);
+  const offeringTitles = [
+    offering.displayTitle,
+    offering.displayName,
+    offering.title,
+    offering.name,
+    offering.shortName,
+    offering.classDisplayName,
+  ].map(normalizeCourseTitleForMatch);
+
+  return (
+    Boolean(optionTitle) &&
+    offeringTitles.some(
+      (title) =>
+        title === optionTitle ||
+        title.includes(optionTitle) ||
+        optionTitle.includes(title),
+    )
+  );
+}
+
+function recordMatches(
+  record: StudentCourseRecord,
+  seriesId: string,
+  year: string,
+) {
+  if (!isEligibilityRecord(record)) return false;
+  if (
+    seriesId !== "all" &&
+    record.seriesId !== seriesId &&
+    record.courseMasterId !== seriesId
+  )
+    return false;
+  if (
+    year !== "all" &&
+    String(record.year ?? record.sourceRocYear ?? "") !== year
+  )
+    return false;
+  return true;
+}
+
+function cleanCourseTitle(value: string) {
+  return text(value)
+    .replace(/\s*[｜|]\s*\d+\s*年.*$/g, "")
+    .replace(/\s*\d+\s*年\s*[｜|].*$/g, "")
+    .trim();
+}
+
+function getCourseOptions(
+  courseSeries: CourseSeries[],
+  courseOfferings: CourseOffering[],
+) {
+  const options = new Map<string, CourseOption>();
+
+  courseSeries.forEach((series) => {
+    if (!series.id) return;
+    options.set(series.id, {
+      id: series.id,
+      title: series.title || series.name || series.id,
+      color: series.color || series.defaultColor,
+      categoryId: series.categoryId,
+      isActive: series.isActive,
+    });
+  });
+
+  courseOfferings.forEach((offering) => {
+    const id = optionKeyFromOffering(offering);
+    if (!id || options.has(id)) return;
+    const title = cleanCourseTitle(
+      offering.displayTitle ||
+        offering.displayName ||
+        offering.title ||
+        offering.shortName ||
+        id,
+    );
+    options.set(id, {
+      id,
+      title: title || id,
+      color: offering.color,
+      categoryId: offering.categoryId,
+      isActive: offering.isActive ?? offering.status !== "archived",
+    });
+  });
+
+  return Array.from(options.values())
+    .filter((item) => item.isActive !== false)
+    .sort((a, b) => a.title.localeCompare(b.title, "zh-Hant"));
+}
+
+function getYearOptions(
+  courseOfferings: CourseOffering[],
+  records: StudentCourseRecord[],
+) {
+  const values = new Set<string>();
+  courseOfferings.forEach((item) => {
+    if (item.year) values.add(String(item.year));
+  });
+  records.forEach((item) => {
+    const year = item.year ?? item.sourceRocYear;
+    if (year) values.add(String(year));
+  });
+  if (values.size === 0) values.add(String(new Date().getFullYear() - 1911));
+  return Array.from(values).sort((a, b) => Number(b) - Number(a));
+}
+
+function buildHref(params: Record<string, string | undefined>) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value && value !== "all") query.set(key, value);
+  });
+  const qs = query.toString();
+  return `/admin/students${qs ? `?${qs}` : ""}`;
+}
+
+function baseTemplateText() {
+  return [
+    "姓名\t身分證後三碼\t手機\t生日\t會員編號\t備註",
+    "王小明\t123\t0912345678\t1990/01/01\tM001\t115年度美容丙級學員",
+    "李小美\t456\t0987654321\t1991/02/02\tM002\t尚未決定考試梯次",
+  ].join("\n");
+}
+
+function getStudentName(student?: Student) {
+  return student?.name ?? "未知學員";
+}
+
+function getStudentSortKey(student: Student) {
+  const memberNo = text(student.memberNo);
+  if (memberNo) return memberNo;
+  return getStudentName(student);
+}
+
+function compareStudentsByMemberNo(a: Student, b: Student) {
+  return getStudentSortKey(a).localeCompare(getStudentSortKey(b), "zh-Hant", {
+    numeric: true,
+  });
+}
+
+function studentMatches(student: Student, q: string) {
+  const query = norm(q);
+  if (!query) return true;
+  return [
+    student.name,
+    student.idNumberLast3,
+    student.phone,
+    student.memberNo,
+    student.note,
+    student.source,
+  ]
+    .map(norm)
+    .some((item) => item.includes(query));
+}
+
+function instructorTemplateText() {
+  return [
+    "講師姓名\t手機\t授課專長\t備註",
+    "陳講師\t0912345678\t美容丙級,護膚\t平日白天可授課",
+    "林講師\t0987654321\t美甲,美睫\t可支援週末班",
+  ].join("\n");
+}
+
+function formatList(items?: string[]) {
+  const values = (items ?? []).map(text).filter(Boolean);
+  return values.length > 0 ? values.join("、") : "未設定";
+}
+
+function instructorMatches(instructor: Instructor, q: string) {
+  const query = norm(q);
+  if (!query) return true;
+  return [
+    instructor.name,
+    instructor.phone,
+    instructor.note,
+    instructor.source,
+    ...(instructor.specialties ?? []),
+    ...(instructor.courseSeriesIds ?? []),
+    ...(instructor.courseOfferingIds ?? []),
+  ]
+    .map(norm)
+    .some((item) => item.includes(query));
+}
+
+function statusLabel(value: unknown) {
+  const status = text(value);
+  const labels: Record<string, string> = {
+    active: "啟用",
+    withdrawn: "已退出",
+    completed: "已完成",
+    expired: "已逾期",
+    booked: "已報名",
+    cancelled: "已取消",
+    unchecked: "未點名",
+    attended: "已出席",
+    absent: "缺席",
+    leave: "請假",
+    pending: "待處理",
+  };
+  return labels[status] ?? status ?? "未設定";
+}
+
+function courseListStatusLabel(value: unknown) {
+  const status = norm(value);
+  if (status === "active") return "上課中";
+  if (status === "completed") return "已結訓";
+  if (["withdrawn", "cancelled", "inactive"].includes(status)) return "未加入";
+  return text(value) || "未加入";
+}
+
+function dateText(...values: unknown[]) {
+  return values.map(text).find(Boolean) ?? "未紀錄時間";
+}
+
+function studentHasRecordForSelection(
+  recordByStudentId: Map<string, StudentCourseRecord>,
+  studentId: string,
+) {
+  return Boolean(recordByStudentId.get(studentId));
 }
 
 export default async function AdminStudentsPage({ searchParams }: PageProps) {
   const {
-    classId,
-    seriesId,
-    year,
-    term,
+    mode = "students",
+    seriesId: querySeriesId,
+    year: queryYear,
+    offeringId: queryOfferingId,
+    status = "all",
+    q = "",
     saved,
     error,
-    q = "",
-    status = "active",
+    imported,
+    skipped,
+    linked,
+    enrolled,
   } = await searchParams;
   const {
-    categories = [],
-    courses,
     students = [],
     courseSeries = [],
     courseOfferings = [],
+    courseSessions = [],
+    reservations = [],
+    studentCourseRecords = [],
     enrollments = [],
+    attendanceRecords = [],
+    instructors = [],
+    categories = [],
   } = await getBookingData();
-  const allStudents = students;
-  const activeStudents = allStudents.filter(
+
+  const currentMode = MODES.some(([key]) => key === mode) ? mode : "students";
+  const instructorSpecialtyCategories = categories
+    .filter((category) => category.isActive !== false)
+    .sort((a, b) => Number(a.sortOrder ?? 0) - Number(b.sortOrder ?? 0));
+  const specialtyCategoryByName = new Map(
+    instructorSpecialtyCategories.map((category) => [category.name, category]),
+  );
+  const courseOptions = getCourseOptions(courseSeries, courseOfferings);
+  const selectedSeriesId =
+    querySeriesId && courseOptions.some((option) => option.id === querySeriesId)
+      ? querySeriesId
+      : (courseOptions[0]?.id ?? "all");
+  const years = getYearOptions(courseOfferings, studentCourseRecords);
+  const selectedYear =
+    queryYear ?? years[0] ?? String(new Date().getFullYear() - 1911);
+  const selectedCourse = courseOptions.find(
+    (item) => item.id === selectedSeriesId,
+  );
+  const selectedOfferings = courseOfferings
+    .filter(
+      (item) =>
+        offeringMatchesCourseOption(item, selectedCourse) &&
+        String(item.year ?? "") === String(selectedYear),
+    )
+    .sort(
+      (a, b) =>
+        Number(a.termNumber ?? a.term ?? 0) -
+        Number(b.termNumber ?? b.term ?? 0),
+    );
+  const selectedOffering =
+    selectedOfferings.find((item) => item.id === queryOfferingId) ??
+    selectedOfferings[0];
+  const selectedOfferingId = selectedOffering?.id ?? "";
+
+  const visibleStudents = students.filter(
     (student) => student.isActive !== false,
   );
-  const inactiveStudents = allStudents.filter(
+  const inactiveStudents = students.filter(
     (student) => student.isActive === false,
   );
-  const studentStatus =
-    status === "inactive" || status === "all" ? status : "active";
-  const legacySelectedCourse =
-    classId && classId !== "all"
-      ? courses.find((course) => course.id === classId)
-      : undefined;
-  const courseMap = new Map(courses.map((course) => [course.id, course]));
-  const seriesMap = new Map(courseSeries.map((series) => [series.id, series]));
-  const offeringMap = new Map(courseOfferings.map((offering) => [offering.id, offering]));
+  const suspectedMisalignedStudents = students.filter(
+    isLikelyMisalignedStudent,
+  );
+  const filteredStudents = visibleStudents
+    .filter((student) => studentMatches(student, q))
+    .sort(compareStudentsByMemberNo);
+  const studentListRows = students
+    .filter((student) => studentMatches(student, q))
+    .filter((student) => {
+      const rosterStatus = getRosterStatus(student).key;
+      if (status === "all") return true;
+      return rosterStatus === status;
+    })
+    .sort(compareStudentsByMemberNo);
+  const records = studentCourseRecords.filter((record) =>
+    recordMatches(record, selectedSeriesId, selectedYear),
+  );
+  const studentById = new Map(
+    visibleStudents.map((student) => [student.id, student]),
+  );
+  const recordByStudentId = new Map(
+    records.map((record) => [record.studentId, record]),
+  );
+  const seriesById = new Map(courseSeries.map((item) => [item.id, item]));
+  const offeringById = new Map(courseOfferings.map((item) => [item.id, item]));
 
-  const selectedSeriesId =
-    seriesId || legacySelectedCourse?.seriesId || legacySelectedCourse?.courseMasterId || "all";
-  const selectedYear =
-    year || (legacySelectedCourse?.year != null ? String(legacySelectedCourse.year) : "all");
-  const selectedTerm =
-    term || (legacySelectedCourse?.termLabel ?? (legacySelectedCourse?.term != null ? String(legacySelectedCourse.term) : "all"));
-  const selectedOffering =
-    classId && classId !== "all"
-      ? courseOfferings.find((offering) => offering.legacyCourseId === classId || offering.id === classId)
-      : courseOfferings.find(
-          (offering) =>
-            (selectedSeriesId === "all" || offering.seriesId === selectedSeriesId || offering.courseMasterId === selectedSeriesId) &&
-            (selectedYear === "all" || String(offering.year) === selectedYear) &&
-            (selectedTerm === "all" || offering.termLabel === selectedTerm || String(offering.term) === selectedTerm),
-        );
-  const selectedClassId = selectedOffering?.legacyCourseId ?? selectedOffering?.id ?? classId ?? "all";
-  const selectedCourse =
-    selectedOffering?.legacyCourseId
-      ? courses.find((course) => course.id === selectedOffering.legacyCourseId)
-      : legacySelectedCourse;
-
-  function getCourseSeriesTitle(course: (typeof courses)[number] | undefined) {
-    if (!course) return "未指定課程";
-    const series = getSeriesForCourse(course, courseSeries);
-    return series?.title ?? course.displayTitle?.split("｜")[0] ?? course.title;
-  }
-
-  function getCourseSeriesDescription(
-    course: (typeof courses)[number] | undefined,
-  ) {
-    if (!course) return "";
-    const series = getSeriesForCourse(course, courseSeries);
-    return (
-      series?.description ?? "同一課程主檔的不同年度 / 期別班級，名冊分開管理。"
-    );
-  }
-
-  const getCourseColor = (courseId?: string) => {
-    const course = courseMap.get(courseId ?? "");
-    if (!course) return "#a1a1aa";
-    const category = categories.find((item) => item.id === course.categoryId);
-    return resolveCourseColor(course, category);
-  };
-  const normalizedQuery = normalizeText(q);
-  const effectiveClassForNew =
-    selectedClassId === "all" ? (courses[0]?.id ?? "") : selectedClassId;
-  const years = Array.from(
-    new Set(courseOfferings.map((offering) => offering.year).filter(Boolean).map(String)),
-  ).sort();
-  const termsForSelectedYear = Array.from(
-    new Set(
-      courseOfferings
-        .filter((offering) => selectedSeriesId === "all" || offering.seriesId === selectedSeriesId || offering.courseMasterId === selectedSeriesId)
-        .filter((offering) => selectedYear === "all" || String(offering.year) === selectedYear)
-        .map((offering) => offering.termLabel ?? String(offering.term ?? ""))
-        .filter(Boolean),
-    ),
-  ).sort();
-
-  const courseFilterGroups = Array.from(
-    courses.reduce((map, course) => {
-      const seriesId = course.seriesId ?? course.courseMasterId ?? `series-${course.id}`;
-      let existing = map.get(seriesId);
-      const seriesTitle = getCourseSeriesTitle(course);
-      const seriesDescription = getCourseSeriesDescription(course);
-      if (existing) {
-        existing.courses.push(course);
-      } else {
-        existing = {
-          id: seriesId,
-          title: seriesTitle,
-          description: seriesDescription,
-          courses: [course],
-        };
-        map.set(seriesId, existing);
+  const selectedEnrollmentStatusByStudentId = new Map<string, string>();
+  const activeClassChipsByStudentId = new Map<string, ActiveClassChip[]>();
+  enrollments
+    .filter((enrollment) => !["withdrawn", "cancelled", "inactive"].includes(text(enrollment.status)))
+    .forEach((enrollment) => {
+      const currentEnrollmentStatus = text(enrollment.status || "active");
+      if (selectedOfferingId && enrollment.offeringId === selectedOfferingId) {
+        selectedEnrollmentStatusByStudentId.set(enrollment.studentId, currentEnrollmentStatus);
       }
-      return map;
-    }, new Map<string, { id: string; title: string; description: string; courses: typeof courses }>()),
-  ).map(([, group]) => ({
-    ...group,
-    courses: group.courses.sort((a, b) => {
-      const yearCompare = (a.year ?? 0) - (b.year ?? 0);
-      if (yearCompare !== 0) return yearCompare;
-      return (a.termLabel ?? a.title).localeCompare(b.termLabel ?? b.title);
-    }),
-  }));
 
-  const searchedStudents = allStudents.filter((student) => {
-    if (!normalizedQuery) return true;
-    const studentEnrollments = getStudentEnrollments(student, enrollments, courses);
-    const classNames = studentEnrollments.map((enrollment) => {
-      const offering = offeringMap.get(getEnrollmentOfferingId(enrollment));
-      const legacyCourse = enrollment.courseId ? courseMap.get(enrollment.courseId) : undefined;
-      return [
-        offering ? getOfferingPeriodLabel(offering) : "",
-        legacyCourse ? getCourseSeriesTitle(legacyCourse) : "",
-        getEnrollmentSeatLabel(enrollment, student),
-      ].join(" ");
+      const offering = enrollment.offeringId
+        ? offeringById.get(enrollment.offeringId)
+        : undefined;
+      const offeringId = enrollment.offeringId || offering?.id || "";
+      const seriesId =
+        offering?.seriesId ||
+        offering?.courseSeriesId ||
+        offering?.courseMasterId ||
+        selectedSeriesId ||
+        "";
+      const year = String(offering?.year || selectedYear || "");
+      const label =
+        enrollment.classDisplayName ||
+        offering?.classDisplayName ||
+        offering?.displayName ||
+        offering?.displayTitle ||
+        offering?.shortName ||
+        [offering?.title, offering?.year ? `${offering.year}年` : "", offering?.termLabel || (offering?.term ? `第${offering.term}期` : "")]
+          .filter(Boolean)
+          .join("｜") ||
+        "已加入班級";
+      if (!offeringId) return;
+      const chips = activeClassChipsByStudentId.get(enrollment.studentId) ?? [];
+      if (!chips.some((chip) => chip.offeringId === offeringId)) {
+        chips.push({ offeringId, seriesId, year, label });
+      }
+      activeClassChipsByStudentId.set(enrollment.studentId, chips);
     });
 
-    return [
-      student.name,
-      student.examGroup,
-      student.memberId,
-      student.externalMemberNo,
-      student.phone,
-      student.note,
-      student.classId,
-      ...classNames,
-    ]
-      .map(normalizeText)
-      .some((value) => value.includes(normalizedQuery));
+  const qualificationRows = filteredStudents
+    .map((student) => {
+      const record = recordByStudentId.get(student.id);
+      const currentClasses = activeClassChipsByStudentId.get(student.id) ?? [];
+      const selectedEnrollmentStatus = selectedEnrollmentStatusByStudentId.get(student.id);
+      const rowStatus = selectedEnrollmentStatus === "completed" ? "已結訓" : selectedEnrollmentStatus ? "上課中" : "未加入";
+      return {
+        currentClasses,
+        record,
+        student,
+        status: rowStatus,
+      };
+    })
+    .filter((row) => {
+      if (status === "bookable" && !canBook(row.status)) return false;
+      if (status === "blocked" && canBook(row.status)) return false;
+      if (!norm(q)) return true;
+      return (
+        studentMatches(row.student, q) ||
+        [row.currentClasses.map((item) => item.label).join(" "), row.record?.note, row.record?.classDisplayName, row.record?.termLabel]
+          .map(norm)
+          .some((item) => item.includes(norm(q)))
+      );
+    });
+  const editableQualificationRows = qualificationRows.filter(
+    (row): row is (typeof qualificationRows)[number] & { record: StudentCourseRecord } => Boolean(row.record),
+  );
+  const sessionById = new Map(courseSessions.map((item) => [item.id, item]));
+
+  const visibleInstructors = instructors
+    .filter((instructor) => instructor.isActive !== false)
+    .filter((instructor) => instructorMatches(instructor, q))
+    .sort((a, b) => a.name.localeCompare(b.name, "zh-Hant"));
+
+  const historyStudentCandidates = currentMode === "history" && norm(q)
+    ? students
+        .filter((student) => student.isActive !== false)
+        .filter((student) => studentMatches(student, q))
+        .sort(compareStudentsByMemberNo)
+    : [];
+  const selectedHistoryStudent = historyStudentCandidates[0];
+  const selectedHistoryStudentId = selectedHistoryStudent?.id ?? "";
+
+  const selectedHistoryEnrollments = selectedHistoryStudent
+    ? enrollments.filter((enrollment) => enrollment.studentId === selectedHistoryStudentId)
+    : [];
+  const visibleHistoryEnrollments = selectedHistoryEnrollments.filter((enrollment) => {
+    const enrollmentStatus = norm(enrollment.status);
+    return !["withdrawn", "cancelled", "inactive"].includes(enrollmentStatus);
   });
+  const selectedHistoryReservations = selectedHistoryStudent
+    ? reservations.filter((reservation) => reservation.studentId === selectedHistoryStudentId)
+    : [];
+  const selectedHistoryAttendance = selectedHistoryStudent
+    ? attendanceRecords.filter((attendance) => attendance.studentId === selectedHistoryStudentId)
+    : [];
 
-  const statusFilteredStudents = searchedStudents.filter((student) => {
-    if (studentStatus === "all") return true;
-    if (studentStatus === "inactive") return student.isActive === false;
-    return student.isActive !== false;
-  });
+  const historyCourseCards = visibleHistoryEnrollments
+    .map((enrollment) => {
+      const offering = offeringById.get(enrollment.offeringId);
+      const series = enrollment.seriesId ? seriesById.get(enrollment.seriesId) : undefined;
+      const relatedAttendance = selectedHistoryAttendance.filter((attendance) => {
+        if (attendance.offeringId && attendance.offeringId === enrollment.offeringId) return true;
+        const attendanceSeriesId = (attendance as { seriesId?: string }).seriesId;
+        if (attendanceSeriesId && enrollment.seriesId && attendanceSeriesId === enrollment.seriesId) return true;
+        return false;
+      });
+      const attendedCount = relatedAttendance.filter((item) => statusLabel(item.status) === "已出席").length;
+      const totalAttendance = relatedAttendance.length;
+      const latestActivity = [
+        enrollment.updatedAt,
+        enrollment.createdAt,
+        enrollment.joinedAt,
+        ...relatedAttendance.map((item) => item.updatedAt || item.checkedAt || item.createdAt),
+      ]
+        .map(text)
+        .filter(Boolean)
+        .sort((a, b) => b.localeCompare(a))[0];
 
-  const visibleStudents =
-    selectedClassId === "all"
-      ? statusFilteredStudents
-      : statusFilteredStudents.filter(
-          (student) => {
-            const studentEnrollments = getStudentEnrollments(student, enrollments, courses);
-            return studentEnrollments.some((enrollment) => {
-              const offeringId = getEnrollmentOfferingId(enrollment);
-              const offering = offeringMap.get(offeringId);
-              return (
-                offeringId === selectedOffering?.id ||
-                enrollment.courseId === selectedClassId ||
-                offering?.legacyCourseId === selectedClassId
-              );
-            });
-          },
-        );
+      return {
+        id: `history-enrollment-${enrollment.id}`,
+        title:
+          enrollment.classDisplayName ||
+          offering?.displayTitle ||
+          offering?.displayName ||
+          offering?.title ||
+          series?.title ||
+          "課程班級",
+        status: courseListStatusLabel(enrollment.status),
+        attendanceText: totalAttendance > 0 ? `${attendedCount} / ${totalAttendance}` : "尚無點名",
+        latestActivity: latestActivity || "未紀錄",
+        note: text(enrollment.note || enrollment.notes || enrollment.groupLabel),
+      };
+    })
+    .sort((a, b) => text(b.latestActivity).localeCompare(text(a.latestActivity)));
 
-  const selectedSeriesLabel =
-    selectedSeriesId !== "all"
-      ? (seriesMap.get(selectedSeriesId)?.title ?? (selectedCourse ? getCourseSeriesTitle(selectedCourse) : "指定課程主檔"))
-      : "全部課程";
-  const selectedLabel = selectedOffering
-    ? getOfferingPeriodLabel(selectedOffering)
-    : selectedYear !== "all" || selectedTerm !== "all"
-      ? [selectedYear !== "all" ? `${selectedYear}年` : "全部年度", selectedTerm !== "all" ? selectedTerm : "全部期別"].join("｜")
-      : "全部年度期別班級";
-  const selectedColor = selectedCourse
-    ? getCourseColor(selectedCourse.id)
-    : "#059669";
-  const statusLabelMap = {
-    active: "使用中",
-    inactive: "已停用",
-    all: "全部資料",
-  } as const;
-  const resumeHref = visibleStudents[0]
-    ? `/admin/students/${visibleStudents[0].id}`
-    : "/admin/students";
+  const recentHistoryRows = [
+    ...selectedHistoryReservations.map((reservation) => {
+      const session = reservation.sessionId ? sessionById.get(reservation.sessionId) : undefined;
+      const offering = reservation.offeringId ? offeringById.get(reservation.offeringId) : undefined;
+      return {
+        id: `reservation-${reservation.id}`,
+        type: "預約報名",
+        title:
+          session?.title ||
+          session?.unitName ||
+          offering?.displayTitle ||
+          offering?.displayName ||
+          offering?.title ||
+          "預約紀錄",
+        status: statusLabel(reservation.status),
+        occurredAt: dateText(reservation.updatedAt, reservation.createdAt, reservation.bookedAt),
+        note: text(reservation.note || reservation.source),
+      };
+    }),
+    ...selectedHistoryAttendance.map((attendance) => {
+      const session = sessionById.get(attendance.sessionId || attendance.courseSessionId || "");
+      const offering = offeringById.get(attendance.offeringId);
+      return {
+        id: `attendance-${attendance.id}`,
+        type: "點名出席",
+        title:
+          session?.title ||
+          session?.unitName ||
+          offering?.displayTitle ||
+          offering?.displayName ||
+          offering?.title ||
+          "出席紀錄",
+        status: statusLabel(attendance.status),
+        occurredAt: dateText(attendance.updatedAt, attendance.createdAt, attendance.checkedAt),
+        note: text(attendance.note || attendance.source),
+      };
+    }),
+    ...visibleHistoryEnrollments.map((enrollment) => ({
+      id: `enrollment-${enrollment.id}`,
+      type: "課程名單",
+      title:
+        enrollment.classDisplayName ||
+        offeringById.get(enrollment.offeringId)?.displayTitle ||
+        offeringById.get(enrollment.offeringId)?.displayName ||
+        offeringById.get(enrollment.offeringId)?.title ||
+        "班級名單",
+      status: courseListStatusLabel(enrollment.status),
+      occurredAt: dateText(enrollment.updatedAt, enrollment.createdAt, enrollment.joinedAt),
+      note: text(enrollment.note || enrollment.notes || enrollment.groupLabel),
+    })),
+  ]
+    .sort((a, b) => text(b.occurredAt).localeCompare(text(a.occurredAt)))
+    .slice(0, 8);
 
-  function classHref(nextClassId: string) {
-    const params = new URLSearchParams();
-    if (nextClassId !== "all") params.set("classId", nextClassId);
-    if (q.trim()) params.set("q", q.trim());
-    if (studentStatus !== "active") params.set("status", studentStatus);
-    const query = params.toString();
-    return `/admin/students${query ? `?${query}` : ""}`;
-  }
+  const activeStudents = visibleStudents.length;
+  const adminSection =
+    currentMode === "students"
+      ? "roster.students"
+      : currentMode === "eligibility"
+        ? "roster.eligibility"
+        : currentMode === "instructors"
+          ? "roster.instructors"
+          : currentMode === "history"
+            ? "roster.history"
+            : "roster.offering";
 
-  function filterHref(next: { seriesId?: string; year?: string; term?: string }) {
-    const params = new URLSearchParams();
-    if (next.seriesId && next.seriesId !== "all") params.set("seriesId", next.seriesId);
-    if (next.year && next.year !== "all") params.set("year", next.year);
-    if (next.term && next.term !== "all") params.set("term", next.term);
-    if (q.trim()) params.set("q", q.trim());
-    if (studentStatus !== "active") params.set("status", studentStatus);
-    const query = params.toString();
-    return `/admin/students${query ? `?${query}` : ""}`;
-  }
-
-  function statusHref(nextStatus: "active" | "inactive" | "all") {
-    const params = new URLSearchParams();
-    if (selectedSeriesId !== "all") params.set("seriesId", selectedSeriesId);
-    if (selectedYear !== "all") params.set("year", selectedYear);
-    if (selectedTerm !== "all") params.set("term", selectedTerm);
-    if (q.trim()) params.set("q", q.trim());
-    if (nextStatus !== "active") params.set("status", nextStatus);
-    const query = params.toString();
-    return `/admin/students${query ? `?${query}` : ""}`;
-  }
+  const pageMetaMap: Record<
+    string,
+    { eyebrow: string; title: string; description: string }
+  > = {
+    students: {
+      eyebrow: "學員總表",
+      title: "學員查找與基本資料管理",
+      description:
+        "日常以搜尋學員、確認會員編號、手機與身分證末三碼為主；新增與批次匯入只在需要時展開。",
+    },
+    eligibility: {
+      eyebrow: "課程狀態",
+      title: "學員課程狀態管理",
+      description:
+        "查看學員是否具備特定課程主檔的上課資格，例如上課中、已結訓、未加入或未加入。",
+    },
+    offering: {
+      eyebrow: "梯次分配",
+      title: "年度課程與期別名冊",
+      description:
+        "查看學員被分配到哪一個年度課程或期別，作為報名、點名與統計依據。",
+    },
+    instructors: {
+      eyebrow: "講師名冊",
+      title: "講師基本資料管理",
+      description:
+        "管理講師基本資料、專長與可授課資訊；目前先作為行政端名冊，不建立講師登入帳號。",
+    },
+    history: {
+      eyebrow: "學習履歷",
+      title: "學員學習履歷彙整",
+      description:
+        "以學員為中心彙整報名、課程狀態、梯次分配與出席紀錄，方便行政人員快速查詢。",
+    },
+  };
+  const pageMeta = pageMetaMap[currentMode] ?? pageMetaMap.students;
 
   return (
-    <AdminShell resumeHref={resumeHref} resumeLabel="學習履歷">
-      <section className="mb-6">
-        <p className="text-sm font-medium text-emerald-700">名冊管理</p>
-        <h1 className="mt-2 text-3xl font-semibold text-zinc-950">
-          依課程主檔與年度期別班級管理學員名冊
+    <AdminShell
+      currentSection={adminSection}
+      resumeHref="/admin/students?mode=history"
+      resumeLabel="學習履歷"
+    >
+      <section className="rounded-[2rem] border border-[#ead7c6] bg-white/85 p-6 shadow-sm">
+        <p className="text-sm font-semibold text-[#a65f3b]">
+          {pageMeta.eyebrow}
+        </p>
+        <h1 className="mt-2 text-3xl font-black tracking-tight text-zinc-950">
+          {pageMeta.title}
         </h1>
-        <p className="mt-2 max-w-4xl text-sm leading-6 text-zinc-600">
-          以「學員」為中心管理名冊；先選課程主檔，再選年度、期別找到名單，最後點學員姓名或「履歷」查看完整學習紀錄。
-          學員主檔建議以「學員編號」識別；座號屬於某一個年度期別班級，不是學員主檔欄位，避免不同班級重複座號造成排序誤判。115-1、115-2 只是年度期別簡稱，不是課程主檔名稱。停用只代表封存，不刪除資料，仍可透過「已停用
-          / 全部資料」撈回查詢。
+        <p className="mt-3 max-w-5xl text-sm leading-7 text-zinc-600">
+          {pageMeta.description}
         </p>
       </section>
 
       {saved ? (
-        <p className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-          已更新名冊。
+        <p className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-bold text-emerald-800">
+          已更新資料{imported ? `，本次處理 ${imported} 筆` : ""}
+          {linked ? `，建立 / 更新 ${linked} 筆課程狀態` : ""}
+          {enrolled ? `，加入 ${enrolled} 筆班級名單` : ""}
+          {skipped ? `，略過 ${skipped} 筆疑似錯位或資料不足的資料` : ""}。
         </p>
       ) : null}
       {error ? (
-        <p className="mb-4 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-          請填寫課程主檔、年度期別班級、姓名與座號。
+        <p className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-3 text-sm font-bold text-rose-800">
+          資料不足，請確認必填欄位、課程目錄、年度與勾選學員。
         </p>
       ) : null}
 
-      <details className="mb-5 rounded-2xl border-2 border-dashed border-emerald-300 bg-emerald-50/50 open:border-emerald-500 open:bg-white open:shadow-sm">
-        <summary className="cursor-pointer list-none px-5 py-5 transition hover:bg-emerald-50">
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+      {currentMode === "students" ? (
+        <section className="mt-5 rounded-[1.75rem] border border-[#ead7c6] bg-white p-5 shadow-sm">
+          <div className="grid gap-4 xl:grid-cols-[1fr_auto] xl:items-center">
             <div>
-              <p className="text-xs font-semibold text-emerald-700">快速新增</p>
-              <h2 className="mt-1 text-xl font-semibold text-zinc-950">
-                新增學員到年度期別班級名冊
-              </h2>
-              <p className="mt-1 text-sm text-zinc-600">
-                這是一個可點擊展開的區塊；需要手動補名冊時再展開新增。
-              </p>
-            </div>
-            <span className="inline-flex items-center justify-center rounded-full bg-emerald-700 px-4 py-2 text-sm font-semibold text-white shadow-sm">
-              ＋ 展開新增表單
-            </span>
-          </div>
-        </summary>
-        <div className="border-t border-zinc-200 p-5">
-          <p className="mb-4 text-sm text-zinc-500">
-            新增學員要先指定所屬課程 /
-            年度期別。下方「期別 / 補充」可保留現場補充資訊。
-          </p>
-          <form
-            action={saveStudentAction}
-            className="grid gap-3 md:grid-cols-[1.35fr_1fr_100px_130px_1fr_120px] md:items-end"
-          >
-            <label>
-              <span className="mb-2 block text-sm font-medium text-zinc-700">
-                所屬年度期別班級
-              </span>
-              <select
-                name="classId"
-                defaultValue={effectiveClassForNew}
-                className="w-full rounded-md border border-zinc-300 px-3 py-3"
-              >
-                {courses.map((course) => (
-                  <option key={course.id} value={course.id}>
-                    {course.title}｜{getCoursePeriodLabel(course)}
-                  </option>
+              <p className="text-sm font-semibold text-[#a65f3b]">管理流程</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {MODES.map(([key, label, description]) => (
+                  <Link
+                    key={key}
+                    href={buildHref({
+                      mode: key,
+                      seriesId:
+                        key === "students" ? undefined : selectedSeriesId,
+                      year: key === "students" ? undefined : selectedYear,
+                      status,
+                      q,
+                    })}
+                    className={`rounded-full border px-4 py-2 text-sm font-bold ${currentMode === key ? "border-[#ef6c00] bg-[#ef6c00] text-white" : "border-[#e8d4c2] bg-white text-[#6b3b25]"}`}
+                    title={description}
+                  >
+                    {label}
+                  </Link>
                 ))}
-              </select>
-            </label>
-            <label>
-              <span className="mb-2 block text-sm font-medium text-zinc-700">
-                姓名
-              </span>
-              <input
-                name="name"
-                className="w-full rounded-md border border-zinc-300 px-3 py-3"
-              />
-            </label>
-            <label>
-              <span className="mb-2 block text-sm font-medium text-zinc-700">
-                座號
-              </span>
-              <input
-                name="seatNumber"
-                type="number"
-                className="w-full rounded-md border border-zinc-300 px-3 py-3"
-              />
-            </label>
-            <label>
-              <span className="mb-2 block text-sm font-medium text-zinc-700">
-                期別 / 補充
-              </span>
-              <input
-                name="examGroup"
-                className="w-full rounded-md border border-zinc-300 px-3 py-3"
-              />
-            </label>
-            <label>
-              <span className="mb-2 block text-sm font-medium text-zinc-700">
-                備註
-              </span>
-              <input
-                name="note"
-                className="w-full rounded-md border border-zinc-300 px-3 py-3"
-              />
-            </label>
-            <button className="rounded-md bg-zinc-900 px-4 py-3 text-sm font-semibold text-white">
-              新增
-            </button>
-          </form>
-        </div>
-      </details>
+              </div>
+            </div>
 
-      <section className="mb-6 rounded-xl border border-zinc-200 bg-white p-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-zinc-950">搜尋學員</h2>
-            <p className="mt-1 text-sm text-zinc-500">
-              目前篩選：{selectedLabel}
-            </p>
+            <div className="flex flex-wrap gap-2 text-xs font-bold xl:justify-end">
+              <span className="rounded-full border border-[#ead7c6] bg-[#fffaf5] px-3 py-2 text-[#6b3b25]">
+                啟用 {activeStudents} 筆
+              </span>
+              <span className="rounded-full border border-[#ead7c6] bg-white px-3 py-2 text-zinc-600">
+                停用 / 歷史 {inactiveStudents.length} 筆
+              </span>
+              <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-2 text-amber-700">
+                疑似錯位 {suspectedMisalignedStudents.length} 筆
+              </span>
+            </div>
           </div>
-          <form className="grid gap-2 sm:grid-cols-[1fr_auto] lg:w-[560px]">
-            {selectedSeriesId !== "all" ? <input type="hidden" name="seriesId" value={selectedSeriesId} /> : null}
-            {selectedYear !== "all" ? <input type="hidden" name="year" value={selectedYear} /> : null}
-            {selectedTerm !== "all" ? <input type="hidden" name="term" value={selectedTerm} /> : null}
-            {studentStatus !== "active" ? (
-              <input type="hidden" name="status" value={studentStatus} />
-            ) : null}
+
+          <form className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
+            <input type="hidden" name="mode" value="students" />
             <input
               name="q"
               defaultValue={q}
-              className="rounded-md border border-zinc-300 px-3 py-3"
-              placeholder="跨課程主檔與年度期別班級搜尋姓名、手機、學員編號、年度、期別、備註"
+              placeholder="搜尋姓名、末三碼、手機、會員編號、備註"
+              className="h-12 rounded-2xl border border-[#ead7c6] bg-white px-4 text-sm text-[#4a2a1a] shadow-sm outline-none transition placeholder:text-zinc-400 focus:border-[#ef6c00] focus:ring-2 focus:ring-[#f7c58d]/40"
             />
-            <button className="rounded-md bg-zinc-900 px-4 py-3 text-sm font-semibold text-white">
+            <button className="rounded-2xl bg-[#6b3b25] px-5 py-3 text-sm font-bold text-white">
               搜尋
             </button>
           </form>
-        </div>
-        <div className="mt-4 grid gap-3 rounded-xl border border-emerald-100 bg-emerald-50/50 p-4 lg:grid-cols-3">
-          <label className="grid gap-2 text-sm font-medium text-zinc-700">
-            課程主檔
-            <select
-              defaultValue={selectedSeriesId}
-              className="rounded-md border border-zinc-300 bg-white px-3 py-3"
-            >
-              <option value="all">全部課程主檔</option>
-              {courseSeries.map((series) => (
-                <option key={series.id} value={series.id}>
-                  {series.title}
-                </option>
-              ))}
-            </select>
-            <span className="text-xs font-normal text-zinc-500">
-              用下方快速按鈕切換，避免後台表單送出打斷工作。
-            </span>
-          </label>
-          <label className="grid gap-2 text-sm font-medium text-zinc-700">
-            年度
-            <select defaultValue={selectedYear} className="rounded-md border border-zinc-300 bg-white px-3 py-3">
-              <option value="all">全部年度</option>
-              {years.map((item) => (
-                <option key={item} value={item}>
-                  {item}年
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="grid gap-2 text-sm font-medium text-zinc-700">
-            期別
-            <select defaultValue={selectedTerm} className="rounded-md border border-zinc-300 bg-white px-3 py-3">
-              <option value="all">全部期別</option>
-              {termsForSelectedYear.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="flex flex-wrap gap-2 lg:col-span-3">
-            <Link href={filterHref({ seriesId: "all", year: "all", term: "all" })} className="rounded-full border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50">
-              全部
-            </Link>
-            {courseSeries.map((series) => (
-              <Link key={series.id} href={filterHref({ seriesId: series.id, year: selectedYear, term: selectedTerm })} className={`rounded-full border px-3 py-2 text-sm font-medium ${selectedSeriesId === series.id ? "border-emerald-700 bg-emerald-700 text-white" : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50"}`}>
-                {series.title}
-              </Link>
-            ))}
-            {years.map((item) => (
-              <Link key={item} href={filterHref({ seriesId: selectedSeriesId, year: item, term: "all" })} className={`rounded-full border px-3 py-2 text-sm font-medium ${selectedYear === item ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50"}`}>
-                {item}年
-              </Link>
-            ))}
-            {termsForSelectedYear.map((item) => (
-              <Link key={item} href={filterHref({ seriesId: selectedSeriesId, year: selectedYear, term: item })} className={`rounded-full border px-3 py-2 text-sm font-medium ${selectedTerm === item ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50"}`}>
-                {item}
-              </Link>
-            ))}
+        </section>
+      ) : null}
+
+      {currentMode !== "students" ? (
+        <section className="mt-6 rounded-[1.75rem] border border-[#ead7c6] bg-white p-5 shadow-sm">
+          <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
+            <div>
+              <p className="text-sm font-semibold text-[#a65f3b]">管理流程</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {MODES.map(([key, label, description]) => (
+                  <Link
+                    key={key}
+                    href={buildHref({
+                      mode: key,
+                      seriesId:
+                        key === "students" ? undefined : selectedSeriesId,
+                      year: key === "students" ? undefined : selectedYear,
+                      status,
+                      q,
+                    })}
+                    className={`rounded-full border px-4 py-2 text-sm font-bold ${currentMode === key ? "border-[#ef6c00] bg-[#ef6c00] text-white" : "border-[#e8d4c2] bg-white text-[#6b3b25]"}`}
+                    title={description}
+                  >
+                    {label}
+                  </Link>
+                ))}
+              </div>
+            </div>
+
+            <form className="grid gap-3 md:grid-cols-[1fr_auto] lg:w-[420px]">
+              <input
+                type="hidden"
+                name="mode"
+                value={currentMode || "students"}
+              />
+              <input
+                type="hidden"
+                name="seriesId"
+                value={selectedSeriesId || ""}
+              />
+              <input type="hidden" name="year" value={selectedYear || ""} />
+              <input
+                name="q"
+                defaultValue={q}
+                placeholder="搜尋姓名、末三碼、手機、備註"
+                className="h-12 rounded-2xl border border-[#ead7c6] bg-white px-4 text-sm text-[#4a2a1a] shadow-sm outline-none transition placeholder:text-zinc-400 focus:border-[#ef6c00] focus:ring-2 focus:ring-[#f7c58d]/40"
+              />
+              <button className="rounded-2xl bg-[#6b3b25] px-5 py-3 text-sm font-bold text-white">
+                搜尋
+              </button>
+            </form>
           </div>
-        </div>
-        <div className="mt-4 grid gap-4">
-          <Link
-            href={classHref("all")}
-            className={`rounded-xl border px-4 py-3 text-sm font-medium ${
-              selectedClassId === "all"
-                ? "border-emerald-700 bg-emerald-700 text-white"
-                : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50"
-            }`}
-          >
-            全部課程主檔 / 全部年度期別班級
-          </Link>
+        </section>
+      ) : null}
 
-          {courseFilterGroups.map((group) => (
-            <section
-              key={group.id}
-              className="rounded-2xl border border-zinc-200 bg-zinc-50 p-3"
+      {currentMode === "students" ? (
+        <>
+          <section className="mt-6 grid gap-5 lg:grid-cols-2">
+            <details
+              id="student-import"
+              className="rounded-[1.75rem] border border-[#ead7c6] bg-white p-5 shadow-sm"
             >
-              <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-emerald-700">
-                    課程
-                  </p>
-                  <h3 className="text-base font-semibold text-zinc-950">
-                    {group.title}
-                  </h3>
-                  <p className="text-xs text-zinc-500">
-                    {group.courses.length} 個年度期別班級，點選後下方名冊會同步切換。
-                  </p>
-                </div>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {group.courses.map((course) => {
-                  const courseColor = getCourseColor(course.id);
-                  const isSelected = selectedClassId === course.id;
-                  const offering = getOfferingForCourse(course, courseOfferings);
-                  const classStudentCount = enrollments.filter(
-                    (enrollment) =>
-                      getEnrollmentOfferingId(enrollment) === offering.id &&
-                      enrollment.status !== "withdrawn",
-                  ).length;
-                  return (
-                    <Link
-                      key={course.id}
-                      href={classHref(course.id)}
-                      className={`rounded-xl border bg-white px-4 py-3 text-sm font-medium transition ${
-                        isSelected
-                          ? "border-zinc-900 bg-zinc-900 text-white ring-2 ring-zinc-900/20"
-                          : "border-zinc-300 text-zinc-700 hover:bg-zinc-50"
-                      }`}
-                      style={{ borderTop: `4px solid ${courseColor}` }}
-                    >
-                      <span className="flex items-center gap-2">
-                        <span
-                          className="h-2.5 w-2.5 rounded-full"
-                          style={{ backgroundColor: courseColor }}
-                          aria-hidden="true"
-                        />
-                        <span className="block">{getCourseSeriesTitle(course)}</span>
-                      </span>
-                      <span className="mt-1 block text-xs opacity-75">
-                        {getOfferingPeriodLabel(offering)}｜{classStudentCount}{" "}
-                        位學員
-                      </span>
-                    </Link>
-                  );
-                })}
-              </div>
-            </section>
-          ))}
-        </div>
-
-        <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-4">
-          <span className="mr-1 text-sm font-medium text-zinc-600">
-            資料狀態
-          </span>
-          {(
-            [
-              ["active", `使用中 ${activeStudents.length}`],
-              ["inactive", `已停用 ${inactiveStudents.length}`],
-              ["all", `全部 ${allStudents.length}`],
-            ] as const
-          ).map(([nextStatus, label]) => (
-            <Link
-              key={nextStatus}
-              href={statusHref(nextStatus)}
-              className={`rounded-full border px-3 py-2 text-sm font-medium ${
-                studentStatus === nextStatus
-                  ? "border-zinc-900 bg-zinc-900 text-white"
-                  : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50"
-              }`}
-            >
-              {label}
-            </Link>
-          ))}
-          <span className="text-xs text-zinc-500">
-            停用＝封存，不會從資料中刪除。
-          </span>
-        </div>
-      </section>
-
-      <section
-        className="mb-4 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm"
-        style={{ borderLeft: `6px solid ${selectedColor}` }}
-      >
-        <p className="text-xs font-semibold text-emerald-700">目前名冊篩選</p>
-        <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="text-sm font-medium text-zinc-500">
-              課程：{selectedSeriesLabel}
-            </p>
-            <h2 className="mt-1 text-xl font-semibold text-zinc-950">
-              年度 / 期別：{selectedLabel}
-            </h2>
-            <p className="mt-1 text-sm text-zinc-500">
-              下方名冊列表目前顯示「{selectedSeriesLabel}｜{selectedLabel}」＋「{statusLabelMap[studentStatus]}」的資料，共{" "}
-              {visibleStudents.length} 位。
-            </p>
-          </div>
-          <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-600">
-            點上方年度期別班級卡片會同步更新這裡與下方名單
-          </span>
-        </div>
-      </section>
-
-      <section className="grid gap-3 md:hidden">
-        {visibleStudents.map((student) => {
-          const enrollment = getStudentEnrollments(student, enrollments, courses).find((item) => {
-            const offeringId = getEnrollmentOfferingId(item);
-            const offering = offeringMap.get(offeringId);
-            return selectedClassId === "all" || offeringId === selectedOffering?.id || item.courseId === selectedClassId || offering?.legacyCourseId === selectedClassId;
-          }) ?? getStudentEnrollments(student, enrollments, courses)[0];
-          const offering = enrollment ? offeringMap.get(getEnrollmentOfferingId(enrollment)) : undefined;
-          const course = offering?.legacyCourseId ? courseMap.get(offering.legacyCourseId) : courseMap.get(student.classId ?? "");
-          const status = getStudentClassStatus(student);
-          const registryNo = getStudentRegistryNumber(student);
-          const isInactive = student.isActive === false;
-          return (
-            <article
-              key={student.id}
-              className={`rounded-xl border border-zinc-200 bg-white p-4 ${isInactive ? "opacity-75" : ""}`}
-              style={{
-                borderTop: `4px solid ${getCourseColor(student.classId)}`,
-              }}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold text-zinc-500">
-                    學員編號｜{registryNo}
-                  </p>
-                  <h2 className="mt-1 text-lg font-semibold text-zinc-950">
-                    {student.name}
-                  </h2>
-                  <p className="mt-1 text-xs text-zinc-500">
-                    課程主檔：{getCourseSeriesTitle(course)}｜年度期別：
-                    {getOfferingPeriodLabel(offering)}
-                  </p>
-                  <p className="mt-1 text-sm text-zinc-500">
-                    座號 {getEnrollmentSeatLabel(enrollment, student) || "未設定"}｜名冊分組{" "}
-                    {student.examGroup || "未填"}
-                  </p>
-                  <p className="mt-1 text-xs text-zinc-500">
-                    來源：{offering?.sourceSheet ?? student.sourceSheet ?? "未標示"}
-                  </p>
-                </div>
-                <span
-                  className={`rounded-full border px-2 py-1 text-xs font-medium ${status.className}`}
-                >
-                  {status.label}
-                </span>
-              </div>
-
-              <div className="mt-4 grid gap-2 rounded-lg bg-zinc-50 p-3 text-sm text-zinc-700">
-                <p>
-                  <span className="text-zinc-500">資料來源：</span>
-                  {student.source || "未標示"}
+              <summary className="cursor-pointer list-none">
+                <p className="text-sm font-semibold text-[#a65f3b]">
+                  批次匯入名冊
                 </p>
-                {student.phone ? (
-                  <p>
-                    <span className="text-zinc-500">電話：</span>
-                    {student.phone}
-                  </p>
-                ) : null}
-                {student.note ? (
-                  <p>
-                    <span className="text-zinc-500">備註：</span>
-                    {student.note}
-                  </p>
-                ) : null}
-              </div>
+                <h2 className="mt-1 text-xl font-black text-zinc-950">
+                  依匯入目的建立學員資料
+                </h2>
+                <p className="mt-1 text-sm leading-6 text-zinc-500">
+                  先選這份名單的用途，再貼上 Excel
+                  內容；一般情況只要展開其中一種匯入方式即可。
+                </p>
+              </summary>
 
-              <div className="mt-4 flex flex-wrap gap-2">
-                <Link
-                  href={`/admin/students/${student.id}`}
-                  className="w-full rounded-md bg-zinc-900 px-3 py-2 text-center text-sm font-semibold text-white hover:bg-zinc-700"
-                >
-                  查看履歷
-                </Link>
-                <details className="w-full rounded-lg border border-zinc-200 bg-white open:border-sky-300 open:bg-sky-50/40">
-                  <summary className="cursor-pointer px-3 py-2 text-center text-sm font-medium hover:bg-zinc-50">
-                    編輯學員資料
+              <div className="mt-5 grid gap-4 border-t border-[#ead7c6] pt-5">
+                <div className="rounded-2xl border border-[#f0dfcf] bg-[#fffaf5] p-4">
+                  <p className="text-sm font-bold text-[#6b3b25]">
+                    選擇匯入目的
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-zinc-500">
+                    不要一次設定全部欄位。只建立名冊、建立課程狀態、加入指定班級，三種情境分開操作比較不容易匯錯。
+                  </p>
+                </div>
+
+                <details className="rounded-2xl border border-[#ead7c6] bg-white p-4">
+                  <summary className="cursor-pointer list-none">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-sm font-black text-zinc-900">
+                          1. 只建立學員資料
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-zinc-500">
+                          適合一般會員名冊，只會建立或更新學員基本資料，不建立課程狀態或班級名單。
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-[#fff7ed] px-3 py-1 text-xs font-bold text-[#a65f3b]">
+                        最單純
+                      </span>
+                    </div>
                   </summary>
                   <form
-                    action={saveStudentAction}
-                    className="grid gap-3 border-t border-zinc-200 p-4"
+                    action={bulkImportStudentIdentitiesAction}
+                    className="mt-4 grid gap-3 border-t border-[#f0dfcf] pt-4"
                   >
-                    <input type="hidden" name="id" value={student.id} />
-                    <label className="grid gap-2 text-sm font-medium text-zinc-700">
-                      所屬年度期別班級
-                      <select
-                        name="classId"
-                        defaultValue={student.classId ?? effectiveClassForNew}
-                        className="rounded-md border border-zinc-300 px-3 py-3"
-                      >
-                        {courses.map((course) => (
-                          <option key={course.id} value={course.id}>
-                            {course.title}｜{getCoursePeriodLabel(course)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="grid gap-2 text-sm font-medium text-zinc-700">
-                      姓名
-                      <input
-                        name="name"
-                        defaultValue={student.name}
-                        className="rounded-md border border-zinc-300 px-3 py-3"
+                    <input
+                      type="hidden"
+                      name="importMode"
+                      value="studentsOnly"
+                    />
+                    <label className="grid gap-2 text-sm font-bold text-zinc-700">
+                      步驟 2｜貼上學員名冊
+                      <textarea
+                        name="rosterText"
+                        rows={8}
+                        placeholder={baseTemplateText()}
+                        className="w-full rounded-2xl border border-[#e8d4c2] bg-white px-4 py-3 text-sm leading-6 outline-none focus:border-[#ef6c00]"
                       />
                     </label>
-                    <label className="grid gap-2 text-sm font-medium text-zinc-700">
-                      座號
-                      <input
-                        name="seatNumber"
-                        type="number"
-                        defaultValue={student.seatNumber}
-                        className="rounded-md border border-zinc-300 px-3 py-3"
-                      />
-                    </label>
-                    <label className="grid gap-2 text-sm font-medium text-zinc-700">
-                      期別 / 補充
-                      <input
-                        name="examGroup"
-                        defaultValue={student.examGroup}
-                        className="rounded-md border border-zinc-300 px-3 py-3"
-                      />
-                    </label>
-                    <label className="grid gap-2 text-sm font-medium text-zinc-700">
-                      備註
-                      <input
-                        name="note"
-                        defaultValue={student.note ?? ""}
-                        className="rounded-md border border-zinc-300 px-3 py-3"
-                      />
-                    </label>
-                    <button className="rounded-md bg-zinc-900 px-4 py-3 text-sm font-semibold text-white">
-                      儲存編輯
+                    <button className="rounded-2xl bg-gradient-to-r from-[#ef6c00] to-[#b46f4a] px-5 py-3 text-sm font-bold text-white">
+                      匯入學員基本資料
                     </button>
                   </form>
                 </details>
-                {isInactive ? (
-                  <span className="w-full rounded-md border border-zinc-300 bg-zinc-50 px-3 py-2 text-center text-sm text-zinc-500">
-                    已停用，資料仍可查詢
-                  </span>
-                ) : (
-                  <form action={disableStudentAction} className="w-full">
-                    <input type="hidden" name="id" value={student.id} />
+
+                <details className="rounded-2xl border border-[#ead7c6] bg-white p-4">
+                  <summary className="cursor-pointer list-none">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-sm font-black text-zinc-900">
+                          2. 建立學員資料＋課程狀態
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-zinc-500">
+                          適合「上課中、已結訓、未加入」這類資格名單，不會加入特定班級。
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-[#fff7ed] px-3 py-1 text-xs font-bold text-[#a65f3b]">
+                        資格名單
+                      </span>
+                    </div>
+                  </summary>
+                  <form
+                    action={bulkImportStudentIdentitiesAction}
+                    className="mt-4 grid gap-4 border-t border-[#f0dfcf] pt-4"
+                  >
                     <input
                       type="hidden"
-                      name="classId"
-                      value={student.classId ?? effectiveClassForNew}
+                      name="importMode"
+                      value="withEligibility"
                     />
-                    <button className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm hover:bg-zinc-50">
+                    <div className="grid gap-3 md:grid-cols-[1fr_140px_180px]">
+                      <label className="grid gap-2 text-sm font-bold text-zinc-700">
+                        步驟 2｜選課程主檔
+                        <select
+                          name="seriesId"
+                          defaultValue={
+                            selectedSeriesId === "all" ? "" : selectedSeriesId
+                          }
+                          className="rounded-2xl border border-[#e8d4c2] bg-white px-4 py-3 text-sm outline-none focus:border-[#ef6c00]"
+                        >
+                          <option value="">請選擇課程主檔</option>
+                          {courseOptions.map((option) => (
+                            <option key={option.id} value={option.id}>
+                              {option.title}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="grid gap-2 text-sm font-bold text-zinc-700">
+                        年度
+                        <input
+                          name="year"
+                          defaultValue={selectedYear}
+                          className="rounded-2xl border border-[#e8d4c2] bg-white px-4 py-3 text-sm outline-none focus:border-[#ef6c00]"
+                        />
+                      </label>
+                      <label className="grid gap-2 text-sm font-bold text-zinc-700">
+                        課程狀態
+                        <select
+                          name="eligibilityStatus"
+                          defaultValue="上課中"
+                          className="rounded-2xl border border-[#e8d4c2] bg-white px-4 py-3 text-sm outline-none focus:border-[#ef6c00]"
+                        >
+                          {IMPORT_ELIGIBILITY_STATUSES.map((item) => (
+                            <option key={item} value={item}>
+                              {item}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    <label className="grid gap-2 text-sm font-bold text-zinc-700">
+                      匯入備註
+                      <input
+                        name="note"
+                        placeholder="例如：115年度美容丙級上課中名單"
+                        className="rounded-2xl border border-[#e8d4c2] bg-white px-4 py-3 text-sm outline-none focus:border-[#ef6c00]"
+                      />
+                    </label>
+                    <label className="grid gap-2 text-sm font-bold text-zinc-700">
+                      步驟 3｜貼上學員名冊
+                      <textarea
+                        name="rosterText"
+                        rows={8}
+                        placeholder={baseTemplateText()}
+                        className="w-full rounded-2xl border border-[#e8d4c2] bg-white px-4 py-3 text-sm leading-6 outline-none focus:border-[#ef6c00]"
+                      />
+                    </label>
+                    <button className="rounded-2xl bg-gradient-to-r from-[#ef6c00] to-[#b46f4a] px-5 py-3 text-sm font-bold text-white">
+                      匯入並建立課程狀態
+                    </button>
+                  </form>
+                </details>
+
+                <details className="rounded-2xl border border-[#ead7c6] bg-white p-4">
+                  <summary className="cursor-pointer list-none">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-sm font-black text-zinc-900">
+                          3. 建立學員資料＋加入指定班級
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-zinc-500">
+                          適合 115-1、115-2
+                          這類正式班級名單；系統會由班級自動帶出課程主檔與年度。
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-[#fff7ed] px-3 py-1 text-xs font-bold text-[#a65f3b]">
+                        班級名單
+                      </span>
+                    </div>
+                  </summary>
+                  <form
+                    action={bulkImportStudentIdentitiesAction}
+                    className="mt-4 grid gap-4 border-t border-[#f0dfcf] pt-4"
+                  >
+                    <input
+                      type="hidden"
+                      name="importMode"
+                      value="withEnrollment"
+                    />
+                    <input
+                      type="hidden"
+                      name="eligibilityStatus"
+                      value="上課中"
+                    />
+                    <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+                      <label className="grid gap-2 text-sm font-bold text-zinc-700">
+                        步驟 2｜選年度課程 / 班級
+                        <select
+                          name="targetOfferingId"
+                          defaultValue=""
+                          className="rounded-2xl border border-[#e8d4c2] bg-white px-4 py-3 text-sm outline-none focus:border-[#ef6c00]"
+                        >
+                          <option value="">請選擇要加入的班級</option>
+                          {courseOfferings.map((offering) => (
+                            <option key={offering.id} value={offering.id}>
+                              {offering.displayTitle ??
+                                offering.displayName ??
+                                offering.title ??
+                                offering.id}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700">
+                        課程狀態：上課中
+                      </div>
+                    </div>
+                    <label className="grid gap-2 text-sm font-bold text-zinc-700">
+                      匯入備註
+                      <input
+                        name="note"
+                        placeholder="例如：115年第2期班級名單匯入"
+                        className="rounded-2xl border border-[#e8d4c2] bg-white px-4 py-3 text-sm outline-none focus:border-[#ef6c00]"
+                      />
+                    </label>
+                    <label className="grid gap-2 text-sm font-bold text-zinc-700">
+                      步驟 3｜貼上學員名冊
+                      <textarea
+                        name="rosterText"
+                        rows={8}
+                        placeholder={baseTemplateText()}
+                        className="w-full rounded-2xl border border-[#e8d4c2] bg-white px-4 py-3 text-sm leading-6 outline-none focus:border-[#ef6c00]"
+                      />
+                    </label>
+                    <button className="rounded-2xl bg-gradient-to-r from-[#ef6c00] to-[#b46f4a] px-5 py-3 text-sm font-bold text-white">
+                      匯入並加入指定班級
+                    </button>
+                  </form>
+                </details>
+              </div>
+            </details>
+
+            <details className="rounded-[1.75rem] border border-[#ead7c6] bg-white p-5 shadow-sm">
+              <summary className="cursor-pointer list-none">
+                <p className="text-sm font-semibold text-[#a65f3b]">單一新增</p>
+                <h2 className="mt-1 text-xl font-black text-zinc-950">
+                  新增單一學員基本資料
+                </h2>
+                <p className="mt-1 text-sm text-zinc-500">
+                  建立後再到「課程狀態」頁勾選加入課程。
+                </p>
+              </summary>
+              <form
+                action={saveStudentIdentityAction}
+                className="mt-5 grid gap-3 border-t border-[#ead7c6] pt-5"
+              >
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="grid gap-2 text-sm font-bold text-zinc-700">
+                    姓名
+                    <input
+                      name="name"
+                      className="rounded-2xl border border-[#e8d4c2] px-4 py-3 outline-none focus:border-[#ef6c00]"
+                    />
+                  </label>
+                  <label className="grid gap-2 text-sm font-bold text-zinc-700">
+                    身分證後三碼
+                    <input
+                      name="idNumberLast3"
+                      maxLength={3}
+                      className="rounded-2xl border border-[#e8d4c2] px-4 py-3 outline-none focus:border-[#ef6c00]"
+                    />
+                  </label>
+                  <label className="grid gap-2 text-sm font-bold text-zinc-700">
+                    手機
+                    <input
+                      name="phone"
+                      className="rounded-2xl border border-[#e8d4c2] px-4 py-3 outline-none focus:border-[#ef6c00]"
+                    />
+                  </label>
+                  <label className="grid gap-2 text-sm font-bold text-zinc-700">
+                    生日
+                    <input
+                      name="birthday"
+                      placeholder="YYYY/MM/DD"
+                      className="rounded-2xl border border-[#e8d4c2] px-4 py-3 outline-none focus:border-[#ef6c00]"
+                    />
+                  </label>
+                  <label className="grid gap-2 text-sm font-bold text-zinc-700">
+                    會員編號
+                    <input
+                      name="memberNo"
+                      className="rounded-2xl border border-[#e8d4c2] px-4 py-3 outline-none focus:border-[#ef6c00]"
+                    />
+                  </label>
+                </div>
+                <label className="grid gap-2 text-sm font-bold text-zinc-700">
+                  備註
+                  <input
+                    name="note"
+                    className="rounded-2xl border border-[#e8d4c2] px-4 py-3 outline-none focus:border-[#ef6c00]"
+                  />
+                </label>
+                <button className="rounded-2xl bg-[#6b3b25] px-5 py-3 text-sm font-bold text-white">
+                  建立學員
+                </button>
+              </form>
+            </details>
+          </section>
+
+          <section
+            id="student-list"
+            className="mt-6 rounded-[1.75rem] border border-[#ead7c6] bg-white shadow-sm"
+          >
+            <div className="border-b border-[#ead7c6] p-5">
+              <p className="text-sm font-semibold text-[#a65f3b]">學員總表</p>
+              <h2 className="mt-1 text-2xl font-black text-zinc-950">
+                所有學員基本資料
+              </h2>
+              <p className="mt-1 text-sm text-zinc-500">
+                這裡只管理姓名、末三碼、手機、生日與會員編號；要加入課程請切到「課程狀態」。
+              </p>
+            </div>
+            <div className="grid gap-4 border-b border-[#ead7c6] bg-[#fffaf5] p-5 xl:grid-cols-[1fr_auto] xl:items-end">
+              <div>
+                <p className="text-sm font-bold text-[#6b3b25]">狀態篩選</p>
+                <p className="mt-1 text-xs text-zinc-500">
+                  學員總表只保留查找與狀態管理；課程狀態、梯次分配與履歷請到對應頁籤處理。
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2 xl:justify-end">
+                {STUDENT_STATUS_FILTERS.map(([key, label]) => (
+                  <Link
+                    key={key}
+                    href={buildHref({ mode: "students", q, status: key })}
+                    className={`rounded-full border px-4 py-2 text-xs font-bold ${status === key ? "border-[#ef6c00] bg-[#ef6c00] text-white" : "border-[#ead7c6] bg-white text-[#6b3b25]"}`}
+                  >
+                    {label}
+                  </Link>
+                ))}
+              </div>
+            </div>
+
+            <div className="hidden grid-cols-[1.15fr_130px_100px_150px_150px_1fr_90px_96px] border-b border-[#ead7c6] bg-[#fff7ed] px-5 py-3 text-sm font-bold text-[#6b3b25] md:grid">
+              <span>學員</span>
+              <span>狀態</span>
+              <span>末三碼</span>
+              <span>手機</span>
+              <span>會員編號</span>
+              <span>備註</span>
+              <span>履歷</span>
+              <span>刪除</span>
+            </div>
+            <div className="divide-y divide-[#f0dfcf]">
+              {studentListRows.map((student) => {
+                const rosterStatus = getRosterStatus(student);
+                return (
+                  <div
+                    key={student.id}
+                    className="grid gap-3 px-5 py-4 transition hover:bg-[#fffaf5] md:grid-cols-[1.15fr_130px_100px_150px_150px_1fr_90px_96px] md:items-center"
+                  >
+                    <div>
+                      <p className="font-black text-zinc-950">{student.name}</p>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        生日：{text(student.birthday) || "未填"}｜來源：
+                        {student.source || "學員總表"}
+                      </p>
+                    </div>
+                    <div className="relative">
+                      <details className="group inline-block">
+                        <summary
+                          className={`inline-flex cursor-pointer list-none rounded-full border px-3 py-1 text-xs font-bold ${rosterStatus.className}`}
+                        >
+                          {rosterStatus.label} ▾
+                        </summary>
+                        <div className="absolute z-20 mt-2 w-28 rounded-2xl border border-[#ead7c6] bg-white p-2 shadow-lg">
+                          {[
+                            ["active", "啟用"],
+                            ["review", "待確認"],
+                            ["inactive", "停用"],
+                          ].map(([statusValue, statusLabel]) => (
+                            <form
+                              key={statusValue}
+                              action={updateStudentIdentityStatusAction}
+                            >
+                              <input
+                                type="hidden"
+                                name="studentId"
+                                value={student.id}
+                              />
+                              <input
+                                type="hidden"
+                                name="status"
+                                value={statusValue}
+                              />
+                              <input
+                                type="hidden"
+                                name="redirectTo"
+                                value={buildHref({
+                                  mode: "students",
+                                  q,
+                                  status,
+                                })}
+                              />
+                              <button className="w-full rounded-xl px-3 py-2 text-left text-xs font-bold text-[#6b3b25] hover:bg-[#fff7ed]">
+                                {statusLabel}
+                              </button>
+                            </form>
+                          ))}
+                        </div>
+                      </details>
+                    </div>
+                    <div className="font-bold text-zinc-950">
+                      {student.idNumberLast3 || "未填"}
+                    </div>
+                    <div className="text-sm text-zinc-700">
+                      {student.phone || "未填"}
+                    </div>
+                    <div className="text-sm text-zinc-700">
+                      {student.memberNo || "未填"}
+                    </div>
+                    <div className="text-sm text-zinc-700">
+                      {student.note || "—"}
+                    </div>
+                    <Link
+                      href={buildHref({
+                        mode: "history",
+                        q: student.memberNo || student.name || student.phone,
+                      })}
+                      className="w-fit rounded-full border border-[#ead7c6] bg-white px-3 py-1 text-xs font-bold text-[#6b3b25] hover:border-[#ef6c00] hover:text-[#ef6c00]"
+                    >
+                      履歷
+                    </Link>
+                    <form action={hardDeleteStudentIdentityAction}>
+                      <input
+                        type="hidden"
+                        name="studentId"
+                        value={student.id}
+                      />
+                      <input
+                        type="hidden"
+                        name="redirectTo"
+                        value={buildHref({ mode: "students", q, status })}
+                      />
+                      <button className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-bold text-rose-600 hover:bg-rose-100">
+                        刪除
+                      </button>
+                    </form>
+                  </div>
+                );
+              })}
+              {studentListRows.length === 0 ? (
+                <p className="p-6 text-sm text-zinc-500">
+                  目前沒有符合條件的學員資料。請調整搜尋或狀態篩選。
+                </p>
+              ) : null}
+            </div>
+          </section>
+        </>
+      ) : null}
+
+      {currentMode === "eligibility" ? (
+        <section
+          id="eligibility-list"
+          className="mt-6 rounded-[1.75rem] border border-[#ead7c6] bg-white shadow-sm"
+        >
+          <div className="border-b border-[#ead7c6] p-5">
+            <p className="text-sm font-semibold text-[#a65f3b]">課程名單</p>
+            <h2 className="mt-1 text-2xl font-black text-zinc-950">
+              {selectedCourse?.title ?? "課程名單"}
+            </h2>
+            <p className="mt-1 text-sm text-zinc-500">
+              先選課程、年度與期別，再點學員「上課中」即可加入該期名單。
+            </p>
+          </div>
+
+          <div className="border-b border-[#ead7c6] bg-[#fffaf5] p-5">
+            <div className="space-y-5">
+              <div>
+                <p className="mb-2 text-xs font-bold text-[#a65f3b]">1. 課程主檔</p>
+                <div className="flex flex-wrap gap-2">
+                  {courseOptions.map((option) => {
+                    const active = option.id === selectedSeriesId;
+                    return (
+                      <Link
+                        key={option.id}
+                        href={buildHref({
+                          mode: "eligibility",
+                          seriesId: option.id,
+                          year: selectedYear,
+                          q,
+                        })}
+                        scroll={false}
+                        className={`rounded-full border px-4 py-2 text-sm font-bold transition ${
+                          active
+                            ? "border-[#ef6c00] bg-[#ef6c00] text-white shadow-sm"
+                            : "border-[#ead7c6] bg-white text-[#6b3b25] hover:bg-[#fff7ed]"
+                        }`}
+                      >
+                        {option.title}
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="grid gap-5 lg:grid-cols-2">
+                <div>
+                  <p className="mb-2 text-xs font-bold text-[#a65f3b]">2. 年度</p>
+                  <div className="flex flex-wrap gap-2">
+                    {years.map((year) => {
+                      const active = String(year) === String(selectedYear);
+                      return (
+                        <Link
+                          key={year}
+                          href={buildHref({
+                            mode: "eligibility",
+                            seriesId: selectedSeriesId,
+                            year,
+                            q,
+                          })}
+                          scroll={false}
+                          className={`rounded-full border px-4 py-2 text-sm font-bold transition ${
+                            active
+                              ? "border-[#ef6c00] bg-[#ef6c00] text-white shadow-sm"
+                              : "border-[#ead7c6] bg-white text-[#6b3b25] hover:bg-[#fff7ed]"
+                          }`}
+                        >
+                          {year} 年
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="mb-2 text-xs font-bold text-[#a65f3b]">3. 期別</p>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedOfferings.length > 0 ? (
+                      selectedOfferings.map((offering) => {
+                        const active = offering.id === selectedOfferingId;
+                        return (
+                          <Link
+                            key={offering.id}
+                            href={buildHref({
+                              mode: "eligibility",
+                              seriesId: selectedSeriesId,
+                              year: selectedYear,
+                              offeringId: offering.id,
+                              q,
+                            })}
+                            scroll={false}
+                            className={`rounded-full border px-4 py-2 text-sm font-bold transition ${
+                              active
+                                ? "border-[#ef6c00] bg-[#ef6c00] text-white shadow-sm"
+                                : "border-[#ead7c6] bg-white text-[#6b3b25] hover:bg-[#fff7ed]"
+                            }`}
+                          >
+                            {offering.termLabel || `${offering.term ?? ""}期` || offering.shortName || offering.displayName}
+                          </Link>
+                        );
+                      })
+                    ) : (
+                      <span className="rounded-full border border-[#ead7c6] bg-white px-4 py-2 text-sm font-bold text-zinc-400">
+                        尚無期別
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <form className="mt-4 flex flex-col gap-3 sm:flex-row">
+              <input type="hidden" name="mode" value="eligibility" />
+              <input type="hidden" name="seriesId" value={selectedSeriesId || ""} />
+              <input type="hidden" name="year" value={selectedYear || ""} />
+              <input type="hidden" name="offeringId" value={selectedOfferingId || ""} />
+              <input
+                name="q"
+                defaultValue={q}
+                placeholder="搜尋姓名、會員編號、目前班級"
+                className="h-12 flex-1 rounded-2xl border border-[#ead7c6] bg-white px-4 text-sm text-[#4a2a1a] shadow-sm outline-none transition placeholder:text-zinc-400 focus:border-[#ef6c00] focus:ring-2 focus:ring-[#f7c58d]/40"
+              />
+              <button className="rounded-2xl bg-[#ef6c00] px-6 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-[#d65f00]">
+                搜尋
+              </button>
+            </form>
+          </div>
+
+          <div className="border-b border-[#ead7c6] bg-[#fffaf5] px-5 py-4">
+            <p className="text-sm font-bold text-[#6b3b25]">
+              在列表中直接切換目前期別狀態
+            </p>
+            <p className="mt-1 text-xs leading-5 text-zinc-500">
+              右側狀態只針對目前選定的課程、年度與期別；左側班級膠囊可快速切換目標班級，不會一次移出全部班級。
+            </p>
+          </div>
+
+          <div className="hidden grid-cols-[1fr_minmax(560px,1.5fr)_280px] border-b border-[#ead7c6] bg-[#fff7ed] px-5 py-3 text-sm font-bold text-[#6b3b25] md:grid">
+            <span>學員</span>
+            <span>目前班級</span>
+            <span className="text-right">目前期別狀態</span>
+          </div>
+          <div className="divide-y divide-[#f0dfcf]">
+            {qualificationRows.map(({ currentClasses, student, record, status: rowStatus }) => (
+              <div
+                key={record?.id ?? `new-${student.id}`}
+                id={`eligibility-${student.id}`}
+                className="scroll-mt-28 grid gap-4 px-5 py-4 md:grid-cols-[1fr_minmax(560px,1.5fr)_280px] md:items-center"
+              >
+                <div>
+                  <p className="font-black text-zinc-950">{student.name}</p>
+                  <p className="mt-1 text-xs text-zinc-500">
+                    會員：{student.memberNo || "未填"}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2 text-xs font-bold">
+                  {currentClasses.length > 0 ? (
+                    currentClasses.map((classItem) => {
+                      const activeClass = classItem.offeringId === selectedOfferingId;
+                      return (
+                        <Link
+                          key={classItem.offeringId}
+                          href={buildHref({
+                            mode: "eligibility",
+                            seriesId: classItem.seriesId || selectedSeriesId,
+                            year: classItem.year || selectedYear,
+                            offeringId: classItem.offeringId,
+                            q,
+                          })}
+                          scroll={false}
+                          className={`rounded-full border px-3 py-1.5 transition ${
+                            activeClass
+                              ? "border-[#ef6c00] bg-[#ef6c00] text-white shadow-sm"
+                              : "border-[#ead7c6] bg-[#fff7ed] text-[#6b3b25] hover:border-[#ef6c00] hover:bg-white"
+                          }`}
+                          title="先點選這個班級，再點右側未加入，只會移出這一個班級"
+                        >
+                          {classItem.label}
+                        </Link>
+                      );
+                    })
+                  ) : (
+                    <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-zinc-500">
+                      尚未分配
+                    </span>
+                  )}
+                </div>
+                <div className="ml-auto flex w-full max-w-[280px] flex-nowrap overflow-hidden rounded-full border border-[#ead7c6] bg-white p-1 shadow-sm">
+                  {ELIGIBILITY_ROW_STATUSES.map((item) => {
+                    const isCurrent = item === rowStatus;
+                    return (
+                      <form
+                        key={item}
+                        action={assignStudentsToCourseEligibilityAction}
+                        className="flex-1"
+                      >
+                        <input type="hidden" name="studentIds" value={student.id} />
+                        <input
+                          type="hidden"
+                          name="seriesId"
+                          value={selectedSeriesId}
+                        />
+                        <input type="hidden" name="year" value={selectedYear || ""} />
+                        <input type="hidden" name="targetOfferingId" value={selectedOfferingId} />
+                        <input type="hidden" name="eligibilityStatus" value={item} />
+                        <input type="hidden" name="note" value={record?.note || ""} />
+                        <input
+                          type="hidden"
+                          name="redirectTo"
+                          value={buildHref({
+                            mode: "eligibility",
+                            seriesId: selectedSeriesId,
+                            year: selectedYear,
+                            offeringId: selectedOfferingId,
+                            q,
+                          })}
+                        />
+                        <button
+                          className={`h-9 w-full rounded-full px-3 text-xs font-bold whitespace-nowrap transition ${
+                            isCurrent
+                              ? statusTone(item)
+                              : "text-zinc-500 hover:bg-[#fff7ed] hover:text-[#6b3b25]"
+                          }`}
+                          aria-pressed={isCurrent}
+                        >
+                          {item}
+                        </button>
+                      </form>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+            {qualificationRows.length === 0 ? (
+              <p className="p-6 text-sm text-zinc-500">
+                目前沒有符合條件的學員。請調整搜尋條件或先到學員總表新增學員。
+              </p>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
+      {currentMode === "instructors" ? (
+        <>
+          <section className="mt-6 rounded-[1.75rem] border border-[#ead7c6] bg-white p-5 shadow-sm">
+            <details open>
+              <summary className="cursor-pointer list-none">
+                <p className="text-sm font-semibold text-[#a65f3b]">單一新增</p>
+                <h2 className="mt-1 text-xl font-black text-zinc-950">
+                  新增講師資料
+                </h2>
+                <p className="mt-1 text-sm text-zinc-500">
+                  先建立講師姓名與手機；授課專長直接勾選既有課程類別，避免自由輸入造成名稱不一致。
+                </p>
+              </summary>
+              <form
+                action={saveInstructorIdentityAction}
+                className="mt-5 grid gap-3 border-t border-[#ead7c6] pt-5"
+              >
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="grid gap-2 text-sm font-bold text-zinc-700">
+                    講師姓名
+                    <input
+                      name="name"
+                      className="rounded-2xl border border-[#e8d4c2] px-4 py-3 outline-none focus:border-[#ef6c00]"
+                    />
+                  </label>
+                  <label className="grid gap-2 text-sm font-bold text-zinc-700">
+                    手機
+                    <input
+                      name="phone"
+                      className="rounded-2xl border border-[#e8d4c2] px-4 py-3 outline-none focus:border-[#ef6c00]"
+                    />
+                  </label>
+                </div>
+                <div className="grid gap-2 text-sm font-bold text-zinc-700">
+                  授課專長
+                  <div className="flex flex-wrap gap-2 rounded-2xl border border-[#e8d4c2] bg-[#fffaf5] p-3">
+                    {instructorSpecialtyCategories.length > 0 ? (
+                      instructorSpecialtyCategories.map((category) => (
+                        <label
+                          key={category.id}
+                          className="inline-flex cursor-pointer items-center gap-2 rounded-full border px-3 py-2 text-xs font-bold transition hover:shadow-sm"
+                          style={{
+                            borderColor: `${category.color ?? "#ead7c6"}55`,
+                            backgroundColor: `${category.color ?? "#ef6c00"}12`,
+                            color: category.color ?? "#6b3b25",
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            name="specialties"
+                            value={category.name}
+                            className="h-3.5 w-3.5"
+                            style={{ accentColor: category.color ?? "#ef6c00" }}
+                          />
+                          {category.name}
+                        </label>
+                      ))
+                    ) : (
+                      <span className="text-xs font-medium text-zinc-500">
+                        目前沒有課程類別，請先到課程類別建立資料。
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-xs font-medium text-zinc-500">
+                    專長來源連結課程類別，例如美容、美體、美甲；實際指派講師到哪一班，之後在年度課程或課堂場次處理。
+                  </span>
+                </div>
+                <label className="grid gap-2 text-sm font-bold text-zinc-700">
+                  備註
+                  <input
+                    name="note"
+                    className="rounded-2xl border border-[#e8d4c2] px-4 py-3 outline-none focus:border-[#ef6c00]"
+                  />
+                </label>
+                <button className="rounded-2xl bg-[#6b3b25] px-5 py-3 text-sm font-bold text-white">
+                  建立講師
+                </button>
+              </form>
+            </details>
+          </section>
+
+          <section className="mt-6 rounded-[1.75rem] border border-[#ead7c6] bg-white shadow-sm">
+            <div className="border-b border-[#ead7c6] p-5">
+              <p className="text-sm font-semibold text-[#a65f3b]">講師名冊</p>
+              <h2 className="mt-1 text-2xl font-black text-zinc-950">
+                所有講師基本資料
+              </h2>
+              <p className="mt-1 text-sm text-zinc-500">
+                目前先管理講師姓名、電話、授課專長與備註，不建立講師登入帳號。授課專長連結課程類別。
+              </p>
+            </div>
+            <div className="hidden grid-cols-[1.1fr_150px_1.5fr_1fr_110px] border-b border-[#ead7c6] bg-[#fff7ed] px-5 py-3 text-sm font-bold text-[#6b3b25] md:grid">
+              <span>講師</span>
+              <span>手機</span>
+              <span>授課專長</span>
+              <span>備註</span>
+              <span>操作</span>
+            </div>
+            <div className="divide-y divide-[#f0dfcf]">
+              {visibleInstructors.map((instructor) => (
+                <div
+                  key={instructor.id}
+                  className="grid gap-3 px-5 py-4 md:grid-cols-[1.1fr_150px_1.5fr_1fr_110px] md:items-center"
+                >
+                  <div>
+                    <p className="font-black text-zinc-950">
+                      {instructor.name}
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      來源：{instructor.source || "手動建立"}
+                    </p>
+                  </div>
+                  <p className="text-sm font-bold text-[#6b3b25]">
+                    {instructor.phone || "未填"}
+                  </p>
+                  <div className="flex flex-wrap gap-2 text-xs font-bold text-[#6b3b25]">
+                    {instructor.specialties && instructor.specialties.length > 0 ? (
+                      instructor.specialties.map((specialty) => {
+                        const category = specialtyCategoryByName.get(specialty);
+                        return (
+                          <span
+                            key={specialty}
+                            className="rounded-full border px-3 py-1"
+                            style={{
+                              borderColor: `${category?.color ?? "#ead7c6"}55`,
+                              backgroundColor: `${category?.color ?? "#fff7ed"}12`,
+                              color: category?.color ?? "#6b3b25",
+                            }}
+                          >
+                            {specialty}
+                          </span>
+                        );
+                      })
+                    ) : (
+                      <span className="text-sm font-medium text-zinc-400">未設定</span>
+                    )}
+                  </div>
+                  <p className="text-sm text-zinc-500">
+                    {instructor.note || "—"}
+                  </p>
+                  <form action={deleteInstructorIdentityAction}>
+                    <input
+                      type="hidden"
+                      name="instructorId"
+                      value={instructor.id}
+                    />
+                    <button className="rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-xs font-bold text-rose-600">
                       停用
                     </button>
                   </form>
-                )}
-              </div>
-            </article>
-          );
-        })}
-        {visibleStudents.length === 0 ? (
-          <p className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-500">
-            目前沒有符合篩選條件的學員。
-          </p>
-        ) : null}
-      </section>
+                </div>
+              ))}
+              {visibleInstructors.length === 0 ? (
+                <p className="p-6 text-sm text-zinc-500">
+                  目前沒有講師資料。請先新增講師。
+                </p>
+              ) : null}
+            </div>
+          </section>
+        </>
+      ) : null}
 
-      <section className="hidden rounded-lg border border-zinc-200 bg-white md:block">
-        <div className="border-b border-zinc-200 px-5 py-5">
-          <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-zinc-950">
-                名冊列表｜{selectedSeriesLabel}｜{selectedLabel}
+      {currentMode === "history" ? (
+        <section className="mt-6 space-y-5">
+          {!norm(q) ? (
+            <div className="rounded-[1.75rem] border border-[#ead7c6] bg-white p-6 shadow-sm">
+              <p className="text-sm font-semibold text-[#a65f3b]">學習履歷查詢</p>
+              <h2 className="mt-2 text-2xl font-black text-zinc-950">
+                先搜尋一位學員
               </h2>
-              <p className="mt-1 text-sm text-zinc-500">
-                目前顯示「{selectedLabel}」與「{statusLabelMap[studentStatus]}
-                」的資料；點上方課程卡片會同步更新這份名單。
+              <p className="mt-2 text-sm leading-7 text-zinc-500">
+                請使用上方搜尋框輸入學員姓名、會員編號或手機。這一頁只顯示單一學員的課程狀態、出席與最近紀錄，避免全部紀錄混在一起。
               </p>
             </div>
-            <p className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-600">
-              目前顯示 {visibleStudents.length} 位
+          ) : selectedHistoryStudent ? (
+            <>
+              <section className="rounded-[1.75rem] border border-[#ead7c6] bg-white p-6 shadow-sm">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-[#a65f3b]">學員摘要</p>
+                    <h2 className="mt-1 text-3xl font-black text-zinc-950">
+                      {selectedHistoryStudent.name}
+                    </h2>
+                    <p className="mt-2 text-sm text-zinc-500">
+                      會員編號：{selectedHistoryStudent.memberNo || "未填"}｜手機：{selectedHistoryStudent.phone || "未填"}
+                    </p>
+                  </div>
+                  <span className={`w-fit rounded-full border px-4 py-2 text-sm font-bold ${getRosterStatus(selectedHistoryStudent).className}`}>
+                    {getRosterStatus(selectedHistoryStudent).label}
+                  </span>
+                </div>
+              </section>
+
+              <section className="rounded-[1.75rem] border border-[#ead7c6] bg-white shadow-sm">
+                <div className="border-b border-[#ead7c6] p-5">
+                  <p className="text-sm font-semibold text-[#a65f3b]">課程履歷</p>
+                  <h2 className="mt-1 text-2xl font-black text-zinc-950">
+                    目前課程狀態
+                  </h2>
+                </div>
+                <div className="grid gap-4 p-5 lg:grid-cols-2">
+                  {historyCourseCards.map((card) => (
+                    <article
+                      key={card.id}
+                      className="rounded-3xl border border-[#ead7c6] bg-[#fffaf5] p-5"
+                    >
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <h3 className="text-lg font-black text-zinc-950">{card.title}</h3>
+                          <p className="mt-2 text-sm text-zinc-500">
+                            最近紀錄：{card.latestActivity}
+                          </p>
+                        </div>
+                        <span className={`w-fit rounded-full border px-3 py-1 text-xs font-bold ${statusTone(card.status)}`}>
+                          {card.status}
+                        </span>
+                      </div>
+                      <div className="mt-4 flex flex-wrap gap-2 text-sm">
+                        <span className="rounded-full border border-[#e8d4c2] bg-white px-3 py-1 font-bold text-[#6b3b25]">
+                          出席：{card.attendanceText}
+                        </span>
+                        {card.note ? (
+                          <span className="rounded-full border border-[#e8d4c2] bg-white px-3 py-1 text-zinc-500">
+                            {card.note}
+                          </span>
+                        ) : null}
+                      </div>
+                    </article>
+                  ))}
+                  {historyCourseCards.length === 0 ? (
+                    <p className="rounded-3xl border border-dashed border-[#ead7c6] bg-[#fffaf5] p-5 text-sm text-zinc-500 lg:col-span-2">
+                      這位學員目前沒有課程名單或課程狀態紀錄。
+                    </p>
+                  ) : null}
+                </div>
+              </section>
+
+              <section className="rounded-[1.75rem] border border-[#ead7c6] bg-white shadow-sm">
+                <div className="border-b border-[#ead7c6] p-5">
+                  <p className="text-sm font-semibold text-[#a65f3b]">最近紀錄</p>
+                  <h2 className="mt-1 text-2xl font-black text-zinc-950">
+                    最近 8 筆活動
+                  </h2>
+                </div>
+                <div className="divide-y divide-[#f0dfcf]">
+                  {recentHistoryRows.map((row) => (
+                    <div
+                      key={row.id}
+                      className="grid gap-3 px-5 py-4 md:grid-cols-[120px_1fr_110px_150px] md:items-center"
+                    >
+                      <span className="w-fit rounded-full border border-[#e8d4c2] bg-[#fffaf5] px-3 py-1 text-xs font-bold text-[#6b3b25]">
+                        {row.type}
+                      </span>
+                      <div>
+                        <p className="font-bold text-zinc-800">{row.title}</p>
+                        <p className="mt-1 text-xs text-zinc-500">{row.note || "無備註"}</p>
+                      </div>
+                      <span className={`w-fit rounded-full border px-3 py-1 text-xs font-bold ${statusTone(row.status)}`}>
+                        {row.status}
+                      </span>
+                      <p className="text-sm text-zinc-500">{row.occurredAt}</p>
+                    </div>
+                  ))}
+                  {recentHistoryRows.length === 0 ? (
+                    <p className="p-6 text-sm text-zinc-500">
+                      這位學員目前沒有最近活動紀錄。
+                    </p>
+                  ) : null}
+                </div>
+              </section>
+            </>
+          ) : (
+            <div className="rounded-[1.75rem] border border-[#ead7c6] bg-white p-6 shadow-sm">
+              <p className="text-sm font-semibold text-[#a65f3b]">查無學員</p>
+              <h2 className="mt-2 text-2xl font-black text-zinc-950">
+                沒有找到符合「{q}」的學員
+              </h2>
+              <p className="mt-2 text-sm text-zinc-500">
+                請改用姓名、會員編號或手機搜尋。
+              </p>
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      {currentMode === "offering" ? (
+        <section className="mt-6 rounded-[1.75rem] border border-[#ead7c6] bg-white shadow-sm">
+          <div className="border-b border-[#ead7c6] p-5">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-[#a65f3b]">
+                  {currentMode === "offering" ? "梯次分配名冊" : "課程狀態名冊"}
+                </p>
+                <h2 className="mt-1 text-2xl font-black text-zinc-950">
+                  {selectedCourse?.title ?? "課程"}｜{selectedYear} 年度
+                </h2>
+                <p className="mt-1 text-sm text-zinc-500">
+                  在這裡調整學生課程狀態，或將學生分配到特定梯次。
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {(
+                  [
+                    ["all", "全部"],
+                    ["bookable", "可預約"],
+                    ["blocked", "不可預約"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <Link
+                    key={key}
+                    href={buildHref({
+                      mode: currentMode,
+                      seriesId: selectedSeriesId,
+                      year: selectedYear,
+                      status: key,
+                      q,
+                    })}
+                    className={`rounded-full border px-4 py-2 text-sm font-bold ${status === key ? "border-[#ef6c00] bg-[#ef6c00] text-white" : "border-[#e8d4c2] bg-white text-[#6b3b25]"}`}
+                  >
+                    {label}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          </div>
+          <form
+            action={bulkUpdateStudentCourseEligibilityAction}
+            className="border-b border-[#ead7c6] bg-[#fffaf5] p-5"
+          >
+            <input
+              type="hidden"
+              name="redirectTo"
+              value={
+                buildHref({
+                  mode: currentMode,
+                  seriesId: selectedSeriesId,
+                  year: selectedYear,
+                  status,
+                  q,
+                }) + "#qualification-bulk"
+              }
+            />
+            <input
+              type="hidden"
+              name="seriesId"
+              value={selectedSeriesId || ""}
+            />
+            <input type="hidden" name="year" value={selectedYear || ""} />
+            <div
+              id="qualification-bulk"
+              className="rounded-2xl border border-[#ead7c6] bg-white p-4"
+            >
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <p className="text-sm font-black text-[#6b3b25]">
+                    批次修改課程狀態
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-zinc-500">
+                    勾選下方資格名冊後，可以批次改為上課中、停用、已結訓；若工作人員加錯資格，請改為「未加入」，系統會清空該課程狀態與梯次。
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4 grid gap-3 lg:grid-cols-[160px_1fr_1fr_auto]">
+                <select
+                  name="eligibilityStatus"
+                  defaultValue="上課中"
+                  className="h-12 rounded-2xl border border-[#ead7c6] bg-white px-4 text-sm font-bold text-[#4a2a1a] shadow-sm outline-none transition focus:border-[#ef6c00] focus:ring-2 focus:ring-[#f7c58d]/40"
+                >
+                  {ELIGIBILITY_STATUSES.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  name="targetOfferingId"
+                  defaultValue=""
+                  className="h-12 rounded-2xl border border-[#ead7c6] bg-white px-4 text-sm font-bold text-[#4a2a1a] shadow-sm outline-none transition focus:border-[#ef6c00] focus:ring-2 focus:ring-[#f7c58d]/40"
+                >
+                  <option value="">不調整梯次 / 尚未分配</option>
+                  {selectedOfferings.map((offering) => (
+                    <option key={offering.id} value={offering.id}>
+                      {offering.displayTitle ?? offering.title}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  name="note"
+                  placeholder="批次備註，可留空"
+                  className="h-12 rounded-2xl border border-[#ead7c6] bg-white px-4 text-sm text-[#4a2a1a] shadow-sm outline-none transition placeholder:text-zinc-400 focus:border-[#ef6c00] focus:ring-2 focus:ring-[#f7c58d]/40"
+                />
+
+                <button className="rounded-2xl bg-[#6b3b25] px-6 py-3 text-sm font-bold text-white">
+                  批次修改資格
+                </button>
+              </div>
+            </div>
+            <div className="mt-4 hidden grid-cols-[48px_1.1fr_110px_150px_1fr_150px] border border-[#ead7c6] bg-[#fff7ed] px-5 py-3 text-sm font-bold text-[#6b3b25] md:grid">
+              <span>選</span>
+              <span>學員</span>
+              <span>末三碼</span>
+              <span>手機</span>
+              <span>目前資格</span>
+              <span>狀態</span>
+            </div>
+            <div className="divide-y divide-[#f0dfcf] rounded-b-2xl border-x border-b border-[#ead7c6] bg-white">
+              {editableQualificationRows.map(
+                ({ student, record, status: rowStatus }) => (
+                  <label
+                    key={record.id}
+                    className="grid cursor-pointer gap-3 px-5 py-4 transition hover:bg-[#fffaf5] md:grid-cols-[48px_1.1fr_110px_150px_1fr_150px] md:items-center"
+                  >
+                    <input
+                      type="checkbox"
+                      name="recordIds"
+                      value={record.id}
+                      className="h-5 w-5 rounded border-[#d8bda4] accent-[#ef6c00]"
+                    />
+                    <div>
+                      <p className="font-black text-zinc-950">{student.name}</p>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        生日：{text(student.birthday) || "未填"}｜會員：
+                        {student.memberNo || "未填"}
+                      </p>
+                    </div>
+                    <div className="font-bold text-zinc-950">
+                      {student.idNumberLast3}
+                    </div>
+                    <div className="text-sm text-zinc-700">
+                      {student.phone || "未填"}
+                    </div>
+                    <div className="text-sm text-zinc-700">
+                      {record.classDisplayName ||
+                        record.termLabel ||
+                        "尚未分配梯次"}
+                    </div>
+                    <div>
+                      <span
+                        className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold ${statusTone(rowStatus)}`}
+                      >
+                        {rowStatus}
+                      </span>
+                    </div>
+                  </label>
+                ),
+              )}
+              {editableQualificationRows.length === 0 ? (
+                <p className="p-6 text-sm text-zinc-500">
+                  目前沒有符合條件的課程狀態。請先切到「課程狀態」勾選學員加入。
+                </p>
+              ) : null}
+            </div>
+          </form>
+
+          <div className="border-b border-[#ead7c6] bg-white px-5 py-4">
+            <p className="text-sm font-black text-[#6b3b25]">逐筆調整</p>
+            <p className="mt-1 text-xs text-zinc-500">
+              需要查看單一學員備註或只改一筆時，可展開下方列項目。
             </p>
           </div>
-        </div>
-        <div className="grid grid-cols-[140px_1.1fr_1.4fr_90px_1fr_1.1fr_190px] border-b border-zinc-200 bg-zinc-50 px-5 py-3 text-sm font-medium text-zinc-600">
-          <span>學員編號</span>
-          <span>學員</span>
-                <span>手機 / 身分證末三碼</span>
-          <span>座號</span>
-                <span>座號</span>
-          <span>名冊狀態</span>
-          <span>操作</span>
-        </div>
-        {visibleStudents.map((student) => {
-          const enrollment = getStudentEnrollments(student, enrollments, courses).find((item) => {
-            const offeringId = getEnrollmentOfferingId(item);
-            const offering = offeringMap.get(offeringId);
-            return selectedClassId === "all" || offeringId === selectedOffering?.id || item.courseId === selectedClassId || offering?.legacyCourseId === selectedClassId;
-          }) ?? getStudentEnrollments(student, enrollments, courses)[0];
-          const offering = enrollment ? offeringMap.get(getEnrollmentOfferingId(enrollment)) : undefined;
-          const course = offering?.legacyCourseId ? courseMap.get(offering.legacyCourseId) : courseMap.get(student.classId ?? "");
-          const status = getStudentClassStatus(student);
-          const registryNo = getStudentRegistryNumber(student);
-          const isInactive = student.isActive === false;
-          return (
-            <details
-              key={student.id}
-              className={`group border-b border-zinc-100 last:border-0 open:bg-sky-50/30 ${isInactive ? "opacity-75" : ""}`}
-            >
-              <summary className="grid cursor-pointer list-none grid-cols-[140px_1.1fr_1.4fr_90px_1fr_1.1fr_190px] items-center px-5 py-5 text-sm hover:bg-zinc-50 group-open:border-b group-open:border-sky-100">
-                <span className="font-semibold text-zinc-950">
-                  {registryNo}
-                </span>
-                <Link
-                  href={`/admin/students/${student.id}`}
-                  className="font-semibold text-zinc-950 hover:text-emerald-700"
-                >
-                  {student.name}
-                  <span className="mt-1 block text-xs font-normal text-zinc-500">
-                    {student.phone || "無手機"}｜{student.idNumberLast3 ? `末三碼 ${student.idNumberLast3}` : "末三碼未填"}
-                  </span>
-                </Link>
-                <span
-                  className="min-w-0 border-l-4 pl-3"
-                  style={{ borderColor: getCourseColor(student.classId) }}
-                >
-                  <span className="block truncate text-xs font-medium text-emerald-700">
-                    {getCourseSeriesTitle(course)}
-                  </span>
-                  <span className="mt-1 block truncate font-semibold text-zinc-950">
-                    {getOfferingPeriodLabel(offering)}
-                  </span>
-                  <span className="mt-1 block truncate text-xs text-zinc-500">
-                    {offering?.shortName ?? offering?.sourceSheet ?? course?.code ?? "未綁定班級"}
-                  </span>
-                </span>
-                <span className="font-semibold text-zinc-700">
-                  {getEnrollmentSeatLabel(enrollment, student) || "未設定"}
-                </span>
-                <span className="text-zinc-700">
-                  {enrollment?.status === "active" ? "名冊有效" : enrollment?.status ?? "待確認"}
-                </span>
-                <span className="flex flex-wrap gap-2">
-                  <span
-                    className={`rounded-full border px-2 py-1 text-xs font-medium ${status.className}`}
-                  >
-                    {status.label}
-                  </span>
-                  {student.source ? (
-                    <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-600">
-                      {student.source}
-                    </span>
-                  ) : null}
-                </span>
-                <span className="flex items-center gap-2">
-                  <Link
-                    href={`/admin/students/${student.id}`}
-                    className="rounded-md bg-zinc-900 px-3 py-2 text-sm font-semibold text-white hover:bg-zinc-700"
-                  >
-                    履歷
-                  </Link>
-                  <span className="rounded-md border border-zinc-300 px-3 py-2 text-sm group-open:border-sky-300 group-open:bg-white">
-                    編輯
-                  </span>
-                  {isInactive ? (
-                    <span className="rounded-md border border-zinc-300 bg-zinc-50 px-3 py-2 text-zinc-500">
-                      已停用
-                    </span>
-                  ) : (
-                    <form action={disableStudentAction}>
-                      <input type="hidden" name="id" value={student.id} />
-                      <input
-                        type="hidden"
-                        name="classId"
-                        value={student.classId ?? effectiveClassForNew}
-                      />
-                      <button className="rounded-md border border-zinc-300 px-3 py-2 hover:bg-zinc-50">
-                        停用
-                      </button>
-                    </form>
-                  )}
-                </span>
-              </summary>
-              <div className="px-4 pb-4">
-                <form
-                  action={saveStudentAction}
-                  className="rounded-xl border border-sky-200 bg-white p-4 shadow-sm"
-                >
-                  <input type="hidden" name="id" value={student.id} />
-                  <div className="grid gap-3 lg:grid-cols-[1.4fr_1fr_0.7fr_0.9fr]">
-                    <label className="grid gap-2 text-sm font-medium text-zinc-700">
-                      所屬年度期別班級
-                      <select
-                        name="classId"
-                        defaultValue={student.classId ?? effectiveClassForNew}
-                        className="rounded-md border border-zinc-300 px-3 py-3"
+          <div className="divide-y divide-[#f0dfcf]">
+            {editableQualificationRows.map(({ currentClasses, student, record, status: rowStatus }) => (
+              <details key={record.id} className="group px-5 py-4">
+                <summary className="flex cursor-pointer list-none flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-lg font-black text-zinc-950">
+                        {student.name}
+                      </p>
+                      <span className="rounded-full bg-[#fff3e6] px-3 py-1 text-xs font-bold text-[#8b5035]">
+                        末三碼 {student.idNumberLast3}
+                      </span>
+                      <span
+                        className={`rounded-full border px-3 py-1 text-xs font-bold ${statusTone(rowStatus)}`}
                       >
-                        {courses.map((course) => (
-                          <option key={course.id} value={course.id}>
-                            {course.title}｜{getCoursePeriodLabel(course)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="grid gap-2 text-sm font-medium text-zinc-700">
-                      姓名
-                      <input
-                        name="name"
-                        defaultValue={student.name}
-                        className="rounded-md border border-zinc-300 px-3 py-3"
-                      />
-                    </label>
-                    <label className="grid gap-2 text-sm font-medium text-zinc-700">
-                      座號
-                      <input
-                        name="seatNumber"
-                        type="number"
-                        defaultValue={student.seatNumber}
-                        className="rounded-md border border-zinc-300 px-3 py-3"
-                      />
-                    </label>
-                    <label className="grid gap-2 text-sm font-medium text-zinc-700">
-                      期別 / 補充
-                      <input
-                        name="examGroup"
-                        defaultValue={student.examGroup}
-                        className="rounded-md border border-zinc-300 px-3 py-3"
-                      />
-                    </label>
+                        {rowStatus}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm text-zinc-500">
+                      {record.classDisplayName ||
+                        record.termLabel ||
+                        "尚未分配梯次"}
+                      ｜手機 {student.phone || "未填"}
+                    </p>
                   </div>
-                  <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_auto] lg:items-end">
-                    <label className="grid gap-2 text-sm font-medium text-zinc-700">
-                      備註
-                      <input
-                        name="note"
-                        defaultValue={student.note ?? ""}
-                        className="rounded-md border border-zinc-300 px-3 py-3"
-                      />
-                    </label>
-                    <button className="rounded-md bg-zinc-900 px-5 py-3 text-sm font-semibold text-white hover:bg-zinc-700">
-                      儲存編輯
-                    </button>
-                  </div>
+                  <span className="rounded-full border border-[#e8d4c2] px-4 py-2 text-sm font-bold text-[#6b3b25] group-open:bg-[#fff3e6]">
+                    調整資格
+                  </span>
+                </summary>
+                <form
+                  action={updateStudentCourseEligibilityAction}
+                  className="mt-4 grid gap-3 rounded-2xl border border-[#ead7c6] bg-[#fffaf5] p-4 lg:grid-cols-[160px_1fr_1fr_auto]"
+                >
+                  <input type="hidden" name="recordId" value={record.id} />
+                  <input
+                    type="hidden"
+                    name="seriesId"
+                    value={selectedSeriesId}
+                  />
+                  <input type="hidden" name="year" value={selectedYear || ""} />
+                  <select
+                    name="eligibilityStatus"
+                    defaultValue={rowStatus}
+                    className="h-12 rounded-2xl border border-[#ead7c6] bg-white px-4 text-sm font-bold text-[#4a2a1a] shadow-sm outline-none transition focus:border-[#ef6c00] focus:ring-2 focus:ring-[#f7c58d]/40"
+                  >
+                    {ELIGIBILITY_STATUSES.map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    name="targetOfferingId"
+                    defaultValue={record.offeringId ?? ""}
+                    className="h-12 rounded-2xl border border-[#ead7c6] bg-white px-4 text-sm font-bold text-[#4a2a1a] shadow-sm outline-none transition focus:border-[#ef6c00] focus:ring-2 focus:ring-[#f7c58d]/40"
+                  >
+                    <option value="">尚未分配梯次</option>
+                    {selectedOfferings.map((offering) => (
+                      <option key={offering.id} value={offering.id}>
+                        {offering.displayTitle ?? offering.title}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    name="note"
+                    defaultValue={record.note ?? ""}
+                    placeholder="備註"
+                    className="h-12 rounded-2xl border border-[#ead7c6] bg-white px-4 text-sm text-[#4a2a1a] shadow-sm outline-none transition placeholder:text-zinc-400 focus:border-[#ef6c00] focus:ring-2 focus:ring-[#f7c58d]/40"
+                  />
+                  <button className="rounded-2xl bg-[#6b3b25] px-5 py-3 text-sm font-bold text-white">
+                    儲存
+                  </button>
                 </form>
-              </div>
-            </details>
-          );
-        })}
-        {visibleStudents.length === 0 ? (
-          <div className="px-4 py-8 text-sm text-zinc-500">
-            目前沒有符合篩選條件的學員。
+              </details>
+            ))}
+            {editableQualificationRows.length === 0 ? (
+              <p className="p-6 text-sm text-zinc-500">
+                目前沒有符合條件的課程狀態。請先切到「課程狀態」勾選學員加入。
+              </p>
+            ) : null}
           </div>
-        ) : null}
-      </section>
+        </section>
+      ) : null}
     </AdminShell>
   );
 }

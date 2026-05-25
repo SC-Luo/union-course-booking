@@ -1,9 +1,9 @@
 export const courseTypes = [
-  { id: "CT", name: "產投課程", description: "產業人才投資方案，在職進修與政府補助課程。" },
-  { id: "PT", name: "職前訓練", description: "待業者全日制訓練。" },
-  { id: "SF", name: "自費課程", description: "工會自辦課程，不適用政府補助。" },
-  { id: "SP", name: "特殊專案", description: "特殊補助、數位學習或跨域專案。" },
-  { id: "CP", name: "競賽輔導", description: "各級競賽培訓。" },
+  { id: "PT", name: "職前課程", description: "固定名冊：職前訓練、待業者或專班制課程。", rosterType: "fixed" },
+  { id: "CT", name: "在職課程", description: "固定名冊：在職進修、產投或長期班級。", rosterType: "fixed" },
+  { id: "SF", name: "技術課程", description: "彈性預約：可依場次或期間開放學員預約。", rosterType: "flexible" },
+  { id: "CP", name: "競賽輔導", description: "彈性預約：競賽訓練、模擬賽與加強輔導。", rosterType: "flexible" },
+  { id: "OT", name: "其他", description: "不一定：無法歸入前述類型的課程或特殊安排。", rosterType: "mixed" },
 ];
 
 export const professionalCategories = [
@@ -21,7 +21,7 @@ export const professionalCategories = [
 ];
 
 export function getCourseTypeName(typeId?: string) {
-  return courseTypes.find((type) => type.id === typeId)?.name ?? "未設定方案";
+  return courseTypes.find((type) => type.id === typeId)?.name ?? "其他";
 }
 
 export function getProfessionalCategoryName(categoryId: string) {

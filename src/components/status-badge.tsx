@@ -2,14 +2,16 @@ import type { AttendanceStatus, CourseStatus, ReservationStatus } from "@/lib/ty
 
 const courseStatusText: Record<CourseStatus, string> = {
   available: "可預約",
-  full: "額滿",
-  closed: "已截止",
+  full: "已額滿",
+  closed: "已關閉",
+  locked: "已鎖定",
 };
 
 const courseStatusClass: Record<CourseStatus, string> = {
   available: "border-emerald-200 bg-emerald-50 text-emerald-700",
   full: "border-amber-200 bg-amber-50 text-amber-700",
   closed: "border-zinc-200 bg-zinc-100 text-zinc-600",
+  locked: "border-zinc-200 bg-zinc-100 text-zinc-600",
 };
 
 const reservationStatusText: Record<ReservationStatus, string> = {
@@ -18,10 +20,10 @@ const reservationStatusText: Record<ReservationStatus, string> = {
 };
 
 const attendanceStatusText: Record<AttendanceStatus, string> = {
-  pending: "未點名",
-  unchecked: "未點名",
-  attended: "已到",
-  absent: "未到",
+  pending: "未確認",
+  unchecked: "未確認",
+  attended: "已出席",
+  absent: "未出席",
   leave: "請假",
 };
 
