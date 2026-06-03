@@ -1,0 +1,80 @@
+---
+title: 工會課程預約系統｜CHANGELOG_AI
+type: changelog
+layer: project-memory
+project: union-course-booking
+category: changelog
+tags:
+  - ai-changelog
+  - project-memory
+created: 2026-05-27
+updated: 2026-05-28
+status: active
+summary: 影響後續 AI 接手、產品方向、技術架構、資料結構或開發流程的重要變更。
+related:
+  - AI_START_HERE.md
+  - HANDOFF.md
+  - GPT_CODEX_WORKFLOW.md
+---
+
+# CHANGELOG_AI
+
+本文件只記錄會影響後續 AI 接手、產品方向、技術架構、資料結構或開發流程的重要變更。不要貼完整聊天紀錄，也不要記錄每一行小改動。
+
+## 2026-05-28
+
+### 單堂點名工作台重構
+
+- 2026-05-28 本輪 Codex 已確認相關實作存在並可建置：`npm.cmd run lint` 與 `npm.cmd run build` 通過，dev server 啟動於 `http://127.0.0.1:3100`。
+- 單堂點名頁整理為現場操作取向：課堂摘要卡、浮動課堂資料編輯視窗、收合式課堂日誌與 TTQS、以及「學員｜狀態列｜出席狀況｜作業｜備註」點名表格。
+- 出席資料規則改為主要狀態只能一個，遲到時間與請假時段作為附加紀錄，可同時存在；預約或未到視為重設並清除附加紀錄。
+- Firestore 點名更新加入 legacy reservation id fallback：document id 找不到時改查資料內 `id`，再更新真正文件，最後才回落 JSON。
+- 作業、備註與課堂日誌改用 inline autosave，支援中文輸入法 composition、約 0.9 秒停止輸入儲存與失焦儲存。
+- 課堂資料編輯視窗的講師選單依 `specialties`、`courseSeriesIds`、`courseOfferingIds` 過濾，舊資料缺欄位時需相容。
+
+### 影響範圍
+
+- 後台單堂點名現場流程
+- `Reservation` 出席附加欄位
+- `CourseSession` 課堂日誌欄位
+- `Instructor` 講師過濾欄位
+- Firestore reservation 舊資料更新策略
+
+### 本次變更
+
+- 完成穩定化整理，`npm.cmd run lint` 與 `npm.cmd run build` 均通過。
+- 修正課程狀態 `locked` 與出席狀態 `late` 的型別 / UI 對齊問題。
+- 清理未使用函式、變數、import、舊元件殘留與不必要 eslint disable。
+- 暫時關閉 `@typescript-eslint/no-explicit-any`，避免資料層混合期被過渡型別雜訊阻塞；後續需分批補型別。
+- 新增 `GPT_CODEX_WORKFLOW.md`，定義 GPT 任務包格式、檔案命名規則、Codex 接手流程與安全規則。
+- 重寫 `AI_START_HERE.md`、`HANDOFF.md`、`tasks.md`、`decisions.md`、`context.md`、`filemap.md` 與 `specs/tech-context.md`，讓 AI 可以更快掌握 repo。
+
+### 影響範圍
+
+- AI 接手流程
+- GPT / Codex 協作格式
+- lint/build 驗證基準
+- 技術文件與檔案地圖
+
+### 後續注意
+
+- 接下來應先把目前大型工作區變更拆成可審查任務包。
+- 不要把根目錄 fix 腳本當成長期流程；應改用 GPT 任務包、patch 與 lint/build 驗證。
+- `firebase-admin-key.json` 與 `.env.local` 仍是敏感檔，不可提交或貼入 Markdown。
+
+## 2026-05-27
+
+### 本次變更
+- 建立 repo 內固定 AI 開工入口文件與專案記憶文件：`AI_START_HERE.md`、`HANDOFF.md`、`tasks.md`、`decisions.md`、`context.md`。
+- 建立正式規格資料夾 `specs/`，並新增產品規格、使用者流程與技術脈絡三份入口規格。
+- 更新 `README.md` 與 `AGENTS.md` 的 AI 開工入口導引，讓後續 GPT / Codex / Opencode 先從 repo 內文件接手。
+- 釐清適用範圍：本入口只用於已開啟或接手本 repo 的情境；一般日常開工仍依 SecondBrain 開工交接流程。
+- 補上檔案路徑與輸出格式規則，要求 AI 明確列出相對路徑、必要的新檔名，以及精簡的產出檔案格式。
+
+### 影響範圍
+- AI 接手流程
+- 專案文件結構
+- 開發後文件更新規則
+
+### 後續注意
+- 後續功能、資料結構、流程或部署規則改變時，需同步檢查 `HANDOFF.md`、`tasks.md`、`decisions.md`、`context.md`、`specs/` 與本文件。

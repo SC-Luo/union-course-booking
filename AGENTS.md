@@ -1,5 +1,28 @@
 # AGENTS.md
 
+## AI 開工入口適用範圍
+
+本專案已建立 repo 內固定 AI 開工入口。這套入口只適用於已經開啟或接手「工會課程預約系統」這個 repo 的情境。一般日常開工、跨專案整理或尚未指定本專案時，仍依使用者的 SecondBrain 開工交接流程為準。
+
+未來 GPT / Codex / Opencode 接手本 repo 時，優先依下列順序讀取 repo 文件：
+
+1. `AI_START_HERE.md`
+2. `HANDOFF.md`
+3. `tasks.md`
+4. `decisions.md`
+5. `context.md`
+6. `GPT_CODEX_WORKFLOW.md`
+7. `filemap.md`
+8. `specs/product-spec.md`
+9. `specs/user-flow.md`
+10. `specs/tech-context.md`
+
+`notes/` 是背景筆記，`archive/docs-legacy/` 是舊版文件；除非明確需要查舊資料，否則不要優先讀取。在本 repo 內工作時不要預設讀取完整 secondbrain vault；只有 repo 文件不足、任務明確需要或使用者要求時才回查。不要把完整聊天紀錄或 Firebase 私密金鑰寫入 Markdown 文件。
+
+需要使用者提供檔案、或需要輸出檔案/程式碼給使用者時，請遵守 `AI_START_HERE.md` 與 `GPT_CODEX_WORKFLOW.md` 的檔案交付格式。
+
+下方 secondbrain 路徑保留為舊背景來源；若和 repo 內入口文件衝突，先以 repo 內 `AI_START_HERE.md`、`HANDOFF.md`、`tasks.md`、`decisions.md`、`context.md` 與 `specs/` 為準，並回報需要同步哪份文件。
+
 ## 專案摘要
 
 這是「工會課程預約系統」的程式專案。
@@ -15,11 +38,13 @@
 
 ## 重要上下文來源
 
-每次開工先讀短版接續摘要，避免一開始載入完整長文件：
+接手本 repo 時先讀 repo 內 `AI_START_HERE.md` 與 `HANDOFF.md`，避免一開始載入完整長文件。一般開工仍依 SecondBrain 開工交接流程為準。
+
+舊版 secondbrain 短版接續摘要保留為背景來源，只有 repo 內文件不足或使用者明確要求時才讀：
 
 `H:\我的雲端硬碟\secondbrain\10-專案\工會課程預約系統開發\docs\session-handoff.md`
 
-產品規格以 Obsidian 筆記為準：
+產品規格以 repo 內 `specs/` 為準。下列 Obsidian 筆記保留為舊背景來源，只有需要查舊資料時才讀：
 
 `H:\我的雲端硬碟\secondbrain\10-專案\工會課程預約系統開發\specs\工會課程預約系統.md`
 
@@ -36,11 +61,11 @@
 
 但不要在每次開工時全文讀取規格、踩坑紀錄或決策紀錄。只有本次任務牽涉特定產品規則、環境問題或重大架構判斷時，才讀相關段落。
 
-如果程式需求和產品規格衝突，先以產品規格為準，並回報需要同步調整哪一份文件。
+如果程式需求和產品規格衝突，先以 repo 內產品規格為準，並回報需要同步調整哪一份文件。
 
 如果開發中遇到可重複避免的問題，請把「現象、判斷、解法、後續改進」寫入踩坑記錄。
 
-收工時優先更新 `docs/session-handoff.md` 的短摘要；只有重大決策才寫入 `docs/decisions.md`，只有可重複避免的坑才寫入 `notes/踩坑過程.md`。
+收工時優先更新 `HANDOFF.md` 的短摘要；任務變化更新 `tasks.md`，重大決策更新 `decisions.md`，規格變化更新 `specs/`，會影響後續 AI 接手的重要變更更新 `CHANGELOG_AI.md`。只有可重複避免的坑才寫入 `notes/踩坑過程.md`。
 
 ## 專案位置與環境
 
