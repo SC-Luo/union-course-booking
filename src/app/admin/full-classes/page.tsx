@@ -27,13 +27,6 @@ function getDaysUntil(from: string, to: string) {
   return Math.round((end - start) / 86400000);
 }
 
-function formatLockLabel(today: string, date: string) {
-  const days = getDaysUntil(today, date);
-  if (days <= 0) return "今天鎖定";
-  if (days === 1) return "明天鎖定";
-  return `${days} 天後鎖定`;
-}
-
 function formatYearTermLabel(course: {
   year?: number;
   termLabel?: string;

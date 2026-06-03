@@ -9,6 +9,9 @@ type CsvColumn<T = Record<string, unknown>> = {
 type ExportTable = {
   id: keyof BookingData;
   label: string;
+  title?: string;
+  sheetName?: string;
+  technicalName?: string;
   description: string;
   fileName: string;
   columns: CsvColumn[];
@@ -58,7 +61,7 @@ function buildTableRows(data: BookingData, table: ExportTable) {
   });
 }
 
-export const EXPORT_TABLES: ExportTable[] = [
+const RAW_EXPORT_TABLES: ExportTable[] = [
   {
     id: "students",
     label: "學員主檔",
@@ -272,6 +275,25 @@ export const EXPORT_TABLES: ExportTable[] = [
     ],
   },
   {
+    id: "instructors",
+    label: "講師資料",
+    description: "講師基本資料、專業項目與可授課類別。",
+    fileName: "09_instructors.csv",
+    columns: [
+      { key: "id", label: "instructorId" },
+      { key: "name", label: "姓名" },
+      { key: "phone", label: "手機" },
+      { key: "specialties", label: "專業項目" },
+      { key: "courseSeriesIds", label: "可授課課程主檔" },
+      { key: "courseOfferingIds", label: "可授課年度期別課程" },
+      { key: "note", label: "備註" },
+      { key: "source", label: "來源" },
+      { key: "isActive", label: "啟用" },
+      { key: "createdAt", label: "建立時間" },
+      { key: "updatedAt", label: "更新時間" },
+    ],
+  },
+  {
     id: "categories",
     label: "課程分類",
     description: "分類、顏色與排序。",
@@ -287,6 +309,92 @@ export const EXPORT_TABLES: ExportTable[] = [
     ],
   },
 ];
+
+const EXPORT_TABLE_DISPLAY: Partial<Record<keyof BookingData, Pick<ExportTable, "title" | "sheetName" | "description">>> = {
+  students: {
+    title: "學員主檔",
+    sheetName: "01_學員主檔",
+    description: "學生基本資料、手機末三碼、名冊與學習紀錄的主要資料。",
+  },
+  courseSeries: {
+    title: "課程主檔",
+    sheetName: "02_課程主檔",
+    description: "課程種類，例如美容丙級、美甲初階，不代表某年度實際開課。",
+  },
+  courseOfferings: {
+    title: "年度期別課程",
+    sheetName: "03_年度期別課程",
+    description: "同一課程主檔在不同年度、期別的開課設定。",
+  },
+  courseSessions: {
+    title: "上課場次",
+    sheetName: "04_上課場次",
+    description: "每一堂實際上課時間、地點、講師與點名狀態。",
+  },
+  reservations: {
+    title: "預約報名紀錄",
+    sheetName: "05_預約報名紀錄",
+    description: "學員預約、取消與報名狀態紀錄。",
+  },
+  attendanceRecords: {
+    title: "出席點名紀錄",
+    sheetName: "06_出席點名紀錄",
+    description: "每位學員每堂課的出席、遲到、請假、缺席紀錄。",
+  },
+  entitlements: {
+    title: "學員課程資格",
+    sheetName: "07_學員課程資格",
+    description: "學員可參與哪些課程或班級的資格資料。",
+  },
+  studentCourseRecords: {
+    title: "學員課程紀錄",
+    sheetName: "08_學員課程紀錄",
+    description: "學員在各課程中的上課狀態、完成狀態與歷程。",
+  },
+  instructors: {
+    title: "講師資料",
+    sheetName: "09_講師資料",
+    description: "講師基本資料、專業項目與可授課類別。",
+  },
+  importBatches: {
+    title: "匯入批次紀錄",
+    sheetName: "10_匯入批次紀錄",
+    description: "Excel 或名冊匯入批次、結果與需人工核對資料。",
+  },
+  enrollments: {
+    title: "課程加入紀錄",
+    sheetName: "11_課程加入紀錄",
+    description: "學員加入或離開年度期別課程的紀錄。",
+  },
+  categories: {
+    title: "課程分類",
+    sheetName: "12_課程分類",
+    description: "後台用來整理課程主檔與年度期別課程的分類資料。",
+  },
+};
+
+const EXPORT_TABLE_ORDER: Array<keyof BookingData> = [
+  "students",
+  "courseSeries",
+  "courseOfferings",
+  "courseSessions",
+  "reservations",
+  "attendanceRecords",
+  "entitlements",
+  "studentCourseRecords",
+  "instructors",
+  "importBatches",
+  "enrollments",
+  "categories",
+];
+
+export const EXPORT_TABLES: ExportTable[] = RAW_EXPORT_TABLES
+  .map((table) => ({
+    ...table,
+    ...EXPORT_TABLE_DISPLAY[table.id],
+    technicalName: String(table.id),
+  }))
+  .sort((a, b) => EXPORT_TABLE_ORDER.indexOf(a.id) - EXPORT_TABLE_ORDER.indexOf(b.id));
 
 export function getExportTable(tableId: string) {
   return EXPORT_TABLES.find((table) => table.id === tableId);

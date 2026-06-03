@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import {
   assignStudentsToCourseEligibilityAction,
   bulkImportStudentIdentitiesAction,
@@ -333,19 +333,6 @@ function studentMatches(student: Student, q: string) {
     .some((item) => item.includes(query));
 }
 
-function instructorTemplateText() {
-  return [
-    "講師姓名\t手機\t授課專長\t備註",
-    "陳講師\t0912345678\t美容丙級,護膚\t平日白天可授課",
-    "林講師\t0987654321\t美甲,美睫\t可支援週末班",
-  ].join("\n");
-}
-
-function formatList(items?: string[]) {
-  const values = (items ?? []).map(text).filter(Boolean);
-  return values.length > 0 ? values.join("、") : "未設定";
-}
-
 function instructorMatches(instructor: Instructor, q: string) {
   const query = norm(q);
   if (!query) return true;
@@ -380,23 +367,8 @@ function statusLabel(value: unknown) {
   return labels[status] ?? status ?? "未設定";
 }
 
-function courseListStatusLabel(value: unknown) {
-  const status = norm(value);
-  if (status === "active") return "上課中";
-  if (status === "completed") return "已結訓";
-  if (["withdrawn", "cancelled", "inactive"].includes(status)) return "未加入";
-  return text(value) || "未加入";
-}
-
 function dateText(...values: unknown[]) {
   return values.map(text).find(Boolean) ?? "未紀錄時間";
-}
-
-function studentHasRecordForSelection(
-  recordByStudentId: Map<string, StudentCourseRecord>,
-  studentId: string,
-) {
-  return Boolean(recordByStudentId.get(studentId));
 }
 
 export default async function AdminStudentsPage({ searchParams }: PageProps) {
@@ -431,9 +403,6 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
   const instructorSpecialtyCategories = categories
     .filter((category) => category.isActive !== false)
     .sort((a, b) => Number(a.sortOrder ?? 0) - Number(b.sortOrder ?? 0));
-  const specialtyCategoryByName = new Map(
-    instructorSpecialtyCategories.map((category) => [category.name, category]),
-  );
   const courseOptions = getCourseOptions(courseSeries, courseOfferings);
   const selectedSeriesId =
     querySeriesId && courseOptions.some((option) => option.id === querySeriesId)
@@ -483,9 +452,6 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
     .sort(compareStudentsByMemberNo);
   const records = studentCourseRecords.filter((record) =>
     recordMatches(record, selectedSeriesId, selectedYear),
-  );
-  const studentById = new Map(
-    visibleStudents.map((student) => [student.id, student]),
   );
   const recordByStudentId = new Map(
     records.map((record) => [record.studentId, record]),
@@ -556,9 +522,6 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
           .some((item) => item.includes(norm(q)))
       );
     });
-  const editableQualificationRows = qualificationRows.filter(
-    (row): row is (typeof qualificationRows)[number] & { record: StudentCourseRecord } => Boolean(row.record),
-  );
   const sessionById = new Map(courseSessions.map((item) => [item.id, item]));
 
   const visibleInstructors = instructors
@@ -575,6 +538,9 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
   const selectedHistoryStudent = historyStudentCandidates[0];
   const selectedHistoryStudentId = selectedHistoryStudent?.id ?? "";
 
+  const selectedHistoryRecords = selectedHistoryStudent
+    ? studentCourseRecords.filter((record) => record.studentId === selectedHistoryStudentId)
+    : [];
   const selectedHistoryEnrollments = selectedHistoryStudent
     ? enrollments.filter((enrollment) => enrollment.studentId === selectedHistoryStudentId)
     : [];
@@ -589,8 +555,8 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
     ? attendanceRecords.filter((attendance) => attendance.studentId === selectedHistoryStudentId)
     : [];
 
-  const historyCourseCards = visibleHistoryEnrollments
-    .map((enrollment) => {
+  const historyCourseCards = [
+    ...visibleHistoryEnrollments.map((enrollment) => {
       const offering = offeringById.get(enrollment.offeringId);
       const series = enrollment.seriesId ? seriesById.get(enrollment.seriesId) : undefined;
       const relatedAttendance = selectedHistoryAttendance.filter((attendance) => {
@@ -620,13 +586,41 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
           offering?.title ||
           series?.title ||
           "課程班級",
-        status: courseListStatusLabel(enrollment.status),
+        status: statusLabel(enrollment.status),
         attendanceText: totalAttendance > 0 ? `${attendedCount} / ${totalAttendance}` : "尚無點名",
         latestActivity: latestActivity || "未紀錄",
         note: text(enrollment.note || enrollment.notes || enrollment.groupLabel),
       };
-    })
-    .sort((a, b) => text(b.latestActivity).localeCompare(text(a.latestActivity)));
+    }),
+    ...selectedHistoryRecords
+      .filter((record) => {
+        if (!record?.offeringId) return true;
+        return !visibleHistoryEnrollments.some((enrollment) => enrollment.offeringId === record?.offeringId);
+      })
+      .filter((record) => {
+        const recordStatus = norm(getCourseRosterStatus(record));
+        return !["已退出", "withdrawn", "cancelled", "inactive"].includes(recordStatus);
+      })
+      .map((record) => {
+        const series = seriesById.get(record.seriesId || record.courseMasterId || "");
+        const offering = record?.offeringId ? offeringById.get(record?.offeringId) : undefined;
+        return {
+          id: `history-record-${record.id}`,
+          title:
+            record?.classDisplayName ||
+            offering?.displayTitle ||
+            offering?.displayName ||
+            offering?.title ||
+            series?.title ||
+            record.sourceColumn ||
+            "課程狀態",
+          status: getCourseRosterStatus(record),
+          attendanceText: "尚無點名",
+          latestActivity: dateText(record?.updatedAt, record?.createdAt, record.importedAt),
+          note: text(record?.note || record?.rawValue),
+        };
+      }),
+  ].sort((a, b) => text(b.latestActivity).localeCompare(text(a.latestActivity)));
 
   const recentHistoryRows = [
     ...selectedHistoryReservations.map((reservation) => {
@@ -674,7 +668,7 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
         offeringById.get(enrollment.offeringId)?.displayName ||
         offeringById.get(enrollment.offeringId)?.title ||
         "班級名單",
-      status: courseListStatusLabel(enrollment.status),
+      status: statusLabel(enrollment.status),
       occurredAt: dateText(enrollment.updatedAt, enrollment.createdAt, enrollment.joinedAt),
       note: text(enrollment.note || enrollment.notes || enrollment.groupLabel),
     })),
@@ -1607,19 +1601,13 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
                       instructorSpecialtyCategories.map((category) => (
                         <label
                           key={category.id}
-                          className="inline-flex cursor-pointer items-center gap-2 rounded-full border px-3 py-2 text-xs font-bold transition hover:shadow-sm"
-                          style={{
-                            borderColor: `${category.color ?? "#ead7c6"}55`,
-                            backgroundColor: `${category.color ?? "#ef6c00"}12`,
-                            color: category.color ?? "#6b3b25",
-                          }}
+                          className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-[#ead7c6] bg-white px-3 py-2 text-xs font-bold text-[#6b3b25] transition hover:border-[#ef6c00]"
                         >
                           <input
                             type="checkbox"
                             name="specialties"
                             value={category.name}
-                            className="h-3.5 w-3.5"
-                            style={{ accentColor: category.color ?? "#ef6c00" }}
+                            className="h-3.5 w-3.5 accent-[#ef6c00]"
                           />
                           {category.name}
                         </label>
@@ -1684,22 +1672,14 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
                   </p>
                   <div className="flex flex-wrap gap-2 text-xs font-bold text-[#6b3b25]">
                     {instructor.specialties && instructor.specialties.length > 0 ? (
-                      instructor.specialties.map((specialty) => {
-                        const category = specialtyCategoryByName.get(specialty);
-                        return (
-                          <span
-                            key={specialty}
-                            className="rounded-full border px-3 py-1"
-                            style={{
-                              borderColor: `${category?.color ?? "#ead7c6"}55`,
-                              backgroundColor: `${category?.color ?? "#fff7ed"}12`,
-                              color: category?.color ?? "#6b3b25",
-                            }}
-                          >
-                            {specialty}
-                          </span>
-                        );
-                      })
+                      instructor.specialties.map((specialty) => (
+                        <span
+                          key={specialty}
+                          className="rounded-full border border-[#ead7c6] bg-[#fff7ed] px-3 py-1"
+                        >
+                          {specialty}
+                        </span>
+                      ))
                     ) : (
                       <span className="text-sm font-medium text-zinc-400">未設定</span>
                     )}
@@ -1973,16 +1953,17 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
               <span>狀態</span>
             </div>
             <div className="divide-y divide-[#f0dfcf] rounded-b-2xl border-x border-b border-[#ead7c6] bg-white">
-              {editableQualificationRows.map(
+              {qualificationRows.map(
                 ({ student, record, status: rowStatus }) => (
                   <label
-                    key={record.id}
+                    key={record?.id ?? student.id}
                     className="grid cursor-pointer gap-3 px-5 py-4 transition hover:bg-[#fffaf5] md:grid-cols-[48px_1.1fr_110px_150px_1fr_150px] md:items-center"
                   >
                     <input
                       type="checkbox"
                       name="recordIds"
-                      value={record.id}
+                      value={record?.id ?? ""}
+                      disabled={!record}
                       className="h-5 w-5 rounded border-[#d8bda4] accent-[#ef6c00]"
                     />
                     <div>
@@ -1999,8 +1980,8 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
                       {student.phone || "未填"}
                     </div>
                     <div className="text-sm text-zinc-700">
-                      {record.classDisplayName ||
-                        record.termLabel ||
+                      {record?.classDisplayName ||
+                        record?.termLabel ||
                         "尚未分配梯次"}
                     </div>
                     <div>
@@ -2013,7 +1994,7 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
                   </label>
                 ),
               )}
-              {editableQualificationRows.length === 0 ? (
+              {qualificationRows.length === 0 ? (
                 <p className="p-6 text-sm text-zinc-500">
                   目前沒有符合條件的課程狀態。請先切到「課程狀態」勾選學員加入。
                 </p>
@@ -2028,8 +2009,8 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
             </p>
           </div>
           <div className="divide-y divide-[#f0dfcf]">
-            {editableQualificationRows.map(({ currentClasses, student, record, status: rowStatus }) => (
-              <details key={record.id} className="group px-5 py-4">
+            {qualificationRows.map(({ student, record, status: rowStatus }) => (
+              <details key={record?.id ?? student.id} className="group px-5 py-4">
                 <summary className="flex cursor-pointer list-none flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -2046,8 +2027,8 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
                       </span>
                     </div>
                     <p className="mt-1 text-sm text-zinc-500">
-                      {record.classDisplayName ||
-                        record.termLabel ||
+                      {record?.classDisplayName ||
+                        record?.termLabel ||
                         "尚未分配梯次"}
                       ｜手機 {student.phone || "未填"}
                     </p>
@@ -2060,7 +2041,7 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
                   action={updateStudentCourseEligibilityAction}
                   className="mt-4 grid gap-3 rounded-2xl border border-[#ead7c6] bg-[#fffaf5] p-4 lg:grid-cols-[160px_1fr_1fr_auto]"
                 >
-                  <input type="hidden" name="recordId" value={record.id} />
+                  <input type="hidden" name="recordId" value={record?.id ?? ""} />
                   <input
                     type="hidden"
                     name="seriesId"
@@ -2080,7 +2061,7 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
                   </select>
                   <select
                     name="targetOfferingId"
-                    defaultValue={record.offeringId ?? ""}
+                    defaultValue={record?.offeringId ?? ""}
                     className="h-12 rounded-2xl border border-[#ead7c6] bg-white px-4 text-sm font-bold text-[#4a2a1a] shadow-sm outline-none transition focus:border-[#ef6c00] focus:ring-2 focus:ring-[#f7c58d]/40"
                   >
                     <option value="">尚未分配梯次</option>
@@ -2092,7 +2073,7 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
                   </select>
                   <input
                     name="note"
-                    defaultValue={record.note ?? ""}
+                    defaultValue={record?.note ?? ""}
                     placeholder="備註"
                     className="h-12 rounded-2xl border border-[#ead7c6] bg-white px-4 text-sm text-[#4a2a1a] shadow-sm outline-none transition placeholder:text-zinc-400 focus:border-[#ef6c00] focus:ring-2 focus:ring-[#f7c58d]/40"
                   />
@@ -2102,7 +2083,7 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
                 </form>
               </details>
             ))}
-            {editableQualificationRows.length === 0 ? (
+            {qualificationRows.length === 0 ? (
               <p className="p-6 text-sm text-zinc-500">
                 目前沒有符合條件的課程狀態。請先切到「課程狀態」勾選學員加入。
               </p>
@@ -2113,3 +2094,6 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
     </AdminShell>
   );
 }
+
+
+

@@ -155,11 +155,6 @@ export default async function AdminHomePage() {
   const unscheduledClasses = courseSummaries.filter((item) => !item.nextSession);
   const emptyRosterClasses = courseSummaries.filter((item) => item.rosterCount === 0);
   const pendingAttendanceSessions = todaySessions.filter((item) => item.bookedCount > item.attendedCount + item.absentCount);
-  const completedAttendanceSessions = todaySessions.filter(
-    (item) => item.bookedCount > 0 && item.attendedCount + item.absentCount >= item.bookedCount,
-  );
-  const lockingSessions = weeklySessions.filter((item) => item.daysUntil >= 0 && item.daysUntil <= 7);
-  const fullClasses = weeklySessions.filter((item) => item.capacity > 0 && item.bookedCount >= item.capacity);
   const weeklyBookingCount = weeklySessions.reduce((sum, item) => sum + item.bookedCount, 0);
   const weeklyCapacity = weeklySessions.reduce((sum, item) => sum + item.capacity, 0);
 

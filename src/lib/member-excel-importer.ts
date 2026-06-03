@@ -116,7 +116,6 @@ export function importMemberWorkbookToBookingData(
 
         const recordId = buildStudentCourseRecordId(student.id, offering.item.id, sheet.name, sourceRow, header);
         let entitlementId: string | undefined;
-        let enrollmentId: string | undefined;
 
         if (parsed.recordType === "first_attendance_date" && parsed.firstAttendanceAt) {
           const entitlement = upsertEntitlement(
@@ -143,7 +142,7 @@ export function importMemberWorkbookToBookingData(
           importBatchId,
           importedAt,
         );
-        enrollmentId = enrollment.item.id;
+        const enrollmentId = enrollment.item.id;
 
         const existingRecord = data.studentCourseRecords.find((item) => item.id === recordId);
         const record: StudentCourseRecord = {

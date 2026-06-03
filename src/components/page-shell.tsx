@@ -45,23 +45,18 @@ type NavGroup = {
   items?: NavLink[];
 };
 
-const palette = {
-  clay: "#E85F00",
-  honey: "#E7892B",
-  copper: "#B46F4A",
-  terracotta: "#8B5035",
-  deep: "#5A3726",
-  cream: "#FFF7EE",
-  paper: "#FFFCF7",
-  line: "#E9D6C4",
-};
-
 function isCurrent(currentSection: string | undefined, key: string) {
   if (!currentSection) return false;
   return currentSection === key || currentSection.startsWith(`${key}.`);
 }
 
-function LineIcon({ name, className = "h-5 w-5" }: { name: IconName; className?: string }) {
+function LineIcon({
+  name,
+  className = "h-5 w-5",
+}: {
+  name: IconName;
+  className?: string;
+}) {
   const common = {
     fill: "none",
     stroke: "currentColor",
@@ -71,7 +66,12 @@ function LineIcon({ name, className = "h-5 w-5" }: { name: IconName; className?:
   };
 
   return (
-    <svg viewBox="0 0 24 24" className={className} aria-hidden="true" {...common}>
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      aria-hidden="true"
+      {...common}
+    >
       {name === "home" ? (
         <>
           <path d="M4 10.5 12 4l8 6.5" />
@@ -255,13 +255,7 @@ function NavItem({
   );
 }
 
-function GroupHeader({
-  group,
-  active,
-}: {
-  group: NavGroup;
-  active: boolean;
-}) {
+function GroupHeader({ group, active }: { group: NavGroup; active: boolean }) {
   const className = [
     "flex w-full items-center gap-3 rounded-[22px] border px-3 py-3 text-left transition-all duration-150",
     active
@@ -307,7 +301,11 @@ function GroupHeader({
 
   if (group.href) {
     return (
-      <a href={group.href} className={className} aria-current={active ? "page" : undefined}>
+      <a
+        href={group.href}
+        className={className}
+        aria-current={active ? "page" : undefined}
+      >
         {content}
       </a>
     );
@@ -362,20 +360,36 @@ export function StudentShell({ children }: { children: ReactNode }) {
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,#fff8f0_0,#f7efe7_45%,#f3e7da_100%)] text-stone-950">
       <header className="sticky top-0 z-40 border-b border-[#ead8c6] bg-[#fffaf5]/95 backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <a href="/" className="inline-flex items-center gap-3 rounded-2xl px-2 py-1 text-[#3a2a20] transition hover:bg-white/70">
-            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#E85F00] via-[#E7892B] to-[#B46F4A] text-white shadow-sm ring-1 ring-white/70" aria-hidden="true">
+          <a
+            href="/"
+            className="inline-flex items-center gap-3 rounded-2xl px-2 py-1 text-[#3a2a20] transition hover:bg-white/70"
+          >
+            <span
+              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#E85F00] via-[#E7892B] to-[#B46F4A] text-white shadow-sm ring-1 ring-white/70"
+              aria-hidden="true"
+            >
               <LineIcon name="course" className="h-6 w-6" />
             </span>
             <span className="min-w-0">
-              <span className="block text-base font-black leading-tight tracking-tight sm:text-lg">台南市美髮及美容美體業產業工會</span>
-              <span className="mt-0.5 block text-sm font-bold leading-tight text-[#8B5035]">課程預約系統</span>
+              <span className="block text-base font-black leading-tight tracking-tight sm:text-lg">
+                台南市美髮及美容美體業產業工會
+              </span>
+              <span className="mt-0.5 block text-sm font-bold leading-tight text-[#8B5035]">
+                課程預約系統
+              </span>
             </span>
           </a>
           <div className="grid w-full grid-cols-2 gap-2 text-sm sm:flex sm:w-auto sm:items-center sm:gap-3">
-            <a href="/booking/search" className="rounded-full border border-[#d8bda4] bg-white/85 px-4 py-3 text-center font-bold text-[#6f4325] shadow-sm transition hover:bg-[#fff4e8]">
+            <a
+              href="/booking/search"
+              className="rounded-full border border-[#d8bda4] bg-white/85 px-4 py-3 text-center font-bold text-[#6f4325] shadow-sm transition hover:bg-[#fff4e8]"
+            >
               查詢預約
             </a>
-            <a href="/admin/login" className="rounded-full bg-[#5A3726] px-4 py-3 text-center font-bold text-white shadow-sm transition hover:bg-[#3a2a20]">
+            <a
+              href="/admin/login"
+              className="rounded-full bg-[#5A3726] px-4 py-3 text-center font-bold text-white shadow-sm transition hover:bg-[#3a2a20]"
+            >
               後台
             </a>
           </div>
@@ -396,14 +410,24 @@ export function AdminShell({
     {
       key: "dashboard",
       title: "工作台",
-      description: "今日總覽與待辦",
+      description: "秘書處與授課人員入口",
       href: "/admin",
       icon: "home",
       items: [
-        { href: "/admin", label: "今日工作總覽", key: "dashboard.today", description: "今日課堂、點名與提醒", icon: "today" },
-        { href: "/admin/weekly-bookings", label: "本週報名狀況", key: "dashboard.weekly-booking", description: "一週內開課與報名概況", icon: "dashboard" },
-        { href: "/admin/booking-locks", label: "即將鎖定預約", key: "dashboard.booking-lock", description: "7 天內不可更改提醒", icon: "session" },
-        { href: "/admin/todos", label: "待處理事項", key: "dashboard.todo", description: "未排場次、未點名、名冊異常", icon: "attendance" },
+        {
+          href: "/admin",
+          label: "秘書處工作台",
+          key: "dashboard.admin",
+          description: "總控課程、報名、點名與待辦",
+          icon: "today",
+        },
+        {
+          href: "/teaching/login",
+          label: "授課工作台",
+          key: "dashboard.teaching",
+          description: "講師與助教登入授課頁",
+          icon: "training",
+        },
       ],
     },
     {
@@ -450,24 +474,17 @@ export function AdminShell({
       items: [
         {
           href: "/admin/weekly-bookings",
-          label: "本週報名",
+          label: "報名總覽",
           key: "booking.weekly",
-          description: "一週內課程報名狀況",
+          description: "近期課程報名狀況",
           icon: "today",
         },
         {
           href: "/admin/booking-locks",
-          label: "即將鎖定",
+          label: "鎖定管理",
           key: "booking.locking",
           description: "預約即將不可更改",
           icon: "session",
-        },
-        {
-          href: "/admin/full-classes",
-          label: "已額滿班級",
-          key: "booking.full",
-          description: "名額已滿與候補提醒",
-          icon: "dashboard",
         },
         {
           href: "/admin/course-offerings",
@@ -481,7 +498,7 @@ export function AdminShell({
     {
       key: "attendance",
       title: "點名出勤",
-      description: "講師、助教與行政共用",
+      description: "點名、出勤與課堂紀錄",
       icon: "attendance",
       items: [
         {
@@ -492,17 +509,10 @@ export function AdminShell({
           icon: "today",
         },
         {
-          href: "/admin/course-sessions",
-          label: "我的授課班級",
-          key: "attendance.my-classes",
-          description: "目前先顯示全部班級",
-          icon: "teacher",
-        },
-        {
-          href: "/admin/stats",
+          href: "/admin/stats?report=attendance",
           label: "出勤紀錄",
           key: "attendance.dashboard",
-          description: "出席、未到與待點名",
+          description: "出席、未到與完成率",
           icon: "dashboard",
         },
       ],
@@ -546,29 +556,22 @@ export function AdminShell({
     {
       key: "reports",
       title: "統計報表",
-      description: "報名、出席與課程分析",
+      description: "統計、備份與同步",
       icon: "dashboard",
       items: [
         {
-          href: "/admin/stats?report=booking",
-          label: "報名統計",
-          key: "reports.booking",
-          description: "各班報名與額滿狀況",
-          icon: "roster",
+          href: "/admin/stats",
+          label: "統計分析",
+          key: "reports.overview",
+          description: "報名、出席與課程分析",
+          icon: "dashboard",
         },
         {
-          href: "/admin/stats?report=attendance",
-          label: "出席統計",
-          key: "reports.attendance",
-          description: "出席、未到與完成率",
-          icon: "attendance",
-        },
-        {
-          href: "/admin/stats?report=course",
-          label: "課程統計",
-          key: "reports.course",
-          description: "課程類別與年度課程分析",
-          icon: "course",
+          href: "/admin/exports",
+          label: "備份同步",
+          key: "reports.exports",
+          description: "Google Sheet、XLSX 與 CSV",
+          icon: "external",
         },
       ],
     },
@@ -601,7 +604,11 @@ export function AdminShell({
 
           <nav className="space-y-3 pb-6" aria-label="工會後台功能導覽">
             {groups.map((group) => (
-              <SidebarGroup key={group.key} group={group} currentSection={currentSection} />
+              <SidebarGroup
+                key={group.key}
+                group={group}
+                currentSection={currentSection}
+              />
             ))}
 
             <section className="border-t border-[#E7892B]/20 pt-5">
@@ -613,7 +620,9 @@ export function AdminShell({
                   <LineIcon name="external" />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-lg font-black leading-6">前往學員前台</span>
+                  <span className="block text-lg font-black leading-6">
+                    前往學員前台
+                  </span>
                   <span className="mt-1 block text-sm leading-5 text-[#fff8f1]">
                     清楚切換到學員預約與查詢端
                   </span>
@@ -626,7 +635,10 @@ export function AdminShell({
 
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="border-b border-[#E7892B]/20 bg-white/80 px-4 py-3 backdrop-blur lg:hidden">
-            <a href="/admin" className="inline-flex items-center gap-2 text-base font-semibold text-zinc-900">
+            <a
+              href="/admin"
+              className="inline-flex items-center gap-2 text-base font-semibold text-zinc-900"
+            >
               <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-[#E85F00] via-[#E7892B] to-[#B46F4A] text-white">
                 <LineIcon name="course" className="h-4.5 w-4.5" />
               </span>

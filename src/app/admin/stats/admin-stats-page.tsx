@@ -176,13 +176,6 @@ export default async function AdminStatsPage({ searchParams }: PageProps) {
     (reservation) => reservation.attendanceStatus === "pending",
   ).length;
 
-  const totalCapacity = activeSessions.reduce(
-    (sum, session) => sum + session.capacity,
-    0,
-  );
-  const totalBooked = reservations.filter(
-    (reservation) => reservation.status === "booked",
-  ).length;
   const totalAttended = reservations.filter(
     (reservation) =>
       reservation.status === "booked" &&

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { inferCategoryFromCode, inferCourseTypeFromCode } from "@/lib/course-coding";
+import { syncGoogleSheets } from "@/lib/google-sheets-sync";
 import {
   buildSessionDeadline,
   cancelReservationByStaff,
@@ -12,6 +13,9 @@ import {
   getBookingData,
   setDocumentActive,
   updateReservationAttendance,
+  updateReservationAttendanceBySessionStudent,
+  updateReservationLessonNotes,
+  markSessionReservationsAttended,
   upsertCategory,
   upsertCourse,
   upsertCourseOffering,
@@ -24,8 +28,9 @@ import {
   deleteInstructorIdentityDocument,
   removeStudentCourseEligibility,
   addStudentToSessionRoster,
+  ensureSessionRosterReservation,
 } from "@/lib/booking-repository";
-import type { AttendanceStatus, CourseCategory, CourseOffering, CourseSeries, CourseSession, Student, StudentCourseRecord } from "@/lib/types";
+import type { AttendanceStatus, CourseCategory, CourseOffering, CourseSeries, CourseSession, Student, StudentCourseRecord, Instructor } from "@/lib/types";
 
 function slugify(input: string) {
   return input
@@ -70,11 +75,64 @@ function formatDate(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
+function encodePathSegment(segment: string) {
+  if (!segment) return segment;
+  try {
+    return encodeURIComponent(decodeURIComponent(segment));
+  } catch {
+    return encodeURIComponent(segment);
+  }
+}
+
+function encodeRouteSegment(segment: string) {
+  return encodePathSegment(segment)
+    .replace(/%2F/gi, "~2F")
+    .replace(/%5C/gi, "~5C");
+}
+
+function buildAdminSessionReservationsPath(sessionId: string) {
+  const safeSessionId = encodeRouteSegment(sessionId);
+  return safeSessionId ? `/admin/sessions/${safeSessionId}/reservations` : "/admin/course-sessions";
+}
+
+function encodeQueryString(query: string) {
+  if (!query) return "";
+  return query
+    .split("&")
+    .map((pair) => {
+      const [key, ...rest] = pair.split("=");
+      const value = rest.join("=");
+      const safeKey = encodePathSegment(key);
+      const safeValue = value ? encodePathSegment(value) : "";
+      return value ? `${safeKey}=${safeValue}` : safeKey;
+    })
+    .join("&");
+}
+
+function safeRedirectPath(path: string | null | undefined, fallback = "/admin") {
+  const raw = String(path ?? "").trim();
+
+  if (!raw || !raw.startsWith("/admin") || raw.startsWith("//")) {
+    return fallback;
+  }
+
+  const hashIndex = raw.indexOf("#");
+  const beforeHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
+  const hash = hashIndex >= 0 ? raw.slice(hashIndex + 1) : "";
+
+  const queryIndex = beforeHash.indexOf("?");
+  const pathname = queryIndex >= 0 ? beforeHash.slice(0, queryIndex) : beforeHash;
+  const query = queryIndex >= 0 ? beforeHash.slice(queryIndex + 1) : "";
+
+  const safePathname = pathname.split("/").map(encodePathSegment).join("/");
+  const safeQuery = query ? `?${encodeQueryString(query)}` : "";
+  const safeHash = hash ? `#${encodePathSegment(hash)}` : "";
+
+  return `${safePathname}${safeQuery}${safeHash}`;
+}
+
 function normalizeAdminRedirect(value: FormDataEntryValue | null, fallback: string) {
-  const raw = String(value ?? "").trim();
-  if (!raw.startsWith("/admin")) return fallback;
-  if (raw.startsWith("//")) return fallback;
-  return raw;
+  return safeRedirectPath(String(value ?? "").trim(), fallback);
 }
 
 function normalizeStringList(value: FormDataEntryValue | null) {
@@ -93,29 +151,248 @@ function buildManagedId(prefix: string, parts: Array<string | number | undefined
   return `${prefix}-${parts.map((part) => slugify(String(part ?? ""))).filter(Boolean).join("-")}`;
 }
 
+function computeLeaveHoursFromTimeRange(start?: string, end?: string) {
+  const parse = (value?: string) => {
+    const match = String(value ?? "").match(/^(\d{1,2}):(\d{2})/);
+    if (!match) return undefined;
+    const hour = Number(match[1]);
+    const minute = Number(match[2]);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute)) return undefined;
+    return hour * 60 + minute;
+  };
+  const startMinutes = parse(start);
+  const endMinutes = parse(end);
+  if (startMinutes == null || endMinutes == null || endMinutes <= startMinutes) return undefined;
+  return Math.max(0.5, Math.round(((endMinutes - startMinutes) / 60) * 2) / 2);
+}
+
+export async function syncGoogleSheetsAction(formData: FormData) {
+  const mode = String(formData.get("mode") ?? "all");
+
+  if (mode !== "all") {
+    redirect("/admin/exports?googleSheetsSync=failed");
+  }
+
+  const result = await syncGoogleSheets("all");
+
+  if (!result.ok) {
+    const status = result.reason === "not-configured" ? "not-configured" : "failed";
+    redirect(`/admin/exports?googleSheetsSync=${status}`);
+  }
+
+  revalidatePath("/admin/exports");
+  redirect("/admin/exports?googleSheetsSync=success");
+}
+
 export async function updateAttendanceAction(formData: FormData) {
   const reservationId = String(formData.get("reservationId") ?? "");
   const sessionId = String(formData.get("sessionId") ?? "");
   const attendanceStatus = String(formData.get("attendanceStatus") ?? "") as AttendanceStatus;
+  const leaveHoursRaw = Number(formData.get("leaveHours") ?? 0);
+  const leaveHours = Number.isFinite(leaveHoursRaw) && leaveHoursRaw > 0 ? leaveHoursRaw : undefined;
+  const leaveStartTime = String(formData.get("leaveStartTime") ?? "").trim() || undefined;
+  const leaveEndTime = String(formData.get("leaveEndTime") ?? "").trim() || undefined;
+  const lateTime = String(formData.get("lateTime") ?? "").trim() || undefined;
+  const effectiveLeaveHours = attendanceStatus === "leave" ? computeLeaveHoursFromTimeRange(leaveStartTime, leaveEndTime) ?? leaveHours : leaveHours;
   const redirectTo = normalizeAdminRedirect(
     formData.get("redirectTo"),
-    `/admin/sessions/${sessionId}/reservations`,
+    buildAdminSessionReservationsPath(sessionId),
   );
 
-  await updateReservationAttendance(reservationId, attendanceStatus);
+  await updateReservationAttendance(reservationId, attendanceStatus, { leaveHours: effectiveLeaveHours, leaveStartTime, leaveEndTime, lateTime });
   revalidatePath("/admin");
   revalidatePath("/admin/stats");
-  revalidatePath(`/admin/sessions/${sessionId}/reservations`);
+  if (sessionId) revalidatePath(buildAdminSessionReservationsPath(sessionId));
   revalidatePath(redirectTo.split("#")[0] || "/admin");
   redirect(redirectTo);
 }
+
+export async function updateRosterAttendanceAction(formData: FormData) {
+  const reservationId = String(formData.get("reservationId") ?? "");
+  const sessionId = String(formData.get("sessionId") ?? "");
+  const courseId = String(formData.get("courseId") ?? "");
+  const studentId = String(formData.get("studentId") ?? "");
+  const attendanceStatus = String(formData.get("attendanceStatus") ?? "") as AttendanceStatus;
+  const leaveHoursRaw = Number(formData.get("leaveHours") ?? 0);
+  const leaveHours = Number.isFinite(leaveHoursRaw) && leaveHoursRaw > 0 ? leaveHoursRaw : undefined;
+  const leaveStartTime = String(formData.get("leaveStartTime") ?? "").trim() || undefined;
+  const leaveEndTime = String(formData.get("leaveEndTime") ?? "").trim() || undefined;
+  const lateTime = String(formData.get("lateTime") ?? "").trim() || undefined;
+  const effectiveLeaveHours = attendanceStatus === "leave" ? computeLeaveHoursFromTimeRange(leaveStartTime, leaveEndTime) ?? leaveHours : leaveHours;
+  const redirectTo = normalizeAdminRedirect(
+    formData.get("redirectTo"),
+    buildAdminSessionReservationsPath(sessionId),
+  );
+
+  let targetReservationId = reservationId.startsWith("roster-") ? "" : reservationId;
+
+  if (!targetReservationId && studentId && courseId && sessionId) {
+    const data = await getBookingData();
+    const existing = (data.reservations ?? []).find(
+      (reservation) =>
+        reservation.sessionId === sessionId &&
+        reservation.studentId === studentId &&
+        reservation.status === "booked",
+    );
+
+    if (existing) {
+      targetReservationId = existing.id;
+    } else {
+      const result = await ensureSessionRosterReservation(studentId, courseId, sessionId);
+      if (result.ok) {
+        targetReservationId = result.reservation.id;
+      } else {
+        const refreshed = await getBookingData();
+        const created = (refreshed.reservations ?? []).find(
+          (reservation) =>
+            reservation.sessionId === sessionId &&
+            reservation.studentId === studentId &&
+            reservation.status === "booked",
+        );
+        if (created) targetReservationId = created.id;
+      }
+    }
+  }
+
+  if (targetReservationId) {
+    await updateReservationAttendanceBySessionStudent(targetReservationId, sessionId, studentId, attendanceStatus, { leaveHours: effectiveLeaveHours, leaveStartTime, leaveEndTime, lateTime });
+  }
+
+  revalidatePath("/admin");
+  revalidatePath("/admin/stats");
+  if (sessionId) revalidatePath(buildAdminSessionReservationsPath(sessionId));
+  revalidatePath(redirectTo.split("#")[0] || "/admin");
+  redirect(redirectTo);
+}
+
+
+export async function bookRosterStudentByStaffAction(formData: FormData) {
+  const studentId = String(formData.get("studentId") ?? "").trim();
+  const courseId = String(formData.get("courseId") ?? "").trim();
+  const sessionId = String(formData.get("sessionId") ?? "").trim();
+  const redirectTo = normalizeAdminRedirect(
+    formData.get("redirectTo"),
+    sessionId ? `${buildAdminSessionReservationsPath(sessionId)}#attendance-list` : "/admin/course-sessions",
+  );
+
+  if (!studentId || !courseId || !sessionId) {
+    redirect(appendAdminQuery(redirectTo, "rosterBooking=invalid"));
+  }
+
+  const data = await getBookingData();
+  const course = (data.courses ?? []).find((item) => item.id === courseId || item.offeringId === courseId);
+  const session = course?.sessions?.find((item) => item.id === sessionId);
+
+  if (!course || !session) {
+    redirect(appendAdminQuery(redirectTo, "rosterBooking=invalid"));
+  }
+
+  const existing = (data.reservations ?? []).find(
+    (reservation) =>
+      reservation.sessionId === session.id &&
+      reservation.studentId === studentId &&
+      reservation.status === "booked",
+  );
+
+  if (!existing) {
+    const bookedCount = (data.reservations ?? []).filter(
+      (reservation) => reservation.sessionId === session.id && reservation.status === "booked",
+    ).length;
+    const capacity = Number(session.capacity ?? 0);
+
+    if (capacity > 0 && bookedCount >= capacity) {
+      redirect(appendAdminQuery(redirectTo, "rosterBooking=full"));
+    }
+  }
+
+  const result = await ensureSessionRosterReservation(studentId, course.id, session.id);
+
+  revalidatePath("/");
+  revalidatePath("/admin");
+  revalidatePath("/admin/stats");
+  revalidatePath("/admin/course-sessions");
+  revalidatePath(`/admin/courses/${course.id}/sessions`);
+  revalidatePath(buildAdminSessionReservationsPath(session.id));
+  revalidatePath(redirectTo.split("#")[0] || "/admin");
+
+  if (!result.ok) {
+    redirect(appendAdminQuery(redirectTo, `rosterBooking=${result.reason}`));
+  }
+
+  redirect(appendAdminQuery(redirectTo, "rosterBooking=success"));
+}
+
+
+export async function markAllSessionStudentsAttendedAction(formData: FormData) {
+  const sessionId = String(formData.get("sessionId") ?? "").trim();
+  const courseId = String(formData.get("courseId") ?? "").trim();
+  const redirectTo = normalizeAdminRedirect(
+    formData.get("redirectTo"),
+    sessionId ? `${buildAdminSessionReservationsPath(sessionId)}#attendance-list` : "/admin/course-sessions",
+  );
+
+  if (!sessionId || !courseId) {
+    redirect(redirectTo);
+  }
+
+  const data = await getBookingData();
+  const course = (data.courses ?? []).find((item) => item.id === courseId || item.offeringId === courseId);
+  const session = course?.sessions?.find((item) => item.id === sessionId);
+
+  if (!course || !session) {
+    redirect(redirectTo);
+  }
+
+  const offeringCandidates = new Set(
+    [course.id, course.offeringId, session.offeringId].filter(Boolean).map(String),
+  );
+  const seriesCandidates = new Set(
+    [course.seriesId, course.courseMasterId, course.courseSeriesId, session.seriesId].filter(Boolean).map(String),
+  );
+
+  const rosterStudentIds = (data.enrollments ?? [])
+    .filter((enrollment) => !["cancelled", "inactive", "withdrawn", "deleted"].includes(String(enrollment.status ?? "active")))
+    .filter((enrollment) => {
+      const enrollmentOfferingIds = [enrollment.offeringId, enrollment.courseOfferingId, enrollment.courseId]
+        .filter(Boolean)
+        .map(String);
+
+      if (enrollmentOfferingIds.length > 0) {
+        return enrollmentOfferingIds.some((id) => offeringCandidates.has(id));
+      }
+
+      const enrollmentSeriesIds = [enrollment.seriesId, enrollment.courseMasterId]
+        .filter(Boolean)
+        .map(String);
+
+      return enrollmentSeriesIds.some((id) => seriesCandidates.has(id));
+    })
+    .map((enrollment) => String(enrollment.studentId ?? ""))
+    .filter(Boolean);
+
+  for (const studentId of Array.from(new Set(rosterStudentIds))) {
+    await ensureSessionRosterReservation(studentId, course.id, session.id);
+  }
+
+  await markSessionReservationsAttended(session.id);
+
+  revalidatePath("/");
+  revalidatePath("/admin");
+  revalidatePath("/admin/stats");
+  revalidatePath("/admin/course-sessions");
+  revalidatePath(`/admin/courses/${course.id}/sessions`);
+  revalidatePath(buildAdminSessionReservationsPath(session.id));
+  revalidatePath(redirectTo.split("#")[0] || "/admin");
+  redirect(redirectTo);
+}
+
 
 export async function cancelReservationByStaffAction(formData: FormData) {
   const reservationId = String(formData.get("reservationId") ?? "");
   const sessionId = String(formData.get("sessionId") ?? "");
   const redirectTo = normalizeAdminRedirect(
     formData.get("redirectTo"),
-    sessionId ? `/admin/sessions/${sessionId}/reservations` : "/admin/course-sessions",
+    sessionId ? buildAdminSessionReservationsPath(sessionId) : "/admin/course-sessions",
   );
 
   if (reservationId) {
@@ -125,15 +402,100 @@ export async function cancelReservationByStaffAction(formData: FormData) {
       revalidatePath(`/courses/${result.courseId}`);
       revalidatePath(`/admin/courses/${result.courseId}`);
       revalidatePath(`/admin/courses/${result.courseId}/sessions`);
-      revalidatePath(`/admin/sessions/${result.sessionId}/reservations`);
+      revalidatePath(buildAdminSessionReservationsPath(result.sessionId));
     }
   }
 
   revalidatePath("/admin");
   revalidatePath("/admin/stats");
-  if (sessionId) revalidatePath(`/admin/sessions/${sessionId}/reservations`);
+  if (sessionId) revalidatePath(buildAdminSessionReservationsPath(sessionId));
   revalidatePath(redirectTo.split("#")[0] || "/admin");
   redirect(redirectTo);
+}
+
+
+export async function saveReservationLessonNotesAction(formData: FormData) {
+  const reservationId = String(formData.get("reservationId") ?? "").trim();
+  const sessionId = String(formData.get("sessionId") ?? "").trim();
+  const redirectTo = normalizeAdminRedirect(
+    formData.get("redirectTo"),
+    sessionId ? buildAdminSessionReservationsPath(sessionId) : "/admin/course-sessions",
+  );
+
+  if (!reservationId) {
+    redirect(redirectTo);
+  }
+
+  const update: { homework?: string; note?: string } = {};
+  if (formData.has("homework")) update.homework = String(formData.get("homework") ?? "").trim();
+  if (formData.has("note")) update.note = String(formData.get("note") ?? "").trim();
+
+  await updateReservationLessonNotes(reservationId, update);
+
+  if (sessionId) revalidatePath(buildAdminSessionReservationsPath(sessionId));
+  revalidatePath(redirectTo.split("#")[0] || "/admin");
+  redirect(redirectTo);
+}
+
+export async function saveReservationLessonNotesInlineAction(formData: FormData) {
+  const reservationId = String(formData.get("reservationId") ?? "").trim();
+  const sessionId = String(formData.get("sessionId") ?? "").trim();
+
+  if (!reservationId) {
+    return { ok: false as const, reason: "missing-reservation-id" as const };
+  }
+
+  const update: { homework?: string; note?: string } = {};
+  if (formData.has("homework")) update.homework = String(formData.get("homework") ?? "").trim();
+  if (formData.has("note")) update.note = String(formData.get("note") ?? "").trim();
+
+  await updateReservationLessonNotes(reservationId, update);
+
+  if (sessionId) revalidatePath(buildAdminSessionReservationsPath(sessionId));
+  return { ok: true as const, savedAt: new Date().toISOString() };
+}
+
+const SESSION_JOURNAL_INLINE_FIELDS = new Set([
+  "teachingContent",
+  "teacherNote",
+  "assistantNote",
+  "adminNote",
+  "abnormalStatus",
+  "followUpNote",
+]);
+
+export async function saveSessionJournalInlineAction(formData: FormData) {
+  const sessionId = String(formData.get("sessionId") ?? "").trim();
+  const field = String(formData.get("field") ?? "").trim();
+  const value = String(formData.get("value") ?? "").trim();
+
+  if (!sessionId) {
+    return { ok: false as const, reason: "missing-session-id" as const };
+  }
+  if (!SESSION_JOURNAL_INLINE_FIELDS.has(field)) {
+    return { ok: false as const, reason: "invalid-field" as const };
+  }
+
+  const data = await getBookingData();
+  const session = data.courses.flatMap((course) => course.sessions ?? []).find((item) => item.id === sessionId);
+  if (!session) {
+    return { ok: false as const, reason: "session-not-found" as const };
+  }
+
+  const nextSession: CourseSession = {
+    ...session,
+    [field]: value,
+    abnormalResolvedStatus: field === "followUpNote"
+      ? (value ? "resolved" : session.abnormalStatus ? "processing" : "unresolved")
+      : field === "abnormalStatus"
+        ? (session.followUpNote ? "resolved" : value ? "processing" : "unresolved")
+        : session.abnormalResolvedStatus,
+    updatedAt: new Date().toISOString(),
+  };
+
+  await upsertSession(nextSession);
+  revalidatePath(buildAdminSessionReservationsPath(sessionId));
+  return { ok: true as const, savedAt: new Date().toISOString() };
 }
 
 export async function saveCategoryAction(formData: FormData) {
@@ -903,11 +1265,6 @@ function normalizeEligibilityStatus(value: FormDataEntryValue | string | null) {
   return raw;
 }
 
-function isEligibilityBookable(status: string) {
-  return !["已通過", "通過", "停用", "退訓", "取消資格", "不可預約", "passed", "inactive", "withdrawn"].some((word) => status.toLowerCase().includes(word.toLowerCase()));
-}
-
-
 function appendAdminQuery(url: string, extra: string) {
   const [base, hash = ""] = url.split("#");
   const separator = base.includes("?") ? "&" : "?";
@@ -1297,8 +1654,6 @@ export async function assignStudentsToCourseEligibilityAction(formData: FormData
 
   const now = new Date().toISOString();
   const isClearingEligibility = eligibilityStatus === "未加入";
-  let assignedCount = 0;
-
   for (const studentId of studentIds) {
     const student = data.students.find((item) => item.id === studentId);
     if (!student) continue;
@@ -1344,7 +1699,6 @@ export async function assignStudentsToCourseEligibilityAction(formData: FormData
     } else if (isClearingEligibility) {
       if (!existingRecord) continue;
       await removeStudentCourseEligibility(student.id, series.id, year);
-      assignedCount += 1;
       continue;
     }
 
@@ -1369,7 +1723,6 @@ export async function assignStudentsToCourseEligibilityAction(formData: FormData
       createdAt: existingRecord?.createdAt ?? now,
       updatedAt: now,
     });
-    assignedCount += 1;
   }
 
   revalidatePath("/");
@@ -1490,7 +1843,7 @@ export async function addStudentToSessionRosterAction(formData: FormData) {
   const sessionId = String(formData.get("sessionId") ?? "").trim();
   const redirectTo = normalizeAdminRedirect(
     formData.get("redirectTo"),
-    `/admin/sessions/${sessionId}/reservations#attendance-list`,
+    `${buildAdminSessionReservationsPath(sessionId)}#attendance-list`,
   );
 
   if (!studentId || !courseId || !sessionId) {
@@ -1502,7 +1855,7 @@ export async function addStudentToSessionRosterAction(formData: FormData) {
   revalidatePath("/admin/students");
   revalidatePath("/admin/course-sessions");
   revalidatePath(`/admin/courses/${courseId}/sessions`);
-  revalidatePath(`/admin/sessions/${sessionId}/reservations`);
+  if (sessionId) revalidatePath(buildAdminSessionReservationsPath(sessionId));
 
   if (!result.ok) {
     redirect(appendAdminQuery(redirectTo, `error=${result.reason}`));
@@ -1561,4 +1914,109 @@ export async function deleteInstructorIdentityAction(formData: FormData) {
   await deleteInstructorIdentityDocument(instructorId);
   revalidatePath("/admin/students");
   redirect(buildStudentsReturn({ mode: "instructors" }, "saved=1"));
+}
+
+
+function getInstructorFromRoster(instructors: Instructor[] | undefined, instructorId: string) {
+  return (instructors ?? []).find((instructor) => instructor.id === instructorId);
+}
+
+function addInstructorNameCandidate(candidates: Map<string, string>, id?: unknown, name?: unknown) {
+  const normalizedName = String(name ?? "").trim();
+  const normalizedId = String(id ?? "").trim() || normalizedName;
+  if (normalizedId && normalizedName && !candidates.has(normalizedId)) {
+    candidates.set(normalizedId, normalizedName);
+  }
+}
+
+function collectInstructorNameCandidates(candidates: Map<string, string>, record: any) {
+  if (!record) return;
+  addInstructorNameCandidate(candidates, record.primaryInstructorId ?? record.instructorId ?? record.defaultInstructorId, record.primaryInstructorName ?? record.instructorName ?? record.defaultInstructorName);
+  const assistantIds = Array.isArray(record.assistantInstructorIds) ? record.assistantInstructorIds : [];
+  const assistantNames = Array.isArray(record.assistantInstructorNames) ? record.assistantInstructorNames : [];
+  assistantNames.forEach((name: string, index: number) => addInstructorNameCandidate(candidates, assistantIds[index] ?? name, name));
+}
+
+function getInstructorNameFromAnySource(data: any, instructorId: string) {
+  const id = String(instructorId ?? "").trim();
+  if (!id) return "";
+  const rosterName = getInstructorFromRoster(data.instructors, id)?.name;
+  if (rosterName) return rosterName;
+
+  const candidates = new Map<string, string>();
+  (data.courses ?? []).forEach((record: any) => collectInstructorNameCandidates(candidates, record));
+  (data.courseOfferings ?? []).forEach((record: any) => collectInstructorNameCandidates(candidates, record));
+  (data.courseSeries ?? []).forEach((record: any) => collectInstructorNameCandidates(candidates, record));
+  (data.courseSessions ?? []).forEach((record: any) => collectInstructorNameCandidates(candidates, record));
+  (data.courses ?? []).flatMap((course: any) => course.sessions ?? []).forEach((record: any) => collectInstructorNameCandidates(candidates, record));
+  return candidates.get(id) ?? id;
+}
+
+function getInstructorNamesFromIds(data: any, instructorIds: string[]) {
+  return instructorIds
+    .map((id) => getInstructorNameFromAnySource(data, id))
+    .filter((name): name is string => Boolean(name && name.trim()));
+}
+
+export async function saveSessionJournalAction(formData: FormData) {
+  const sessionId = String(formData.get("sessionId") ?? "").trim();
+  const redirectTo = normalizeAdminRedirect(
+    formData.get("redirectTo"),
+    sessionId ? buildAdminSessionReservationsPath(sessionId) : "/admin/course-sessions",
+  );
+
+  if (!sessionId) {
+    redirect(redirectTo);
+  }
+
+  const data = await getBookingData();
+  const session = data.courses.flatMap((course) => course.sessions ?? []).find((item) => item.id === sessionId);
+
+  if (!session) {
+    redirect(redirectTo);
+  }
+
+  const now = new Date().toISOString();
+  const abnormalStatus = String(formData.get("abnormalStatus") ?? "").trim();
+  const followUpNote = String(formData.get("followUpNote") ?? "").trim();
+  const abnormalResolvedStatus = followUpNote ? "resolved" : abnormalStatus ? "processing" : "unresolved";
+  const instructorId = String(formData.get("instructorId") ?? "").trim();
+  const instructorName = getInstructorNameFromAnySource(data, instructorId);
+  const assistantInstructorIds = Array.from(new Set(formData.getAll("assistantInstructorIds").map((value) => String(value).trim()).filter(Boolean)));
+  const assistantInstructorNames = getInstructorNamesFromIds(data, assistantInstructorIds);
+  const date = String(formData.get("date") ?? session.date ?? "").trim() || session.date;
+  const startTime = String(formData.get("startTime") ?? session.startTime ?? "").trim() || session.startTime;
+  const endTime = String(formData.get("endTime") ?? session.endTime ?? "").trim() || session.endTime;
+  const location = String(formData.get("location") ?? session.location ?? "").trim() || session.location;
+  const topic = String(formData.get("topic") ?? session.topic ?? "").trim();
+
+  const updatedSession: CourseSession = {
+    ...session,
+    date,
+    startTime,
+    endTime,
+    topic,
+    location,
+    instructorId: instructorId || undefined,
+    instructorName: instructorName || undefined,
+    assistantInstructorIds,
+    assistantInstructorNames,
+    sessionStatus: String(formData.get("sessionStatus") ?? session.sessionStatus ?? session.status ?? "scheduled"),
+    attendanceStatus: String(formData.get("attendanceStatus") ?? session.attendanceStatus ?? "not_started"),
+    teachingContent: formData.has("teachingContent") ? String(formData.get("teachingContent") ?? "").trim() : session.teachingContent,
+    teacherNote: formData.has("teacherNote") ? String(formData.get("teacherNote") ?? "").trim() : session.teacherNote,
+    assistantNote: formData.has("assistantNote") ? String(formData.get("assistantNote") ?? "").trim() : session.assistantNote,
+    adminNote: formData.has("adminNote") ? String(formData.get("adminNote") ?? "").trim() : session.adminNote,
+    abnormalStatus: formData.has("abnormalStatus") ? abnormalStatus : session.abnormalStatus,
+    followUpNote: formData.has("followUpNote") ? followUpNote : session.followUpNote,
+    abnormalResolvedStatus: formData.has("abnormalStatus") || formData.has("followUpNote") ? abnormalResolvedStatus : session.abnormalResolvedStatus,
+    updatedAt: now,
+  };
+
+  await upsertSession(updatedSession);
+  revalidatePath("/admin");
+  revalidatePath("/admin/course-sessions");
+  if (sessionId) revalidatePath(buildAdminSessionReservationsPath(sessionId));
+  revalidatePath(redirectTo.split("#")[0] || "/admin");
+  redirect(redirectTo);
 }

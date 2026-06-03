@@ -52,7 +52,7 @@ export function buildGoogleSheetImportWorkbook(data: BookingData) {
       return { wch: Math.min(Math.max(maxBodyLength + 2, 10), 42) };
     });
 
-    const sheetName = safeSheetName(table.fileName.replace(/\.csv$/i, ""), index);
+    const sheetName = safeSheetName(table.sheetName ?? table.fileName.replace(/\.csv$/i, ""), index);
     XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
   });
 

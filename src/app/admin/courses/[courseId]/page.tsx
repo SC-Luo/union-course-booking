@@ -6,7 +6,6 @@ import { CourseStatusBadge } from "@/components/status-badge";
 import { getBookingData } from "@/lib/booking-repository";
 import {
   getCategoryName,
-  getCourseStatus,
   getOfferingForCourse,
   getOfferingPeriodLabel,
   getSeriesForCourse,

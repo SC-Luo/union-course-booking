@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { bulkCreateSessionsAction, disableSessionAction, saveSessionAction } from "@/app/admin/actions";
+import { bulkCreateSessionsAction, saveSessionAction } from "@/app/admin/actions";
 import { AdminShell } from "@/components/page-shell";
 import { getBookingData } from "@/lib/booking-repository";
-import { formatReservationCutoff, getCategoryName, getCourse, resolveCourseColor } from "@/lib/course-utils";
+import { getCategoryName, getCourse, resolveCourseColor } from "@/lib/course-utils";
 
 export const dynamic = "force-dynamic";
 
@@ -30,10 +30,6 @@ function formatDisplayDate(date?: string) {
   const parsed = new Date(`${date}T00:00:00`);
   if (Number.isNaN(parsed.getTime())) return date.replaceAll("-", "/");
   return `${date.replaceAll("-", "/")} ${longWeekdayNames[parsed.getDay()]}`;
-}
-
-function getSessionCapacityText(bookedCount: number, capacity: number) {
-  return `已報名 ${bookedCount}｜容量 ${capacity}`;
 }
 
 function statusLabel(status?: string, isActive?: boolean) {
@@ -185,7 +181,7 @@ function CalendarView({ course, color, sessions, monthParam, mode = "attendance"
   }, {});
 
   const rows: { date: Date; dateKey: string; inMonth: boolean; items: any[] }[][] = [];
-  let pointer = new Date(gridStart);
+  const pointer = new Date(gridStart);
   while (pointer <= gridEnd) {
     const week: { date: Date; dateKey: string; inMonth: boolean; items: any[] }[] = [];
     for (let i = 0; i < 7; i += 1) {
@@ -509,68 +505,6 @@ function SessionStatusRadios({ defaultValue }: { defaultValue?: string }) {
         ))}
       </div>
     </fieldset>
-  );
-}
-
-function SessionCard({ session, course, color, defaultOpen = false }: { session: any; course: any; color: string; defaultOpen?: boolean }) {
-  return (
-    <article id={`session-${session.id}`} className={`scroll-mt-6 overflow-hidden rounded-[28px] border bg-white shadow-sm ${session.isActive ? "border-[#ead8ca]" : "border-rose-200 bg-rose-50/20"}`}>
-      <div className="h-1.5" style={{ backgroundColor: color }} />
-      <div className="grid gap-5 p-4 xl:grid-cols-[1fr_2fr] xl:p-5">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <LessonAvailabilityBadge session={session} />
-            <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusPillClass(session.status, session.isActive)}`}>{statusLabel(session.status, session.isActive)}</span>
-            {!session.isActive ? <span className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700">已停用</span> : null}
-          </div>
-          <h3 className="mt-3 text-2xl font-black leading-tight text-[#1f1712]">{formatDisplayDate(session.date)}｜{session.startTime}–{session.endTime}</h3>
-          <p className="mt-2 text-sm leading-6 text-[#66584f]">{session.topic || "未填單元"}｜{session.location || getDefaultLocation(course) || "未設地點"}</p>
-          <p className="mt-1 text-xs text-[#8a7c72]">{getSessionCapacityText(session.bookedCount ?? 0, session.capacity ?? 0)}｜{formatReservationCutoff(session)}</p>
-          {session.changeReason ? <p className="mt-3 rounded-2xl bg-[#fff6ed] px-3 py-2 text-xs text-[#8B5035]">異動原因：{session.changeReason}</p> : null}
-        </div>
-
-        <div className="min-w-0">
-          <div className="mb-3 flex flex-wrap gap-2 xl:justify-end">
-            <Link href={reservationHref(session.id)} className="rounded-2xl bg-[#5A3726] px-4 py-2 text-sm font-bold text-white hover:brightness-105">點名 / 名單</Link>
-            <form action={disableSessionAction}>
-              <input type="hidden" name="id" value={session.id} />
-              <input type="hidden" name="courseId" value={course.id} />
-              <input type="hidden" name="redirectTo" value={`/admin/courses/${course.id}/sessions?view=list`} />
-              <input type="hidden" name="isActive" value={session.isActive ? "false" : "true"} />
-              <button className={session.isActive ? "rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100" : "rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100"}>{session.isActive ? "停用" : "啟用"}</button>
-            </form>
-          </div>
-
-          <details open={defaultOpen} className="rounded-[24px] border border-[#ead8ca] bg-[#fffdf9] p-3 open:p-4">
-            <summary className="cursor-pointer rounded-2xl px-2 py-1 text-sm font-bold text-[#5A3726] hover:bg-[#fff6ed]">修改本堂課</summary>
-            <form action={saveSessionAction} className="mt-4 grid w-full gap-4">
-              <input type="hidden" name="id" value={session.id} />
-              <input type="hidden" name="courseId" value={course.id} />
-              <input type="hidden" name="bookedCount" value={session.bookedCount ?? 0} />
-              <input type="hidden" name="redirectTo" value={`/admin/courses/${course.id}/sessions?view=list`} />
-              <div className="grid gap-3 lg:grid-cols-3">
-                <label className="grid gap-1 text-sm font-semibold text-[#4e4038]">日期<input name="date" type="date" defaultValue={session.date} className="h-12 w-full rounded-2xl border border-[#dbcabd] px-3 font-normal" /></label>
-                <label className="grid gap-1 text-sm font-semibold text-[#4e4038]">開始<input name="startTime" type="time" defaultValue={session.startTime} className="h-12 w-full rounded-2xl border border-[#dbcabd] px-3 font-normal" /></label>
-                <label className="grid gap-1 text-sm font-semibold text-[#4e4038]">結束<input name="endTime" type="time" defaultValue={session.endTime} className="h-12 w-full rounded-2xl border border-[#dbcabd] px-3 font-normal" /></label>
-              </div>
-              <div className="grid gap-3 lg:grid-cols-12">
-                <label className="grid min-w-0 gap-1 text-sm font-semibold text-[#4e4038] lg:col-span-8">單元<input name="topic" defaultValue={session.topic ?? ""} className="h-12 w-full min-w-0 rounded-2xl border border-[#dbcabd] px-3 font-normal" placeholder="單元" /></label>
-                <label className="grid min-w-0 gap-1 text-sm font-semibold text-[#4e4038] lg:col-span-4">名額<input name="capacity" type="number" min={session.bookedCount ?? 0} defaultValue={session.capacity ?? getDefaultCapacity(course)} className="h-12 w-full min-w-0 rounded-2xl border border-[#dbcabd] px-3 font-normal" /></label>
-              </div>
-              <div className="grid gap-3 lg:grid-cols-2">
-                <label className="grid gap-1 text-sm font-semibold text-[#4e4038]">地點<input name="location" defaultValue={session.location || getDefaultLocation(course)} className="h-12 w-full rounded-2xl border border-[#dbcabd] px-3 font-normal" placeholder="地點" /></label>
-                <label className="grid gap-1 text-sm font-semibold text-[#4e4038]">講師<input name="instructorName" defaultValue={session.instructorName || getDefaultInstructor(course)} className="h-12 w-full rounded-2xl border border-[#dbcabd] px-3 font-normal" placeholder="講師" /></label>
-              </div>
-              <SessionStatusRadios defaultValue={session.status ?? "scheduled"} />
-              <label className="grid gap-1 text-sm font-semibold text-[#4e4038]">預約截止<input name="bookingDeadline" defaultValue={session.bookingDeadline} className="h-12 w-full rounded-2xl border border-[#dbcabd] px-3 font-normal" placeholder="預約截止" /></label>
-              <label className="grid gap-1 text-sm font-semibold text-[#4e4038]">異動原因<textarea name="changeReason" defaultValue={session.changeReason ?? ""} className="min-h-20 rounded-2xl border border-[#dbcabd] px-3 py-3 font-normal" placeholder="停課、調課或補課時填寫原因" /></label>
-              <input type="hidden" name="isActive" value={session.isActive ? "true" : "false"} />
-              <button className="rounded-2xl bg-gradient-to-r from-[#E85F00] to-[#B46F4A] px-4 py-3 text-sm font-bold text-white">儲存編輯</button>
-            </form>
-          </details>
-        </div>
-      </div>
-    </article>
   );
 }
 

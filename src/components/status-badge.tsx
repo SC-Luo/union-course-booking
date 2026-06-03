@@ -24,6 +24,7 @@ const attendanceStatusText: Record<AttendanceStatus, string> = {
   unchecked: "未確認",
   attended: "已出席",
   absent: "未出席",
+  late: "遲到",
   leave: "請假",
 };
 
@@ -32,6 +33,7 @@ const attendanceStatusClass: Record<AttendanceStatus, string> = {
   unchecked: "border-zinc-200 bg-zinc-100 text-zinc-600",
   attended: "border-emerald-200 bg-emerald-50 text-emerald-700",
   absent: "border-rose-200 bg-rose-50 text-rose-700",
+  late: "border-amber-200 bg-amber-50 text-amber-800",
   leave: "border-sky-200 bg-sky-50 text-sky-700",
 };
 

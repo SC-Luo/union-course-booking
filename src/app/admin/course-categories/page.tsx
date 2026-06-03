@@ -102,7 +102,7 @@ export default async function CourseCategoriesPage({ searchParams }: PageProps) 
           <div>
             <p className="text-sm font-medium text-[#B46F4A]">課程行政</p>
             <h1 className="mt-2 text-3xl font-black text-[#1f1712] sm:text-4xl">課程類別</h1>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-[#66584f]">
+            <p className="mt-3 line-clamp-2 text-sm leading-6 text-[#66584f]">
               管理課程第 1 層分類，類別會影響前台篩選、後台標籤顏色與課程代碼前綴。代表色以下拉式色票選擇，選定後會明確顯示目前顏色；自訂類別也會一起出現在列表。
             </p>
           </div>
@@ -115,12 +115,15 @@ export default async function CourseCategoriesPage({ searchParams }: PageProps) 
       {saved ? <p className="mb-4 rounded-2xl border border-[#d8b69f] bg-[#fff6ed] px-4 py-3 text-sm text-[#8B5035]">已儲存課程類別。</p> : null}
       {error ? <p className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">無法完成操作，請確認欄位或關聯資料。</p> : null}
 
-      <section className="mb-6 rounded-[30px] border border-[#ead8ca] bg-[#fffdf9] p-6 shadow-[0_16px_45px_rgba(90,55,38,0.07)] sm:p-7">
-        <div>
-          <h2 className="text-xl font-black text-[#1f1712]">新增類別</h2>
-          <p className="mt-1 text-sm leading-6 text-[#8a7c72]">新增後可在課程主檔中選用；代號建議 1 至 2 碼大寫英文字。</p>
-        </div>
-        <form action={saveCategoryAction} className="mt-5 grid gap-3 xl:grid-cols-[100px_180px_320px_1fr_120px] xl:items-end">
+      <details className="mb-6 rounded-[30px] border border-[#ead8ca] bg-[#fffdf9] shadow-[0_16px_45px_rgba(90,55,38,0.07)]">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-4 p-6 sm:p-7">
+          <div>
+            <h2 className="text-xl font-black text-[#1f1712]">新增類別</h2>
+            <p className="mt-1 text-sm leading-6 text-[#8a7c72]">平常先收納；需要新增新的課程分類時再展開。</p>
+          </div>
+          <span className="rounded-2xl border border-[#dbcabd] bg-white px-4 py-2 text-sm font-black text-[#5A3726]">展開新增</span>
+        </summary>
+        <form action={saveCategoryAction} className="grid gap-3 border-t border-[#ead8ca] p-6 sm:p-7 xl:grid-cols-[100px_180px_320px_1fr_120px] xl:items-end">
           <label>
             <span className="mb-2 block text-sm font-semibold text-[#4e4038]">代號</span>
             <input name="id" className="w-full rounded-2xl border border-[#dbcabd] bg-white px-3 py-3 uppercase" placeholder="B" maxLength={2} />
@@ -139,9 +142,9 @@ export default async function CourseCategoriesPage({ searchParams }: PageProps) 
           </label>
           <button className="rounded-2xl bg-gradient-to-r from-[#E85F00] to-[#B46F4A] px-4 py-3 text-sm font-bold text-white shadow-sm hover:brightness-105">儲存</button>
         </form>
-      </section>
+      </details>
 
-      <section className="grid gap-5">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {mergedCategories.map((category) => {
           const seriesCount = courseSeries.filter((item) => item.categoryId === category.id).length;
           const offeringCount = courseOfferings.filter((item) => item.categoryId === category.id).length;
@@ -151,34 +154,34 @@ export default async function CourseCategoriesPage({ searchParams }: PageProps) 
           return (
             <article
               key={category.id}
-              className="relative overflow-hidden rounded-[28px] border border-[#ead8ca] bg-white shadow-[0_10px_28px_rgba(90,55,38,0.05)]"
+              className="relative overflow-hidden rounded-[26px] border border-[#ead8ca] bg-white shadow-[0_10px_28px_rgba(90,55,38,0.05)]"
             >
               <div className="absolute inset-y-0 left-0 w-2" style={{ backgroundColor: category.color }} />
-              <div className="relative grid gap-5 p-5 pl-7 xl:grid-cols-[1fr_auto] xl:items-start">
+              <div className="relative grid gap-4 p-5 pl-7">
                 <div className="min-w-0">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-3">
                       <ColorDot color={category.color} size="md" />
-                      <h2 className="text-2xl font-black tracking-tight text-[#1f1712]">{category.name}</h2>
+                      <h2 className="text-xl font-black tracking-tight text-[#1f1712]">{category.name}</h2>
                       <span className="rounded-full border border-[#ead8ca] bg-[#fff6ed] px-3 py-1 text-xs font-black text-[#8B5035]">
                         {category.code ?? category.id}
                       </span>
                       <StatusPill active={category.isActive} />
                     </div>
-                    <p className="mt-3 max-w-3xl text-sm leading-6 text-[#66584f]">{category.description}</p>
+                    <p className="mt-3 line-clamp-2 text-sm leading-6 text-[#66584f]">{category.description}</p>
                   </div>
 
-                  <div className="mt-5 grid gap-2 text-sm sm:grid-cols-3 xl:max-w-3xl">
+                  <div className="mt-4 grid grid-cols-3 gap-2 text-sm">
                     <MetricCard label="課程主檔" value={seriesCount} />
                     <MetricCard label="年度期別" value={offeringCount} />
                     <MetricCard label="舊班級資料" value={legacyCount} />
                   </div>
                 </div>
 
-                <div className="flex flex-wrap gap-2 xl:justify-end">
+                <div className="flex flex-wrap gap-2">
                   <details>
                     <summary className="cursor-pointer rounded-xl border border-[#dbcabd] bg-[#fffdf9] px-4 py-2 text-sm font-semibold text-[#5A3726] hover:bg-[#fff6ed]">編輯</summary>
-                    <form action={saveCategoryAction} className="mt-3 grid w-full gap-3 rounded-2xl border border-[#ead8ca] bg-[#fffdf9] p-4 xl:w-[460px]">
+                    <form action={saveCategoryAction} className="mt-3 grid w-full gap-3 rounded-2xl border border-[#ead8ca] bg-[#fffdf9] p-4">
                       <input type="hidden" name="id" value={category.id} />
                       <label className="grid gap-1 text-sm font-semibold text-[#4e4038]">名稱<input name="name" defaultValue={category.name} className="rounded-2xl border border-[#dbcabd] px-3 py-3 font-normal" /></label>
                       <label className="grid gap-1 text-sm font-semibold text-[#4e4038]">代表色<CategoryColorPicker defaultValue={category.color} /></label>

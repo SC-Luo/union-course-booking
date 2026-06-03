@@ -1,6 +1,6 @@
 export type CourseStatus = "available" | "full" | "closed" | "locked";
 
-export type AttendanceStatus = "pending" | "unchecked" | "attended" | "absent" | "leave";
+export type AttendanceStatus = "pending" | "unchecked" | "attended" | "absent" | "late" | "leave";
 
 export type ReservationStatus = "booked" | "cancelled";
 
@@ -70,6 +70,8 @@ export type CourseOffering = {
   capacity?: number;
   primaryInstructorId?: string;
   primaryInstructorName?: string;
+  defaultInstructorId?: string;
+  defaultInstructorName?: string;
   assistantInstructorIds?: string[];
   assistantInstructorNames?: string[];
   bookingStatus?: "open" | "closed" | "draft" | string;
@@ -105,6 +107,15 @@ export type CourseSession = {
   instructorName?: string;
   assistantInstructorIds?: string[];
   assistantInstructorNames?: string[];
+  sessionStatus?: "scheduled" | "suspended" | "rescheduled" | "makeup" | string;
+  attendanceStatus?: "not_started" | "in_progress" | "completed" | string;
+  teachingContent?: string;
+  teacherNote?: string;
+  assistantNote?: string;
+  adminNote?: string;
+  abnormalStatus?: string;
+  followUpNote?: string;
+  abnormalResolvedStatus?: "unresolved" | "processing" | "resolved" | string;
   status?: "scheduled" | "suspended" | "rescheduled" | "makeup" | "cancelled" | string;
   changeReason?: string;
   originalSessionId?: string;
@@ -133,6 +144,15 @@ export type CourseSessionRecord = {
   instructorName?: string;
   assistantInstructorIds?: string[];
   assistantInstructorNames?: string[];
+  sessionStatus?: "scheduled" | "suspended" | "rescheduled" | "makeup" | string;
+  attendanceStatus?: "not_started" | "in_progress" | "completed" | string;
+  teachingContent?: string;
+  teacherNote?: string;
+  assistantNote?: string;
+  adminNote?: string;
+  abnormalStatus?: string;
+  followUpNote?: string;
+  abnormalResolvedStatus?: "unresolved" | "processing" | "resolved" | string;
   changeReason?: string;
   originalSessionId?: string;
   rescheduledToSessionId?: string;
@@ -215,7 +235,12 @@ export type Reservation = {
   cancelledAt?: string;
   status: ReservationStatus;
   attendanceStatus: AttendanceStatus;
+  lateTime?: string;
+  leaveHours?: number;
+  leaveStartTime?: string;
+  leaveEndTime?: string;
   source?: ReservationSource;
+  homework?: string;
   note?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -343,6 +368,10 @@ export type AttendanceRecord = {
   status: Exclude<AttendanceStatus, "pending">;
   checkedAt?: string;
   checkedBy?: string;
+  lateTime?: string;
+  leaveHours?: number;
+  leaveStartTime?: string;
+  leaveEndTime?: string;
   note?: string;
   createdAt?: string;
   updatedAt?: string;

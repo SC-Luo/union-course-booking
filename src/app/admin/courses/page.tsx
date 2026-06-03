@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { disableCourseAction, saveCourseAction } from "@/app/admin/actions";
+import { saveCourseAction } from "@/app/admin/actions";
 import { AdminShell } from "@/components/page-shell";
 import { courseTypes, professionalCategories } from "@/lib/course-coding";
 import { getBookingData } from "@/lib/booking-repository";
@@ -220,7 +220,7 @@ function getStatusLabel(status?: string, open?: boolean) {
 }
 
 export default async function AdminCoursesPage({ searchParams }: PageProps) {
-  const { saved, error, courseId, section: rawSection } = await searchParams;
+  const { saved, error, section: rawSection } = await searchParams;
   const section = normalizeSection(rawSection);
   const data = await getBookingData();
   const { categories, courses } = data;

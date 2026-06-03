@@ -1,4 +1,3 @@
-/* eslint-disable @next/next/no-html-link-for-pages */
 import { CourseViewSwitcher } from "@/components/course-view-switcher";
 import { LastReservationCard } from "@/components/last-reservation-card";
 import { StudentShell } from "@/components/page-shell";

@@ -170,8 +170,6 @@ type CreateReservationInput = {
   idNumberLast3?: string;
 };
 
-type EligibleStudent = Pick<Student, "id" | "name" | "idNumberLast3" | "classId" | "offeringId" | "seriesId" | "courseMasterId" | "isActive">;
-
 function cleanIdentityLast3(value: string | undefined) {
   return String(value ?? "").replace(/\D/g, "").slice(0, 3);
 }
@@ -199,49 +197,6 @@ function getCourseSeriesCandidates(course: Course, session: CourseSession) {
     course.courseMasterId,
     session.seriesId,
   ].filter(Boolean) as string[]);
-}
-
-function isStudentEligibleForCourse(student: EligibleStudent, course: Course, session: CourseSession) {
-  if (student.isActive === false) return false;
-  const offeringCandidates = getCourseOfferingCandidates(course, session);
-  const seriesCandidates = getCourseSeriesCandidates(course, session);
-  return (
-    (student.classId ? offeringCandidates.has(student.classId) : false) ||
-    (student.offeringId ? offeringCandidates.has(student.offeringId) : false) ||
-    (student.seriesId ? seriesCandidates.has(student.seriesId) : false) ||
-    (student.courseMasterId ? seriesCandidates.has(student.courseMasterId) : false)
-  );
-}
-
-function isDisallowedEligibilityStatus(value: string | undefined) {
-  const text = String(value ?? "").trim().toLowerCase();
-  return ["已通過", "通過", "停用", "退訓", "completed", "passed", "inactive", "withdrawn", "revoked", "false", "no", "不可預約"].some((item) => text.includes(item));
-}
-
-function isAllowedEligibilityStatus(value: string | undefined) {
-  const text = String(value ?? "").trim().toLowerCase();
-  if (!text) return false;
-  if (isDisallowedEligibilityStatus(text)) return false;
-  return ["可上課", "可預約", "已分配梯次", "已報考", "未通過", "active", "eligible", "can_book", "美容丙級"].some((item) => text.includes(item));
-}
-
-function isStudentCourseEligibilityRecord(record: StudentCourseRecord) {
-  const sourceColumn = String(record.sourceColumn ?? "").replace(/\s+/g, "");
-  return record.recordType === "roster" || sourceColumn.includes("課程資格") || sourceColumn.includes("上課資格") || sourceColumn.includes("美容丙級") || sourceColumn.toLowerCase().includes("eligibility");
-}
-
-function isEffectiveEligibilityRecord(record: StudentCourseRecord, course: Course, session: CourseSession) {
-  if (!isStudentCourseEligibilityRecord(record)) return false;
-  if (!isAllowedEligibilityStatus(record.normalizedValue ?? record.rawValue)) return false;
-
-  const seriesCandidates = getCourseSeriesCandidates(course, session);
-  const year = course.year ?? (session.date ? Number(session.date.slice(0, 4)) - 1911 : undefined);
-  const recordYearMatches = record.year == null || year == null || String(record.year) === String(year);
-  const recordSeriesMatches =
-    (record.seriesId ? seriesCandidates.has(record.seriesId) : false) ||
-    (record.courseMasterId ? seriesCandidates.has(record.courseMasterId) : false);
-
-  return recordYearMatches && recordSeriesMatches;
 }
 
 function isActiveEnrollmentStatus(status: string | undefined) {
@@ -362,33 +317,466 @@ export async function createReservation(input: CreateReservationInput) {
   }
 }
 
-export async function updateReservationAttendance(reservationId: string, attendanceStatus: AttendanceStatus) {
-  if (!["pending", "attended", "absent"].includes(attendanceStatus)) {
+type ReservationAttendanceUpdateOptions = {
+  leaveHours?: number;
+  leaveStartTime?: string;
+  leaveEndTime?: string;
+  lateTime?: string;
+};
+
+type ComputedReservationAttendanceUpdate = {
+  attendanceStatus: AttendanceStatus;
+  lateTime?: string | null;
+  leaveHours?: number | null;
+  leaveStartTime?: string | null;
+  leaveEndTime?: string | null;
+};
+
+function hasLeaveRecord(value: Partial<Pick<Reservation, "leaveHours" | "leaveStartTime" | "leaveEndTime">>) {
+  return Boolean(value.leaveStartTime || value.leaveEndTime || value.leaveHours != null);
+}
+
+function computeReservationAttendanceUpdate(
+  current: Partial<Reservation>,
+  requestedStatus: AttendanceStatus,
+  options: ReservationAttendanceUpdateOptions = {},
+): ComputedReservationAttendanceUpdate {
+  const currentStatus = current.attendanceStatus;
+  const currentHasLeave = hasLeaveRecord(current);
+  const requestedHasLeave = hasLeaveRecord(options);
+  const next: ComputedReservationAttendanceUpdate = { attendanceStatus: requestedStatus };
+
+  if (requestedStatus === "late") {
+    next.attendanceStatus = "late";
+    next.lateTime = options.lateTime ?? current.lateTime ?? null;
+    next.leaveHours = options.leaveHours ?? current.leaveHours ?? null;
+    next.leaveStartTime = options.leaveStartTime ?? current.leaveStartTime ?? null;
+    next.leaveEndTime = options.leaveEndTime ?? current.leaveEndTime ?? null;
+    return next;
+  }
+
+  if (requestedStatus === "leave") {
+    next.attendanceStatus = currentStatus === "late" || currentStatus === "attended" ? currentStatus : "leave";
+    next.lateTime = current.lateTime ?? null;
+    next.leaveHours = options.leaveHours ?? current.leaveHours ?? null;
+    next.leaveStartTime = options.leaveStartTime ?? current.leaveStartTime ?? null;
+    next.leaveEndTime = options.leaveEndTime ?? current.leaveEndTime ?? null;
+    if (!requestedHasLeave && !currentHasLeave) {
+      next.leaveHours = null;
+      next.leaveStartTime = null;
+      next.leaveEndTime = null;
+    }
+    return next;
+  }
+
+  if (requestedStatus === "attended") {
+    next.attendanceStatus = "attended";
+    next.lateTime = null;
+    next.leaveHours = currentHasLeave ? current.leaveHours ?? null : null;
+    next.leaveStartTime = currentHasLeave ? current.leaveStartTime ?? null : null;
+    next.leaveEndTime = currentHasLeave ? current.leaveEndTime ?? null : null;
+    return next;
+  }
+
+  next.lateTime = null;
+  next.leaveHours = null;
+  next.leaveStartTime = null;
+  next.leaveEndTime = null;
+  return next;
+}
+
+function applyReservationAttendanceUpdate(reservation: Reservation, update: ComputedReservationAttendanceUpdate) {
+  reservation.attendanceStatus = update.attendanceStatus;
+
+  if (update.lateTime) {
+    reservation.lateTime = update.lateTime;
+  } else {
+    delete reservation.lateTime;
+  }
+
+  if (update.leaveHours != null) {
+    reservation.leaveHours = update.leaveHours;
+  } else {
+    delete reservation.leaveHours;
+  }
+
+  if (update.leaveStartTime) {
+    reservation.leaveStartTime = update.leaveStartTime;
+  } else {
+    delete reservation.leaveStartTime;
+  }
+
+  if (update.leaveEndTime) {
+    reservation.leaveEndTime = update.leaveEndTime;
+  } else {
+    delete reservation.leaveEndTime;
+  }
+}
+
+export async function updateReservationAttendance(
+  reservationId: string,
+  attendanceStatus: AttendanceStatus,
+  options: ReservationAttendanceUpdateOptions = {},
+) {
+  if (!["pending", "unchecked", "attended", "late", "absent", "leave"].includes(attendanceStatus)) {
     return;
   }
+
+  const applyLocalFallback = () => {
+    const data = readBookingData();
+    const reservation = data.reservations.find((item) => item.id === reservationId);
+    if (reservation) {
+      applyReservationAttendanceUpdate(
+        reservation,
+        computeReservationAttendanceUpdate(reservation, attendanceStatus, options),
+      );
+      writeBookingData(data);
+    }
+  };
+
+  const db = getFirestoreDb();
+
+  if (!db) {
+    applyLocalFallback();
+    return;
+  }
+
+  try {
+    const directRef = db.collection("reservations").doc(reservationId);
+    const directDoc = await directRef.get();
+
+    if (directDoc.exists) {
+      const currentReservation = { ...(directDoc.data() ?? {}), id: directDoc.id } as Partial<Reservation>;
+      const updatePayload = computeReservationAttendanceUpdate(currentReservation, attendanceStatus, options);
+      await directRef.update(updatePayload);
+      return;
+    }
+
+    // Some older/imported Firestore reservation documents were saved with a document id
+    // that does not match the reservation.id field stored inside the document.
+    // The attendance page uses reservation.id from getBookingData(), so direct doc(id)
+    // can miss the real Firestore document. Query by the stored id before falling back.
+    const legacySnapshot = await db
+      .collection("reservations")
+      .where("id", "==", reservationId)
+      .limit(1)
+      .get();
+
+    const legacyDoc = legacySnapshot.docs[0];
+    if (legacyDoc) {
+      const currentReservation = { ...(legacyDoc.data() ?? {}), id: legacyDoc.id } as Partial<Reservation>;
+      const updatePayload = computeReservationAttendanceUpdate(currentReservation, attendanceStatus, options);
+      await legacyDoc.ref.update(updatePayload);
+      return;
+    }
+
+    console.warn(`Reservation document not found for attendance update: ${reservationId}`);
+    applyLocalFallback();
+  } catch (error) {
+    console.warn("Firestore attendance update failed, falling back to local booking data.", error);
+    applyLocalFallback();
+  }
+}
+
+
+export async function updateReservationAttendanceBySessionStudent(
+  reservationId: string,
+  sessionId: string,
+  studentId: string | undefined,
+  attendanceStatus: AttendanceStatus,
+  options: ReservationAttendanceUpdateOptions = {},
+) {
+  if (!studentId || !sessionId) {
+    await updateReservationAttendance(reservationId, attendanceStatus, options);
+    return;
+  }
+
+  if (!["pending", "unchecked", "attended", "late", "absent", "leave"].includes(attendanceStatus)) {
+    return;
+  }
+
+  const applyLocalFallback = () => {
+    const data = readBookingData();
+    const reservation =
+      data.reservations.find((item) => item.id === reservationId) ??
+      data.reservations.find(
+        (item) =>
+          item.sessionId === sessionId &&
+          item.studentId === studentId &&
+          item.status === "booked",
+      );
+
+    if (reservation) {
+      applyReservationAttendanceUpdate(
+        reservation,
+        computeReservationAttendanceUpdate(reservation, attendanceStatus, options),
+      );
+      writeBookingData(data);
+    }
+  };
+
+  const db = getFirestoreDb();
+
+  if (!db) {
+    applyLocalFallback();
+    return;
+  }
+
+  try {
+    const directRef = db.collection("reservations").doc(reservationId);
+    const directDoc = await directRef.get();
+
+    if (directDoc.exists) {
+      const currentReservation = { ...(directDoc.data() ?? {}), id: directDoc.id } as Partial<Reservation>;
+      const updatePayload = computeReservationAttendanceUpdate(currentReservation, attendanceStatus, options);
+      await directRef.update(updatePayload);
+      return;
+    }
+
+    const legacySnapshot = await db
+      .collection("reservations")
+      .where("id", "==", reservationId)
+      .limit(1)
+      .get();
+
+    const legacyDoc = legacySnapshot.docs[0];
+    if (legacyDoc) {
+      const currentReservation = { ...(legacyDoc.data() ?? {}), id: legacyDoc.id } as Partial<Reservation>;
+      const updatePayload = computeReservationAttendanceUpdate(currentReservation, attendanceStatus, options);
+      await legacyDoc.ref.update(updatePayload);
+      return;
+    }
+
+    const sessionStudentSnapshot = await db
+      .collection("reservations")
+      .where("sessionId", "==", sessionId)
+      .where("studentId", "==", studentId)
+      .limit(5)
+      .get();
+
+    const sessionStudentDoc = sessionStudentSnapshot.docs.find((doc) => {
+      const data = doc.data() as Partial<Reservation>;
+      return data.status === "booked" || !data.status;
+    });
+
+    if (sessionStudentDoc) {
+      const currentReservation = { ...(sessionStudentDoc.data() ?? {}), id: sessionStudentDoc.id } as Partial<Reservation>;
+      const updatePayload = computeReservationAttendanceUpdate(currentReservation, attendanceStatus, options);
+      await sessionStudentDoc.ref.update(updatePayload);
+      return;
+    }
+
+    console.warn(
+      `Reservation document not found for attendance update: ${reservationId} (${sessionId}/${studentId})`,
+    );
+    applyLocalFallback();
+  } catch (error) {
+    console.warn("Firestore attendance update failed, falling back to local booking data.", error);
+    applyLocalFallback();
+  }
+}
+
+
+
+export async function markSessionReservationsAttended(sessionId: string) {
+  const now = buildTimestamp();
+  const payload: Record<string, unknown> = {
+    attendanceStatus: "attended",
+    lateTime: null,
+    leaveHours: null,
+    leaveStartTime: null,
+    leaveEndTime: null,
+    updatedAt: now,
+  };
+
+  const applyLocalFallback = () => {
+    const data = readBookingData();
+    let changed = false;
+
+    data.reservations.forEach((reservation) => {
+      if (reservation.sessionId === sessionId && reservation.status === "booked") {
+        reservation.attendanceStatus = "attended";
+        reservation.lateTime = undefined;
+        reservation.leaveHours = undefined;
+        reservation.leaveStartTime = undefined;
+        reservation.leaveEndTime = undefined;
+        reservation.updatedAt = now;
+        changed = true;
+      }
+    });
+
+    if (changed) writeBookingData(data);
+  };
+
+  const db = getFirestoreDb();
+
+  if (!db) {
+    applyLocalFallback();
+    return;
+  }
+
+  try {
+    const snapshot = await db
+      .collection("reservations")
+      .where("sessionId", "==", sessionId)
+      .where("status", "==", "booked")
+      .get();
+
+    await Promise.all(snapshot.docs.map((doc) => doc.ref.set(payload, { merge: true })));
+  } catch (error) {
+    console.warn("Firestore batch attendance update failed, falling back to local booking data.", error);
+    applyLocalFallback();
+  }
+}
+
+
+type ReservationLessonNoteUpdate = {
+  homework?: string;
+  note?: string;
+};
+
+export async function updateReservationLessonNotes(reservationId: string, update: ReservationLessonNoteUpdate) {
+  const now = new Date().toISOString();
+  const payload: Partial<Reservation> & { updatedAt: string } = { updatedAt: now };
+
+  if (Object.prototype.hasOwnProperty.call(update, "homework")) {
+    payload.homework = String(update.homework ?? "").trim();
+  }
+
+  if (Object.prototype.hasOwnProperty.call(update, "note")) {
+    payload.note = String(update.note ?? "").trim();
+  }
+
+  const applyLocalFallback = () => {
+    const data = readBookingData();
+    const reservation = data.reservations.find((item) => item.id === reservationId);
+    if (reservation) {
+      Object.assign(reservation, payload);
+      writeBookingData(data);
+    }
+  };
+
+  const db = getFirestoreDb();
+
+  if (!db) {
+    applyLocalFallback();
+    return;
+  }
+
+  try {
+    const directRef = db.collection("reservations").doc(reservationId);
+    const directDoc = await directRef.get();
+
+    if (directDoc.exists) {
+      await directRef.update(payload);
+      return;
+    }
+
+    const legacySnapshot = await db
+      .collection("reservations")
+      .where("id", "==", reservationId)
+      .limit(1)
+      .get();
+
+    const legacyDoc = legacySnapshot.docs[0];
+    if (legacyDoc) {
+      await legacyDoc.ref.update(payload);
+      return;
+    }
+
+    console.warn(`Reservation document not found for lesson note update: ${reservationId}`);
+    applyLocalFallback();
+  } catch (error) {
+    console.warn("Firestore lesson note update failed, falling back to local booking data.", error);
+    applyLocalFallback();
+  }
+}
+
+
+export async function ensureSessionRosterReservation(studentId: string, courseId: string, sessionId: string) {
+  const now = buildTimestamp();
+
+  const buildFromData = (data: BookingData) => {
+    const student = (data.students ?? []).find((item) => item.id === studentId && item.isActive !== false);
+    const course = (data.courses ?? []).find((item) => item.id === courseId || item.offeringId === courseId);
+    const session = course?.sessions?.find((item) => item.id === sessionId);
+
+    if (!student || !course || !session) {
+      return { ok: false as const, reason: "invalid" as const };
+    }
+
+    const existing = (data.reservations ?? []).find(
+      (reservation) =>
+        reservation.sessionId === session.id &&
+        reservation.studentId === student.id &&
+        reservation.status === "booked",
+    );
+
+    if (existing) {
+      return { ok: true as const, reservation: existing, courseId: course.id, sessionId: session.id };
+    }
+
+    const seriesId = course.seriesId || course.courseMasterId || course.courseSeriesId || course.offeringId || course.id;
+    const studentLast3 = cleanIdentityLast3(student.idNumberLast3) || cleanIdentityLast3(student.phone).slice(-3);
+    const reservation: Reservation = {
+      id: `roster-${String(session.id).replace(/[\/]/g, "~")}-${student.id}`,
+      courseId: course.id,
+      sessionId: session.id,
+      studentId: student.id,
+      studentName: student.name,
+      phoneLastThree: studentLast3,
+      idNumberLast3: cleanIdentityLast3(student.idNumberLast3) || studentLast3,
+      offeringId: session.offeringId ?? course.offeringId,
+      seriesId,
+      bookedAt: now,
+      status: "booked",
+      attendanceStatus: "unchecked",
+      source: "manual",
+      note: "由年度課程名單自動帶入課堂點名",
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    return { ok: true as const, reservation, courseId: course.id, sessionId: session.id, shouldCreate: true as const };
+  };
 
   const db = getFirestoreDb();
 
   if (!db) {
     const data = readBookingData();
-    const reservation = data.reservations.find((item) => item.id === reservationId);
-    if (reservation) {
-      reservation.attendanceStatus = attendanceStatus;
+    const result = buildFromData(data);
+    if (result.ok && "shouldCreate" in result) {
+      data.reservations = [...(data.reservations ?? []), result.reservation];
+      const session = data.courses.flatMap((course) => course.sessions ?? []).find((item) => item.id === sessionId);
+      if (session) {
+        session.bookedCount = (data.reservations ?? []).filter((item) => item.sessionId === sessionId && item.status === "booked").length;
+      }
       writeBookingData(data);
     }
-    return;
+    return result;
   }
 
   try {
-    await db.collection("reservations").doc(reservationId).update({ attendanceStatus });
+    const data = await getBookingData();
+    const result = buildFromData(data);
+    if (result.ok && "shouldCreate" in result) {
+      await db.collection("reservations").doc(result.reservation.id).set(result.reservation, { merge: true });
+      try {
+        await db.collection("sessions").doc(sessionId).set({ updatedAt: now }, { merge: true });
+      } catch {
+        // 部分專案版本沒有獨立 sessions collection；點名紀錄已成功建立即可。
+      }
+    }
+    return result;
   } catch (error) {
-    console.warn("Firestore attendance update failed, falling back to local booking data.", error);
+    console.warn("Firestore roster reservation ensure failed, falling back to local booking data.", error);
     const data = readBookingData();
-    const reservation = data.reservations.find((item) => item.id === reservationId);
-    if (reservation) {
-      reservation.attendanceStatus = attendanceStatus;
+    const result = buildFromData(data);
+    if (result.ok && "shouldCreate" in result) {
+      data.reservations = [...(data.reservations ?? []), result.reservation];
       writeBookingData(data);
     }
+    return result;
   }
 }
 
