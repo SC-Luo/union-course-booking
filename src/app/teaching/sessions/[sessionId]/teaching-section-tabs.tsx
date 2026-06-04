@@ -2,27 +2,32 @@
 
 import { useEffect, useState } from "react";
 
+const DEFAULT_ACTIVE_HASH = "#summary";
+
 const TABS = [
-  { href: "#summary", label: "\u6458\u8981" },
-  { href: "#attendance-list", label: "\u9ede\u540d" },
-  { href: "#lesson-journal", label: "\u7d00\u9304" },
+  { href: "#summary", label: "摘要" },
+  { href: "#attendance-list", label: "點名" },
+  { href: "#lesson-journal", label: "紀錄" },
 ];
 
 function getActiveHash() {
-  if (typeof window === "undefined") return "#summary";
-  return window.location.hash || "#summary";
+  if (typeof window === "undefined") return DEFAULT_ACTIVE_HASH;
+  return window.location.hash || DEFAULT_ACTIVE_HASH;
 }
 
 export function TeachingSectionTabs() {
-  const [activeHash, setActiveHash] = useState(getActiveHash);
+  // Keep the first render identical between server and client.
+  // The current browser hash is applied only after mount to avoid hydration mismatch.
+  const [activeHash, setActiveHash] = useState(DEFAULT_ACTIVE_HASH);
 
   useEffect(() => {
-    function handleHashChange() {
+    function syncActiveHash() {
       setActiveHash(getActiveHash());
     }
 
-    window.addEventListener("hashchange", handleHashChange);
-    return () => window.removeEventListener("hashchange", handleHashChange);
+    syncActiveHash();
+    window.addEventListener("hashchange", syncActiveHash);
+    return () => window.removeEventListener("hashchange", syncActiveHash);
   }, []);
 
   return (

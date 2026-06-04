@@ -199,6 +199,7 @@ const TEACHING_JOURNAL_FIELDS = new Set([
   "teachingContent",
   "teacherNote",
   "assistantNote",
+  "adminNote",
   "abnormalStatus",
   "followUpNote",
 ]);
@@ -208,11 +209,35 @@ export async function saveTeachingJournalAction(formData: FormData) {
   const teacherName = String(formData.get("teacherName") ?? "").trim();
   const field = String(formData.get("field") ?? "").trim();
   const value = String(formData.get("value") ?? "").trim();
+  const sessionStatus = String(formData.get("sessionStatus") ?? "").trim();
+  const attendanceStatus = String(formData.get("attendanceStatus") ?? "").trim();
   const fallback = sessionId ? `${buildTeachingSessionPath(sessionId, teacherName)}#lesson-journal` : "/teaching/login";
   const redirectTo = safeTeachingRedirectPath(String(formData.get("redirectTo") ?? ""), fallback);
 
-  if (!TEACHING_JOURNAL_FIELDS.has(field)) {
+  const hasJournalField = Boolean(field);
+  const hasSessionStatus = Boolean(sessionStatus);
+  const hasAttendanceStatus = Boolean(attendanceStatus);
+
+  if (hasJournalField && !TEACHING_JOURNAL_FIELDS.has(field)) {
     redirect(appendTeachingQuery(redirectTo, "journal=invalid"));
+  }
+
+  if (
+    hasSessionStatus &&
+    !["scheduled", "suspended", "makeup", "rescheduled", "cancelled"].includes(sessionStatus)
+  ) {
+    redirect(appendTeachingQuery(redirectTo, "sessionStatus=invalid"));
+  }
+
+  if (
+    hasAttendanceStatus &&
+    !["not_started", "in_progress", "completed"].includes(attendanceStatus)
+  ) {
+    redirect(appendTeachingQuery(redirectTo, "attendanceStatus=invalid"));
+  }
+
+  if (!hasJournalField && !hasSessionStatus && !hasAttendanceStatus) {
+    redirect(appendTeachingQuery(redirectTo, "journal=empty"));
   }
 
   const resolved = await resolveAuthorizedTeachingSession(sessionId, teacherName);
@@ -224,7 +249,9 @@ export async function saveTeachingJournalAction(formData: FormData) {
   const followUpNote = field === "followUpNote" ? value : resolved.session.followUpNote ?? "";
   const updatedSession: CourseSession = {
     ...resolved.session,
-    [field]: value,
+    ...(hasJournalField ? { [field]: value } : {}),
+    ...(hasSessionStatus ? { sessionStatus } : {}),
+    ...(hasAttendanceStatus ? { attendanceStatus } : {}),
     abnormalResolvedStatus:
       field === "abnormalStatus" || field === "followUpNote"
         ? followUpNote
@@ -237,6 +264,8 @@ export async function saveTeachingJournalAction(formData: FormData) {
   };
 
   await upsertSession(updatedSession);
+  revalidatePath("/teaching");
   revalidatePath(buildTeachingSessionPath(resolved.session.id, teacherName));
+  revalidatePath(redirectTo.split("#")[0] || "/teaching");
   redirect(redirectTo);
 }

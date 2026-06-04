@@ -28,6 +28,48 @@ const fallbackColors: Record<string, string> = {
   R: "#f59e0b",
 };
 
+const courseModeOptions = [
+  {
+    value: "fixed_roster",
+    label: "固定名冊制",
+    description: "補助、職前、產投、在職課等固定班級；重點是每堂點名與累計出缺勤。",
+  },
+  {
+    value: "booking_flexible",
+    label: "預約制",
+    description: "自費或彈性上課；學員可自行選擇開放時段並受名額與鎖定時間限制。",
+  },
+  {
+    value: "subsidy_roster",
+    label: "補助固定名冊",
+    description: "職訓、產投或補助班級；固定名冊並需特別重視出缺勤、作業與結訓紀錄。",
+  },
+] as const;
+
+function normalizeCourseModeValue(value: unknown) {
+  const raw = String(value ?? "").trim();
+  if (raw === "booking_flexible") return "booking_flexible";
+  if (raw === "subsidy_roster") return "subsidy_roster";
+  return "fixed_roster";
+}
+
+function getCourseModeLabel(value: unknown) {
+  const normalized = normalizeCourseModeValue(value);
+  return courseModeOptions.find((option) => option.value === normalized)?.label ?? "固定名冊制";
+}
+
+function CourseModePill({ value }: { value?: string }) {
+  const normalized = normalizeCourseModeValue(value);
+  const className =
+    normalized === "booking_flexible"
+      ? "rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700"
+      : normalized === "subsidy_roster"
+        ? "rounded-full bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700"
+        : "rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700";
+
+  return <span className={className}>{getCourseModeLabel(normalized)}</span>;
+}
+
 function getSeriesTitle(seriesId: string | undefined, allSeries: Array<{ id: string; title: string }>) {
   return allSeries.find((series) => series.id === seriesId)?.title ?? "未指定目錄";
 }
@@ -103,7 +145,7 @@ function InstructorPickerFields({
   const selectedAssistants = new Set(initialAssistantInstructorIds);
 
   return (
-    <section className="md:col-span-2 rounded-[26px] border border-[#ead8ca] bg-[#fffdf9] p-4 shadow-inner shadow-[#ead8ca]/20">
+    <section className="rounded-[26px] border border-[#ead8ca] bg-[#fffdf9] p-4 shadow-inner shadow-[#ead8ca]/20">
       <div className="mb-4 flex flex-col gap-1 border-b border-[#ead8ca] pb-3">
         <p className="text-sm font-black text-[#1f1712]">講師設定</p>
         <p className="text-xs leading-5 text-[#8a7c72]">這裡統一讀取講師名冊；只顯示授課專長符合此課程類別的講師。</p>
@@ -173,6 +215,7 @@ function CourseOfferingDetailsFields({
   initialClassDisplayName,
   initialCapacity,
   initialBookingStatus = "open",
+  initialCourseMode,
   initialStartDate,
   initialEndDate,
   initialPrimaryInstructorId,
@@ -188,6 +231,7 @@ function CourseOfferingDetailsFields({
   initialClassDisplayName?: string;
   initialCapacity?: number | string;
   initialBookingStatus?: string;
+  initialCourseMode?: string;
   initialStartDate?: string;
   initialEndDate?: string;
   initialPrimaryInstructorId?: string;
@@ -195,60 +239,110 @@ function CourseOfferingDetailsFields({
   initialLocation?: string;
   initialNotes?: string;
 }) {
-  return (
-    <div className="grid gap-4 xl:col-span-2">
-      <div className="grid gap-4 md:grid-cols-3">
-        <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">
-          年度
-          <input name="year" defaultValue={initialYear ?? ""} required className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none transition focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" placeholder="例如 115" />
-        </label>
-        <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">
-          期別
-          <input name="term" defaultValue={initialTerm ?? ""} required className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none transition focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" placeholder="例如 2" />
-        </label>
-        <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">
-          報名狀態
-          <select name="bookingStatus" defaultValue={initialBookingStatus} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none transition focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10">
-            <option value="open">開放報名</option>
-            <option value="closed">關閉報名</option>
-            <option value="draft">草稿</option>
-          </select>
-        </label>
-      </div>
+  const selectedCourseMode = normalizeCourseModeValue(initialCourseMode);
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">
-          班級名稱
-          <input name="classDisplayName" defaultValue={initialClassDisplayName ?? ""} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none transition focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" placeholder="可留空，系統自動組合" />
-        </label>
-        <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">
-          總名額
-          <input name="capacity" defaultValue={initialCapacity ?? ""} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none transition focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" placeholder="例如 12" />
-        </label>
-        <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">
+  const inputClassName =
+    "h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none transition focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10";
+
+  return (
+    <div className="grid gap-5">
+      <section className="rounded-[26px] border border-[#ead8ca] bg-[#fffdf9] p-4 shadow-inner shadow-[#ead8ca]/20 sm:p-5">
+        <div className="mb-4 border-b border-[#ead8ca] pb-3">
+          <p className="text-sm font-black text-[#1f1712]">班級基本資料</p>
+          <p className="mt-1 text-xs leading-5 text-[#8a7c72]">先填年度、期別與班級資訊；常用欄位集中在同一區，避免表單橫向拉太寬。</p>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-[0.8fr_0.8fr_1fr]">
+          <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">
+            年度
+            <input name="year" defaultValue={initialYear ?? ""} required className={inputClassName} placeholder="例如 115" />
+          </label>
+          <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">
+            期別
+            <input name="term" defaultValue={initialTerm ?? ""} required className={inputClassName} placeholder="例如 2" />
+          </label>
+          <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">
+            總名額
+            <input name="capacity" defaultValue={initialCapacity ?? ""} className={inputClassName} placeholder="例如 12" />
+          </label>
+        </div>
+
+        <div className="mt-4 grid gap-4 lg:grid-cols-[1.4fr_0.9fr]">
+          <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">
+            班級名稱
+            <input name="classDisplayName" defaultValue={initialClassDisplayName ?? ""} className={inputClassName} placeholder="可留空，系統自動組合" />
+          </label>
+          <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">
+            前台報名狀態
+            <select name="bookingStatus" defaultValue={initialBookingStatus} className={inputClassName}>
+              <option value="open">開放報名</option>
+              <option value="closed">關閉報名</option>
+              <option value="draft">草稿</option>
+            </select>
+          </label>
+        </div>
+
+        <label className="mt-4 grid gap-2 text-sm font-semibold text-[#4e4038]">
           地點
-          <input name="location" defaultValue={initialLocation ?? ""} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none transition focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" placeholder="工會教室" />
+          <input name="location" defaultValue={initialLocation ?? ""} className={inputClassName} placeholder="工會教室" />
         </label>
-        <InstructorPickerFields
-          series={series}
-          categories={categories}
-          instructors={instructors}
-          initialPrimaryInstructorId={initialPrimaryInstructorId}
-          initialAssistantInstructorIds={initialAssistantInstructorIds}
-        />
-        <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">
-          開始日期
-          <input type="date" name="startDate" defaultValue={initialStartDate ?? ""} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none transition focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" />
+      </section>
+
+      <section className="rounded-[26px] border border-[#ead8ca] bg-[#fffdf9] p-4 shadow-inner shadow-[#ead8ca]/20 sm:p-5">
+        <div className="mb-4 border-b border-[#ead8ca] pb-3">
+          <p className="text-sm font-black text-[#1f1712]">課程運作模式</p>
+          <p className="mt-1 text-xs leading-5 text-[#8a7c72]">這會影響前台是否開放預約，以及後續要走預約管理或固定名冊出缺勤管理。</p>
+        </div>
+        <div className="grid gap-3 lg:grid-cols-3">
+          {courseModeOptions.map((option) => (
+            <label
+              key={option.value}
+              className="cursor-pointer rounded-[22px] border border-[#ead8ca] bg-white p-4 transition hover:border-[#E7892B] hover:bg-[#fffaf5] has-[:checked]:border-[#E85F00] has-[:checked]:bg-[#fff1e7] has-[:checked]:shadow-[0_10px_28px_rgba(232,95,0,0.12)]"
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="courseMode"
+                  value={option.value}
+                  defaultChecked={selectedCourseMode === option.value}
+                  className="h-4 w-4 border-[#dbcabd] accent-[#E85F00]"
+                />
+                <span className="text-sm font-black text-[#1f1712]">{option.label}</span>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-[#8a7c72]">{option.description}</p>
+            </label>
+          ))}
+        </div>
+      </section>
+
+      <InstructorPickerFields
+        series={series}
+        categories={categories}
+        instructors={instructors}
+        initialPrimaryInstructorId={initialPrimaryInstructorId}
+        initialAssistantInstructorIds={initialAssistantInstructorIds}
+      />
+
+      <section className="rounded-[26px] border border-[#ead8ca] bg-[#fffdf9] p-4 shadow-inner shadow-[#ead8ca]/20 sm:p-5">
+        <div className="mb-4 border-b border-[#ead8ca] pb-3">
+          <p className="text-sm font-black text-[#1f1712]">日期與備註</p>
+          <p className="mt-1 text-xs leading-5 text-[#8a7c72]">可先留空，排課後再補齊；備註只放行政提醒或特殊安排。</p>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">
+            開始日期
+            <input type="date" name="startDate" defaultValue={initialStartDate ?? ""} className={inputClassName} />
+          </label>
+          <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">
+            結束日期
+            <input type="date" name="endDate" defaultValue={initialEndDate ?? ""} className={inputClassName} />
+          </label>
+        </div>
+        <label className="mt-4 grid gap-2 text-sm font-semibold text-[#4e4038]">
+          備註
+          <textarea name="notes" defaultValue={initialNotes ?? ""} className="min-h-24 rounded-2xl border border-[#dbcabd] bg-white px-3 py-3 font-normal outline-none transition focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" placeholder="班級備註、行政提醒或特殊安排" />
         </label>
-        <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">
-          結束日期
-          <input type="date" name="endDate" defaultValue={initialEndDate ?? ""} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none transition focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" />
-        </label>
-      </div>
-      <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">
-        備註
-        <textarea name="notes" defaultValue={initialNotes ?? ""} className="min-h-24 rounded-2xl border border-[#dbcabd] bg-white px-3 py-3 font-normal outline-none transition focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" placeholder="班級備註、行政提醒或特殊安排" />
-      </label>
+      </section>
     </div>
   );
 }
@@ -310,7 +404,7 @@ export default async function CourseOfferingsPage({ searchParams }: PageProps) {
         {activeSeries.length === 0 ? (
           <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">尚未建立課程目錄，請先到課程目錄新增。</div>
         ) : (
-          <form action={saveCourseOfferingAction} className="mt-5 grid gap-5">
+          <form action={saveCourseOfferingAction} className="mx-auto mt-5 grid max-w-5xl gap-5">
             <section className="rounded-[26px] border border-[#ead8ca] bg-[#fffdf9] p-4 shadow-inner shadow-[#ead8ca]/20">
               <div className="mb-4 flex flex-col gap-1 border-b border-[#ead8ca] pb-3">
                 <p className="text-sm font-black text-[#1f1712]">建立班級識別</p>
@@ -340,6 +434,7 @@ export default async function CourseOfferingsPage({ searchParams }: PageProps) {
               instructors={instructors}
               initialCapacity={getSeries(selectedSeriesId, courseSeries)?.defaultCapacity}
               initialLocation={getSeries(selectedSeriesId, courseSeries)?.defaultLocation}
+              initialCourseMode={getSeries(selectedSeriesId, courseSeries)?.defaultCourseMode}
             />
             <button className="rounded-2xl bg-gradient-to-r from-[#E85F00] to-[#B46F4A] px-4 py-3 text-sm font-bold text-white shadow-sm hover:brightness-105">儲存年度課程</button>
           </form>
@@ -379,6 +474,7 @@ export default async function CourseOfferingsPage({ searchParams }: PageProps) {
                       <span className="rounded-full bg-[#fff6ed] px-3 py-1 text-xs font-bold text-[#8B5035]">{offering.code ?? offering.classIdentifier ?? offering.id}</span>
                       <span className="rounded-full bg-[#f6eee8] px-3 py-1 text-xs font-semibold text-[#66584f]">{getSeriesTitle(offering.seriesId, courseSeries)}</span>
                       <StatusPill status={offering.status} active={offering.isActive} />
+                      <CourseModePill value={offering.courseMode ?? series?.defaultCourseMode} />
                     </div>
 
                     <h2 className="mt-3 text-2xl font-black leading-tight text-[#1f1712]">
@@ -401,8 +497,9 @@ export default async function CourseOfferingsPage({ searchParams }: PageProps) {
                   </div>
                 </div>
 
-                <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-[repeat(4,minmax(0,1fr))_minmax(190px,1.25fr)]">
+                <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-[repeat(5,minmax(0,1fr))_minmax(190px,1.25fr)]">
                   <MiniMetric label="名冊 / 報名" value={`${reserved}/${capacity}`} />
+                  <MiniMetric label="運作模式" value={getCourseModeLabel(offering.courseMode ?? series?.defaultCourseMode)} />
                   <MiniMetric label="課堂日誌" value={sessionCount > 0 ? `${sessionCount} 堂` : "尚未排課"} />
                   <MiniMetric label="主要講師" value={primaryInstructorName ?? offering.primaryInstructorName ?? "未設"} />
                   <MiniMetric label="地點" value={offering.location ?? legacyCourse?.defaultLocation ?? "未設"} />
@@ -429,7 +526,7 @@ export default async function CourseOfferingsPage({ searchParams }: PageProps) {
                           展開編輯
                         </span>
                       </summary>
-                      <form action={saveCourseOfferingAction} className="mt-5 rounded-[24px] border border-[#ead8ca] bg-[#fffdf9] p-4">
+                      <form action={saveCourseOfferingAction} className="mx-auto mt-5 max-w-5xl rounded-[24px] border border-[#ead8ca] bg-[#fffdf9] p-4">
                         <input type="hidden" name="id" value={offering.id} />
                         <input type="hidden" name="legacyCourseId" value={legacyCourse?.id ?? offering.legacyCourseId ?? ""} />
                         <div className="grid gap-4">
@@ -449,6 +546,7 @@ export default async function CourseOfferingsPage({ searchParams }: PageProps) {
                               initialClassDisplayName={offering.classDisplayName ?? offering.displayTitle}
                               initialCapacity={offering.capacity ?? legacyCourse?.totalCapacity}
                               initialBookingStatus={offering.bookingStatus ?? offering.status ?? "open"}
+                              initialCourseMode={offering.courseMode ?? series?.defaultCourseMode}
                               initialStartDate={offering.startDate}
                               initialEndDate={offering.endDate}
                               initialPrimaryInstructorId={offering.primaryInstructorId}

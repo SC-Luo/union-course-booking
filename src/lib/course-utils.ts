@@ -41,6 +41,112 @@ export function getCategoryName(categoryId: string, categories: CourseCategory[]
   return categories.find((category) => category.id === categoryId)?.name ?? categoryId;
 }
 
+
+export type NormalizedCourseMode = "booking_flexible" | "fixed_roster" | "subsidy_roster";
+
+export type CourseModeInfo = {
+  mode: NormalizedCourseMode;
+  label: string;
+  shortLabel: string;
+  frontTitle: string;
+  frontDescription: string;
+  badgeClassName: string;
+  isBookingEnabled: boolean;
+};
+
+function normalizeModeText(value?: string | null) {
+  return String(value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+export function getNormalizedCourseMode(
+  course?: Partial<Pick<Course, "courseMode" | "rosterType" | "bookingOpen">> | null,
+): NormalizedCourseMode {
+  const mode = normalizeModeText(course?.courseMode);
+
+  if (["booking_flexible", "booking", "reservation", "booking_flex", "flexible_booking"].includes(mode)) {
+    return "booking_flexible";
+  }
+
+  if (["subsidy_roster", "subsidy_fixed_roster", "grant_roster", "funded_roster"].includes(mode)) {
+    return "subsidy_roster";
+  }
+
+  if (["fixed_roster", "roster_fixed", "fixed_roster_exam", "roster", "attendance_roster"].includes(mode)) {
+    return "fixed_roster";
+  }
+
+  const rosterType = normalizeModeText(course?.rosterType);
+
+  if (["booking", "reservation"].includes(rosterType)) {
+    return "booking_flexible";
+  }
+
+  if (["subsidy", "subsidy_roster", "grant", "funded"].includes(rosterType)) {
+    return "subsidy_roster";
+  }
+
+  if (["fixed", "roster_fixed", "fixed_roster"].includes(rosterType)) {
+    return "fixed_roster";
+  }
+
+  // Legacy data did not always store courseMode. Keep old public booking behavior
+  // until the course offering is explicitly marked as a fixed roster course.
+  if (course?.bookingOpen === false) {
+    return "fixed_roster";
+  }
+
+  return "booking_flexible";
+}
+
+export function isBookingCourse(course?: Partial<Pick<Course, "courseMode" | "rosterType" | "bookingOpen">> | null) {
+  return getNormalizedCourseMode(course) === "booking_flexible";
+}
+
+export function isFixedRosterCourse(course?: Partial<Pick<Course, "courseMode" | "rosterType" | "bookingOpen">> | null) {
+  return !isBookingCourse(course);
+}
+
+export function getCourseModeInfo(
+  course?: Partial<Pick<Course, "courseMode" | "rosterType" | "bookingOpen">> | null,
+): CourseModeInfo {
+  const mode = getNormalizedCourseMode(course);
+
+  if (mode === "booking_flexible") {
+    return {
+      mode,
+      label: "預約制課程",
+      shortLabel: "預約制",
+      frontTitle: "選擇上課單元與時段",
+      frontDescription: "這類課程可由學員自行選擇可預約時段；名額額滿、鎖定或停課時不可預約。",
+      badgeClassName: "border-emerald-200 bg-emerald-50 text-emerald-800",
+      isBookingEnabled: true,
+    };
+  }
+
+  if (mode === "subsidy_roster") {
+    return {
+      mode,
+      label: "補助固定名冊",
+      shortLabel: "補助名冊",
+      frontTitle: "固定課表與出席紀錄",
+      frontDescription: "這類課程以正式名冊為準，不開放自行預約。系統將用於每堂點名、出缺勤累計與補助課程紀錄。",
+      badgeClassName: "border-sky-200 bg-sky-50 text-sky-800",
+      isBookingEnabled: false,
+    };
+  }
+
+  return {
+    mode,
+    label: "固定名冊課程",
+    shortLabel: "固定名冊",
+    frontTitle: "固定課表與出席紀錄",
+    frontDescription: "這類課程以班級名冊為準，不開放自行預約。學員依既定課表出席，系統將用於每堂點名與出缺勤累計。",
+    badgeClassName: "border-amber-200 bg-amber-50 text-amber-900",
+    isBookingEnabled: false,
+  };
+}
+
+
 function normalizeLookupValue(value: string | undefined) {
   return decodeURIComponent(value ?? "")
     .trim()

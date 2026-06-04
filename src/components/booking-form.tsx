@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState, type FormEvent } from "react";
+import { useActionState, useEffect, useRef, type FormEvent } from "react";
 import { useFormStatus } from "react-dom";
 import { createReservationAction, type CreateReservationFormState } from "@/app/actions";
 
@@ -15,8 +15,17 @@ const errorMessage: Record<string, string> = {
   invalid: "請輸入名冊上的姓名。",
   duplicate: "這位學員已經預約過這門課程，不能重複預約其他時段。",
   closed: "這個課堂目前無法預約，可能已額滿、已進入開課前鎖定期、停課或已取消。",
+  not_booking: "此課程為固定名冊課程，不開放前台預約。",
   not_roster: "你目前不在這個班級名冊內，無法完成預約。請確認姓名是否與名冊一致，若資料無誤仍無法預約，請聯絡工會協助確認。",
 };
+
+function getErrorMessage(error?: string) {
+  if (!error) {
+    return "";
+  }
+
+  return errorMessage[error] ?? error;
+}
 
 function SubmitButton() {
   const { pending } = useFormStatus();
@@ -33,10 +42,15 @@ function SubmitButton() {
 }
 
 export function BookingForm({ courseId, sessionId, courseTitle, sessionTime }: BookingFormProps) {
-  const [studentName, setStudentName] = useState(() =>
-    typeof window === "undefined" ? "" : (localStorage.getItem("booking.studentName") ?? "")
-  );
+  const studentNameRef = useRef<HTMLInputElement>(null);
   const [state, formAction] = useActionState<CreateReservationFormState, FormData>(createReservationAction, {});
+
+  useEffect(() => {
+    const rememberedStudentName = localStorage.getItem("booking.studentName") ?? "";
+    if (studentNameRef.current && !studentNameRef.current.value) {
+      studentNameRef.current.value = rememberedStudentName;
+    }
+  }, []);
 
   function rememberStudent(event: FormEvent<HTMLFormElement>) {
     const form = new FormData(event.currentTarget);
@@ -70,7 +84,7 @@ export function BookingForm({ courseId, sessionId, courseTitle, sessionTime }: B
 
       {state.error ? (
         <p className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
-          {errorMessage[state.error] ?? "預約失敗，請再確認資料。"}
+          {getErrorMessage(state.error)}
         </p>
       ) : null}
 
@@ -79,8 +93,7 @@ export function BookingForm({ courseId, sessionId, courseTitle, sessionTime }: B
         <input
           name="studentName"
           required
-          value={studentName}
-          onChange={(event) => setStudentName(event.target.value)}
+          ref={studentNameRef}
           className="w-full rounded-2xl border border-[#d8bda4] bg-[#fffaf5] px-4 py-4 text-base outline-none transition focus:border-[#9b4f1f] focus:bg-white focus:ring-4 focus:ring-[#f3e1d0]"
           placeholder="請輸入名冊上的姓名"
         />

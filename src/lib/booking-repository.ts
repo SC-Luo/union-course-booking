@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { normalizeBookingData, readBookingData, writeBookingData } from "./data-store";
 import { getAdminDb } from "./firebase-admin";
-import { canChangeReservation, getReservationCutoff } from "./course-utils";
+import { canChangeReservation, getReservationCutoff, isBookingCourse } from "./course-utils";
 import type { AttendanceStatus, BookingData, Course, CourseCategory, CourseOffering, CourseSeries, CourseSession, Enrollment, Reservation, Student, StudentCourseRecord, Instructor } from "./types";
 
 function shouldUseFirestore() {
@@ -212,7 +212,11 @@ function isEffectiveEnrollment(enrollment: Enrollment, course: Course, session: 
   const seriesCandidates = getCourseSeriesCandidates(course, session);
   const offeringMatches =
     (enrollment.offeringId ? offeringCandidates.has(enrollment.offeringId) : false) ||
-    (enrollment.courseOfferingId ? offeringCandidates.has(enrollment.courseOfferingId) : false);
+    (enrollment.courseOfferingId ? offeringCandidates.has(enrollment.courseOfferingId) : false) ||
+    // 舊名冊／資格頁有些資料會把年度班級寫在 courseId，
+    // 後台名冊頁已接受這種資料；前台名單制預約也要用同一套判斷，
+    // 避免後台看得到「上課中」，但前台預約時被判定不在名冊內。
+    (enrollment.courseId ? offeringCandidates.has(enrollment.courseId) : false);
   const seriesMatches =
     (enrollment.seriesId ? seriesCandidates.has(enrollment.seriesId) : false) ||
     (enrollment.courseMasterId ? seriesCandidates.has(enrollment.courseMasterId) : false);
@@ -262,6 +266,10 @@ export async function createReservation(input: CreateReservationInput) {
         return { ok: false as const, reason: "invalid" };
       }
 
+      if (!isBookingCourse(course)) {
+        return { ok: false as const, reason: "not_booking" };
+      }
+
       const studentSnapshot = await transaction.get(
         db.collection("students").where("name", "==", input.studentName).limit(20),
       );
@@ -287,16 +295,29 @@ export async function createReservation(input: CreateReservationInput) {
         return { ok: false as const, reason: "not_roster" };
       }
 
-      const duplicateSnapshot = await transaction.get(
-        db
-          .collection("reservations")
-          .where("courseId", "==", course.id)
-          .where("studentId", "==", eligibleStudent.id)
-          .where("status", "==", "booked")
-          .limit(1),
-      );
+      // 預約制課程允許同一位學員預約同一期課程底下的不同上課日期；
+      // 只有「同一堂 session」不能重複預約。
+      // 另外保留 studentName 查詢，兼容舊預約資料可能沒有 studentId 的情況。
+      const [duplicateByStudentIdSnapshot, duplicateByNameSnapshot] = await Promise.all([
+        transaction.get(
+          db
+            .collection("reservations")
+            .where("sessionId", "==", session.id)
+            .where("studentId", "==", eligibleStudent.id)
+            .where("status", "==", "booked")
+            .limit(1),
+        ),
+        transaction.get(
+          db
+            .collection("reservations")
+            .where("sessionId", "==", session.id)
+            .where("studentName", "==", input.studentName)
+            .where("status", "==", "booked")
+            .limit(1),
+        ),
+      ]);
 
-      if (!duplicateSnapshot.empty) {
+      if (!duplicateByStudentIdSnapshot.empty || !duplicateByNameSnapshot.empty) {
         return { ok: false as const, reason: "duplicate" };
       }
 
@@ -903,15 +924,21 @@ function createReservationInJson(input: CreateReservationInput) {
     return { ok: false as const, reason: "invalid" };
   }
 
+  if (!isBookingCourse(course)) {
+    return { ok: false as const, reason: "not_booking" };
+  }
+
   const eligibleStudent = findEligibleStudentInData(data, course, session, input.studentName);
 
   if (!eligibleStudent) {
     return { ok: false as const, reason: "not_roster" };
   }
 
+  // 預約制課程允許同一位學員預約同一期課程底下的不同上課日期；
+  // 只有「同一堂 session」不能重複預約。
   const hasDuplicate = data.reservations.some(
     (reservation) =>
-      reservation.courseId === course.id &&
+      reservation.sessionId === session.id &&
       reservation.status === "booked" &&
       (reservation.studentId === eligibleStudent.id ||
         normalizeName(reservation.studentName) === normalizeName(input.studentName)),

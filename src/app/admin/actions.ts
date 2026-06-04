@@ -30,7 +30,7 @@ import {
   addStudentToSessionRoster,
   ensureSessionRosterReservation,
 } from "@/lib/booking-repository";
-import type { AttendanceStatus, CourseCategory, CourseOffering, CourseSeries, CourseSession, Student, StudentCourseRecord, Instructor } from "@/lib/types";
+import type { AttendanceStatus, CourseCategory, CourseMode, CourseOffering, CourseSeries, CourseSession, Student, StudentCourseRecord, Instructor } from "@/lib/types";
 
 function slugify(input: string) {
   return input
@@ -149,6 +149,21 @@ function normalizeNumber(value: FormDataEntryValue | null, fallback?: number) {
 
 function buildManagedId(prefix: string, parts: Array<string | number | undefined>) {
   return `${prefix}-${parts.map((part) => slugify(String(part ?? ""))).filter(Boolean).join("-")}`;
+}
+
+function normalizeCourseMode(value: FormDataEntryValue | string | null | undefined, fallback?: string): CourseMode | undefined {
+  const raw = String(value ?? fallback ?? "").trim();
+  if (!raw) return undefined;
+
+  if (raw === "roster_fixed" || raw === "fixed_roster_exam") {
+    return "fixed_roster";
+  }
+
+  return raw as CourseMode;
+}
+
+function inferRosterTypeFromCourseMode(courseMode: CourseMode | undefined) {
+  return courseMode === "booking_flexible" ? "booking" : "fixed";
 }
 
 function computeLeaveHoursFromTimeRange(start?: string, end?: string) {
@@ -600,7 +615,7 @@ export async function saveCourseSeriesAction(formData: FormData) {
     name: String(formData.get("name") ?? title).trim() || title,
     categoryId,
     courseType,
-    defaultCourseMode: String(formData.get("defaultCourseMode") ?? existing?.defaultCourseMode ?? "").trim() || undefined,
+    defaultCourseMode: normalizeCourseMode(formData.get("defaultCourseMode"), existing?.defaultCourseMode),
     defaultCapacity,
     defaultLocation: String(formData.get("defaultLocation") ?? "").trim(),
     defaultInstructorId: String(formData.get("defaultInstructorId") ?? existing?.defaultInstructorId ?? "").trim() || undefined,
@@ -685,6 +700,11 @@ export async function saveCourseOfferingAction(formData: FormData) {
   const color = normalizeHexColor(formData.get("color"));
   const isActive = formData.get("isActive") !== "false";
   const bookingStatus = String(formData.get("bookingStatus") ?? existing?.bookingStatus ?? (isActive ? "open" : "closed")).trim();
+  const courseMode =
+    normalizeCourseMode(formData.get("courseMode"), existing?.courseMode ?? series?.defaultCourseMode) ??
+    (String(formData.get("rosterType") ?? existing?.rosterType ?? "").trim() === "booking" ? "booking_flexible" : "fixed_roster");
+  const rosterType = inferRosterTypeFromCourseMode(courseMode);
+  const bookingOpen = courseMode === "booking_flexible" && (bookingStatus === "open" || bookingStatus === "active");
 
   const offering: CourseOffering = {
     ...(existing ?? {}),
@@ -705,9 +725,9 @@ export async function saveCourseOfferingAction(formData: FormData) {
     termLabel,
     classIdentifier: String(formData.get("classIdentifier") ?? existing?.classIdentifier ?? `${year}-${term}`).trim(),
     classDisplayName,
-    rosterType: String(formData.get("rosterType") ?? existing?.rosterType ?? "fixed").trim(),
+    rosterType,
     courseType: String(formData.get("courseType") ?? existing?.courseType ?? series?.courseType ?? "").trim() || undefined,
-    courseMode: String(formData.get("courseMode") ?? existing?.courseMode ?? series?.defaultCourseMode ?? "").trim() || undefined,
+    courseMode,
     sourceSheet: String(formData.get("sourceSheet") ?? existing?.sourceSheet ?? "").trim() || undefined,
     location: String(formData.get("location") ?? existing?.location ?? series?.defaultLocation ?? "").trim() || undefined,
     capacity,
@@ -716,7 +736,7 @@ export async function saveCourseOfferingAction(formData: FormData) {
     assistantInstructorIds: normalizeStringList(formData.get("assistantInstructorIds")),
     assistantInstructorNames: normalizeStringList(formData.get("assistantInstructorNames")),
     bookingStatus,
-    bookingOpen: bookingStatus === "open" || bookingStatus === "active",
+    bookingOpen,
     status: bookingStatus === "closed" ? "closed" : bookingStatus === "draft" ? "draft" : "open",
     color: color ?? existing?.color ?? series?.color,
     startDate: String(formData.get("startDate") ?? existing?.startDate ?? "").trim() || undefined,

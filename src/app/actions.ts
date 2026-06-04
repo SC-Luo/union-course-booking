@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { cancelReservation, createReservation } from "@/lib/booking-repository";
+import { cancelReservation, createReservation, getCourseCatalog } from "@/lib/booking-repository";
+import { getCourse, getSession, isBookingCourse } from "@/lib/course-utils";
 
 function cleanIdNumberLast3(value: FormDataEntryValue | null) {
   return String(value ?? "").replace(/\D/g, "").slice(0, 3);
@@ -19,6 +20,19 @@ export async function createReservationAction(
   const courseId = String(formData.get("courseId") ?? "");
   const sessionId = String(formData.get("sessionId") ?? "");
   const studentName = String(formData.get("studentName") ?? "").trim();
+
+  const { courses } = await getCourseCatalog();
+  const course = getCourse(courseId, courses);
+  const session = course ? getSession(course, sessionId) : undefined;
+
+  if (!course || !session) {
+    return { error: "找不到課程或課堂，請回到課程列表重新操作。" };
+  }
+
+  if (!isBookingCourse(course)) {
+    return { error: "此課程為固定名冊課程，不開放前台預約。" };
+  }
+
   const result = await createReservation({
     courseId,
     sessionId,
@@ -28,7 +42,14 @@ export async function createReservationAction(
   });
 
   if (!result.ok) {
-    return { error: result.reason };
+    const reasonText: Record<string, string> = {
+      not_booking: "此課程為固定名冊課程，不開放前台預約。",
+      not_roster: "查無此課程名冊內的學員，請確認姓名是否與名冊一致。",
+      duplicate: "你已經預約過這一堂課。",
+      closed: "此課堂目前已額滿、鎖定或未開放預約。",
+      invalid: "預約資料不完整，請回到課程列表重新操作。",
+    };
+    return { error: reasonText[result.reason] ?? result.reason };
   }
 
   revalidatePath("/");

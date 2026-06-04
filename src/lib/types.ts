@@ -8,7 +8,15 @@ export type CourseCapacityMode = "course" | "session";
 
 export type ReservationSource = "online" | "manual" | "excel" | "excel_import";
 
-export type CourseMode = "booking_flexible" | "roster_fixed" | "fixed_roster_exam" | string;
+export type CourseMode =
+  | "booking_flexible"
+  | "fixed_roster"
+  | "subsidy_roster"
+  // Legacy compatibility
+  | "booking"
+  | "roster_fixed"
+  | "fixed_roster_exam"
+  | string;
 
 export type CourseCategory = {
   id: string;
@@ -435,6 +443,51 @@ export type Instructor = {
   updatedAt?: string;
 };
 
+export type AssignmentSubmissionType = "text" | "url" | "image";
+
+export type AssignmentStatus = "draft" | "open" | "closed" | "archived" | string;
+
+export type AssignmentSubmissionStatus =
+  | "not_submitted"
+  | "submitted"
+  | "needs_revision"
+  | "approved"
+  | string;
+
+export type CourseAssignment = {
+  id: string;
+  courseId?: string;
+  offeringId?: string;
+  sessionId?: string;
+  title: string;
+  description?: string;
+  dueAt?: string;
+  submissionTypes: AssignmentSubmissionType[];
+  isRequired?: boolean;
+  status: AssignmentStatus;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type AssignmentSubmission = {
+  id: string;
+  assignmentId: string;
+  studentId: string;
+  courseId?: string;
+  offeringId?: string;
+  sessionId?: string;
+  textAnswer?: string;
+  urlAnswer?: string;
+  imageUrls?: string[];
+  status: AssignmentSubmissionStatus;
+  submittedAt?: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  reviewNote?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 export type BookingData = {
   categories: CourseCategory[];
   /** Legacy compatibility layer for older front/admin routes. */
@@ -450,4 +503,6 @@ export type BookingData = {
   entitlements: Entitlement[];
   importBatches: ImportBatch[];
   instructors?: Instructor[];
+  courseAssignments?: CourseAssignment[];
+  assignmentSubmissions?: AssignmentSubmission[];
 };
