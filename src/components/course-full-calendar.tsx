@@ -7,6 +7,7 @@ import { canChangeReservation, formatReservationCutoff, getRemainingSeats, isSes
 import type { Course, CourseCategory, CourseSession } from "@/lib/types";
 
 type CourseFullCalendarProps = { courses: Course[]; categories: CourseCategory[] };
+const TAIPEI_TIMEZONE = "Asia/Taipei";
 
 type AvailabilityTone = "bookable" | "locked" | "full" | "closed";
 
@@ -26,6 +27,25 @@ function formatDateKey(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function getTaipeiDateParts() {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TAIPEI_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const parts = formatter.formatToParts(new Date());
+  const year = Number(parts.find((part) => part.type === "year")?.value ?? "0");
+  const month = Number(parts.find((part) => part.type === "month")?.value ?? "1");
+  const day = Number(parts.find((part) => part.type === "day")?.value ?? "1");
+  return { year, month, day };
+}
+
+function getTaipeiToday() {
+  const { year, month, day } = getTaipeiDateParts();
+  return new Date(year, month - 1, day);
 }
 
 function getMonthTitle(date: Date) {
@@ -74,6 +94,7 @@ function buildCalendarDays(currentMonth: Date, sessions: CalendarSession[]) {
   const firstDay = new Date(year, month, 1);
   const calendarStart = new Date(firstDay);
   calendarStart.setDate(firstDay.getDate() - firstDay.getDay());
+  const taipeiTodayKey = formatDateKey(getTaipeiToday());
 
   return Array.from({ length: 42 }, (_, index) => {
     const date = new Date(calendarStart);
@@ -83,7 +104,7 @@ function buildCalendarDays(currentMonth: Date, sessions: CalendarSession[]) {
       date: dateKey,
       day: date.getDate(),
       isCurrentMonth: date.getMonth() === month,
-      isToday: dateKey === formatDateKey(new Date()),
+      isToday: dateKey === taipeiTodayKey,
       sessions: sessions.filter((item) => item.session.date === dateKey),
     };
   });
@@ -134,7 +155,7 @@ function SessionModal({ item, onClose }: { item: CalendarSession | null; onClose
 }
 
 export function CourseFullCalendar({ courses, categories }: CourseFullCalendarProps) {
-  const today = new Date();
+  const today = getTaipeiToday();
   const todayKey = formatDateKey(today);
 
   const calendarSessions = useMemo(() => {

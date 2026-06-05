@@ -6,6 +6,7 @@ import { canChangeReservation, formatReservationCutoff, getCategoryName, getRema
 import type { Course, CourseCategory, CourseSession } from "@/lib/types";
 
 type MobileCourseCalendarProps = { courses: Course[]; categories: CourseCategory[] };
+const TAIPEI_TIMEZONE = "Asia/Taipei";
 
 type CalendarSessionItem = {
   courseId: string;
@@ -33,6 +34,25 @@ function formatDateKey(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function getTaipeiDateParts() {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TAIPEI_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const parts = formatter.formatToParts(new Date());
+  const year = Number(parts.find((part) => part.type === "year")?.value ?? "0");
+  const month = Number(parts.find((part) => part.type === "month")?.value ?? "1");
+  const day = Number(parts.find((part) => part.type === "day")?.value ?? "1");
+  return { year, month, day };
+}
+
+function getTaipeiToday() {
+  const { year, month, day } = getTaipeiDateParts();
+  return new Date(year, month - 1, day);
 }
 
 function getMonthTitle(date: Date) { return `${date.getFullYear()}年${date.getMonth() + 1}月`; }
@@ -114,7 +134,7 @@ function SessionModal({ item, onClose }: { item: CalendarSessionItem | null; onC
 }
 
 export function MobileCourseCalendar({ courses, categories }: MobileCourseCalendarProps) {
-  const today = new Date();
+  const today = getTaipeiToday();
   const todayKey = formatDateKey(today);
 
   const sessions = useMemo<CalendarSessionItem[]>(() => courses.flatMap((course) => course.sessions.filter((session: CourseSession) => session.isActive).map((session: CourseSession) => {
