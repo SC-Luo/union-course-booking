@@ -9,7 +9,7 @@ tags:
   - nextjs
   - firestore
 created: 2026-05-27
-updated: 2026-05-28
+updated: 2026-06-05
 status: active
 summary: 技術架構、資料來源、重要路徑、驗證指令與開發注意事項。
 related:
@@ -45,7 +45,7 @@ npm.cmd run lint
 npm.cmd run build
 ```
 
-截至 2026-05-28：
+截至 2026-06-05：
 
 - `npm.cmd run lint` 通過，0 warning。
 - `npm.cmd run build` 通過。
@@ -69,6 +69,7 @@ npm.cmd run build
 - `src/lib/data-store.ts`：本機 JSON 正規化與讀寫。
 - `src/lib/booking-repository.ts`：Firestore / JSON 資料存取。
 - `src/lib/firebase-admin.ts`：Firebase Admin 初始化。
+- `tools/sync-firestore-from-booking-data.mjs`：以本機 `data/booking-data.json` 備份、清理並回灌 Firestore 指定 collections。
 - `data/booking-data.json`：本機 JSON 備援資料。
 
 更多檔案位置請讀 `filemap.md`。
@@ -81,6 +82,12 @@ npm.cmd run build
 - 專案也有延伸集合：`courseSeries`、`courseOfferings`、`courseSessions`、`enrollments`、`attendanceRecords`、`entitlements`、`studentCourseRecords`、`instructors`、`importBatches`。
 - 資料來源由 `BOOKING_DATA_SOURCE=firestore` 控制。
 - Firestore 初始化或讀寫失敗時，資料層會回落使用本機 JSON。
+
+## 部署狀態
+
+- Repo 已連結 Vercel 專案 `union-course-booking`。
+- `.vercel/project.json` 已存在，代表本機工作區已綁定 Vercel project / team。
+- Git 遠端為 GitHub：`SC-Luo/union-course-booking`。
 
 ## Firestore 開發注意
 
@@ -95,6 +102,29 @@ npm.cmd run build
 ```powershell
 npx.cmd -y firebase-tools@latest ...
 ```
+
+## Firestore 正式同步腳本
+
+- `tools/sync-firestore-from-booking-data.mjs` 支援兩種模式：
+  - `--dry-run`：列出目前線上 collections 與本機各 collection 筆數，不做刪除。
+  - `--apply`：先把線上資料備份到 `firestore-backups/<timestamp>/`，再清空指定 collections，最後用本機 `data/booking-data.json` 重建資料。
+- 目前腳本目標 collections 為：
+  - `categories`
+  - `courses`
+  - `sessions`
+  - `reservations`
+  - `students`
+  - `courseSeries`
+  - `courseOfferings`
+  - `courseSessions`
+  - `studentCourseRecords`
+  - `enrollments`
+  - `attendanceRecords`
+  - `instructors`
+  - `entitlements`
+  - `importBatches`
+- `sessions` 若本機 JSON 沒有獨立頂層陣列，腳本會自動從 `courses[].sessions` 展開生成。
+- 這支腳本屬於正式資料操作工具；執行 `--apply` 前必須先確認備份位置與清理範圍。
 
 ## Lint / TypeScript 注意
 

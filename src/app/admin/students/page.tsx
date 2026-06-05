@@ -1,4 +1,4 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 import {
   assignStudentsToCourseEligibilityAction,
   bulkImportStudentIdentitiesAction,
@@ -30,6 +30,7 @@ type PageProps = {
     offeringId?: string;
     status?: string;
     q?: string;
+    instructorId?: string;
     saved?: string;
     error?: string;
     imported?: string;
@@ -379,6 +380,7 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
     offeringId: queryOfferingId,
     status = "all",
     q = "",
+    instructorId: editingInstructorId,
     saved,
     error,
     imported,
@@ -528,6 +530,8 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
     .filter((instructor) => instructor.isActive !== false)
     .filter((instructor) => instructorMatches(instructor, q))
     .sort((a, b) => a.name.localeCompare(b.name, "zh-Hant"));
+  const editingInstructor =
+    instructors.find((instructor) => instructor.id === editingInstructorId) ?? null;
 
   const historyStudentCandidates = currentMode === "history" && norm(q)
     ? students
@@ -1646,7 +1650,7 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
                 目前先管理講師姓名、電話、授課專長與備註，不建立講師登入帳號。授課專長連結課程類別。
               </p>
             </div>
-            <div className="hidden grid-cols-[1.1fr_150px_1.5fr_1fr_110px] border-b border-[#ead7c6] bg-[#fff7ed] px-5 py-3 text-sm font-bold text-[#6b3b25] md:grid">
+            <div className="hidden grid-cols-[1.1fr_150px_1.5fr_1fr_120px] border-b border-[#ead7c6] bg-[#fff7ed] px-5 py-3 text-sm font-bold text-[#6b3b25] md:grid">
               <span>講師</span>
               <span>手機</span>
               <span>授課專長</span>
@@ -1657,7 +1661,7 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
               {visibleInstructors.map((instructor) => (
                 <div
                   key={instructor.id}
-                  className="grid gap-3 px-5 py-4 md:grid-cols-[1.1fr_150px_1.5fr_1fr_110px] md:items-center"
+                  className="grid gap-3 px-5 py-4 md:grid-cols-[1.1fr_150px_1.5fr_1fr_120px] md:items-center"
                 >
                   <div>
                     <p className="font-black text-zinc-950">
@@ -1687,16 +1691,16 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
                   <p className="text-sm text-zinc-500">
                     {instructor.note || "—"}
                   </p>
-                  <form action={deleteInstructorIdentityAction}>
-                    <input
-                      type="hidden"
-                      name="instructorId"
-                      value={instructor.id}
-                    />
-                    <button className="rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-xs font-bold text-rose-600">
-                      停用
-                    </button>
-                  </form>
+                  <Link
+                    href={buildHref({
+                      mode: "instructors",
+                      q,
+                      instructorId: instructor.id,
+                    })}
+                    className="w-fit rounded-full border border-[#ead7c6] bg-white px-4 py-2 text-xs font-bold text-[#6b3b25] transition hover:border-[#ef6c00] hover:text-[#ef6c00]"
+                  >
+                    編輯
+                  </Link>
                 </div>
               ))}
               {visibleInstructors.length === 0 ? (
@@ -1706,6 +1710,129 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
               ) : null}
             </div>
           </section>
+
+          {editingInstructor ? (
+            <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8">
+              <Link
+                href={buildHref({ mode: "instructors", q })}
+                aria-label="關閉講師編輯視窗"
+                className="absolute inset-0 bg-zinc-950/45 backdrop-blur-sm"
+              />
+              <article className="relative z-10 max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-[1.75rem] border border-[#ead7c6] bg-white shadow-2xl">
+                <div className="flex items-start justify-between gap-4 border-b border-[#ead7c6] p-6">
+                  <div>
+                    <p className="text-sm font-bold text-[#a65f3b]">編輯講師資料</p>
+                    <h2 className="mt-1 text-2xl font-black text-zinc-950">
+                      {editingInstructor.name}
+                    </h2>
+                    <p className="mt-1 text-sm text-zinc-500">
+                      修改講師基本資料、授課專長與狀態。
+                    </p>
+                  </div>
+                  <Link
+                    href={buildHref({ mode: "instructors", q })}
+                    className="shrink-0 rounded-2xl border border-[#ead7c6] bg-white px-4 py-2 text-sm font-black text-[#6b3b25] transition hover:border-[#ef6c00] hover:text-[#ef6c00]"
+                  >
+                    關閉
+                  </Link>
+                </div>
+
+                <div className="max-h-[calc(90vh-112px)] overflow-y-auto p-6">
+                  <form action={saveInstructorIdentityAction} className="grid gap-5">
+                    <input type="hidden" name="instructorId" value={editingInstructor.id} />
+                    <input type="hidden" name="isActive" value="false" />
+
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="grid gap-2 text-sm font-bold text-zinc-700">
+                        講師姓名
+                        <input
+                          name="name"
+                          defaultValue={editingInstructor.name}
+                          className="rounded-2xl border border-[#e8d4c2] px-4 py-3 outline-none focus:border-[#ef6c00]"
+                        />
+                      </label>
+                      <label className="grid gap-2 text-sm font-bold text-zinc-700">
+                        手機
+                        <input
+                          name="phone"
+                          defaultValue={editingInstructor.phone ?? ""}
+                          className="rounded-2xl border border-[#e8d4c2] px-4 py-3 outline-none focus:border-[#ef6c00]"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="grid gap-2 text-sm font-bold text-zinc-700">
+                      授課專長
+                      <div className="flex flex-wrap gap-2 rounded-2xl border border-[#e8d4c2] bg-[#fffaf5] p-3">
+                        {instructorSpecialtyCategories.length > 0 ? (
+                          instructorSpecialtyCategories.map((category) => (
+                            <label
+                              key={category.id}
+                              className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-[#ead7c6] bg-white px-3 py-2 text-xs font-bold text-[#6b3b25] transition hover:border-[#ef6c00]"
+                            >
+                              <input
+                                type="checkbox"
+                                name="specialties"
+                                value={category.name}
+                                defaultChecked={(editingInstructor.specialties ?? []).includes(category.name)}
+                                className="h-3.5 w-3.5 accent-[#ef6c00]"
+                              />
+                              {category.name}
+                            </label>
+                          ))
+                        ) : (
+                          <span className="text-xs font-medium text-zinc-500">
+                            目前沒有課程類別，請先到課程類別建立資料。
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <label className="grid gap-2 text-sm font-bold text-zinc-700">
+                      備註
+                      <input
+                        name="note"
+                        defaultValue={editingInstructor.note ?? ""}
+                        className="rounded-2xl border border-[#e8d4c2] px-4 py-3 outline-none focus:border-[#ef6c00]"
+                      />
+                    </label>
+
+                    <label className="inline-flex w-fit cursor-pointer items-center gap-2 rounded-2xl border border-[#ead7c6] bg-[#fffaf5] px-4 py-3 text-sm font-bold text-[#6b3b25]">
+                      <input
+                        type="checkbox"
+                        name="isActive"
+                        value="true"
+                        defaultChecked={editingInstructor.isActive !== false}
+                        className="h-4 w-4 accent-[#ef6c00]"
+                      />
+                      啟用此講師
+                    </label>
+
+                    <button className="rounded-2xl bg-[#6b3b25] px-5 py-3 text-sm font-bold text-white">
+                      儲存講師資料
+                    </button>
+                  </form>
+
+                  <div className="mt-5 rounded-3xl border border-rose-100 bg-rose-50/40 p-5">
+                    <p className="text-sm font-black text-rose-700">停用講師</p>
+                    <p className="mt-1 text-xs leading-5 text-rose-600">
+                      停用後不會再作為新課堂的主要指派選項，但既有課堂紀錄仍會保留。
+                    </p>
+                    <form action={deleteInstructorIdentityAction} className="mt-4">
+                      <input
+                        type="hidden"
+                        name="instructorId"
+                        value={editingInstructor.id}
+                      />
+                      <button className="rounded-2xl border border-rose-200 bg-white px-4 py-2 text-sm font-black text-rose-600 transition hover:bg-rose-100">
+                        停用此講師
+                      </button>
+                    </form>
+                  </div>
+                </div>
+              </article>
+            </div>
+          ) : null}
         </>
       ) : null}
 

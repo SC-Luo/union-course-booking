@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { MobileCourseCalendar } from "@/components/mobile-course-calendar";
-import { canChangeReservation, formatReservationCutoff, getRemainingSeats, resolveCourseColor } from "@/lib/course-utils";
+import { canChangeReservation, formatReservationCutoff, getRemainingSeats, isSessionBookableByStatus, resolveCourseColor } from "@/lib/course-utils";
 import type { Course, CourseCategory, CourseSession } from "@/lib/types";
 
 type CourseFullCalendarProps = { courses: Course[]; categories: CourseCategory[] };
@@ -43,19 +43,21 @@ function getDisplayDate(dateKey: string) {
   return `${year}/${month}/${day}（${weekday}）`;
 }
 
-function isReservableStatus(status?: string) {
-  return ["scheduled", "rescheduled", "makeup", undefined, ""].includes(status);
+function getSessionDisplayStatus(session: CourseSession) {
+  return String(session.sessionStatus ?? session.status ?? "scheduled").trim() || "scheduled";
 }
 
 function getAvailability(course: Course, session: CourseSession) {
-  if (!course.isActive || !session.isActive) return { label: "未開放", tone: "closed" as const };
-  if (!isReservableStatus(session.status)) {
-    if (session.status === "cancelled") return { label: "已取消", tone: "closed" as const };
-    if (session.status === "suspended") return { label: "停課", tone: "closed" as const };
-    return { label: "不可約", tone: "closed" as const };
-  }
+  const status = getSessionDisplayStatus(session);
+
+  if (!course.isActive || session.isActive === false) return { label: "未開放", tone: "closed" as const };
+  if (status === "cancelled") return { label: "已取消", tone: "closed" as const };
+  if (status === "suspended") return { label: "本堂停課", tone: "closed" as const };
+  if (status === "makeup") return { label: "補課", tone: "bookable" as const };
+  if (status === "rescheduled") return { label: "已調課", tone: "closed" as const };
+  if (!isSessionBookableByStatus(session)) return { label: "暫不開放", tone: "closed" as const };
   if (getRemainingSeats(session) <= 0) return { label: "額滿", tone: "full" as const };
-  if (!canChangeReservation(session)) return { label: "已鎖定", tone: "locked" as const };
+  if (!canChangeReservation(session)) return { label: "報名截止", tone: "locked" as const };
   return { label: "可預約", tone: "bookable" as const };
 }
 
@@ -112,12 +114,12 @@ function SessionModal({ item, onClose }: { item: CalendarSession | null; onClose
           <p><span className="font-bold text-[#34231a]">課堂狀態：</span><span className={`ml-2 inline-flex rounded-full border px-2 py-0.5 text-xs font-black ${statusClass(item.tone)}`}>{item.label}</span></p>
           <p><span className="font-bold text-[#34231a]">剩餘名額：</span>{item.remainingSeats}</p>
           <p className="sm:col-span-2"><span className="font-bold text-[#34231a]">地點：</span>{item.session.location || "未提供"}</p>
-          <p className="sm:col-span-2"><span className="font-bold text-[#34231a]">預約鎖定：</span>{formatReservationCutoff(item.session)}</p>
+          <p className="sm:col-span-2"><span className="font-bold text-[#34231a]">報名截止：</span>{formatReservationCutoff(item.session)}</p>
         </div>
 
         <div className="mt-5 rounded-3xl border border-[#ead8c6] bg-white p-4 text-sm leading-6 text-[#7b6252]">
           <p className="font-bold text-[#34231a]">預約說明</p>
-          <p className="mt-2">預約時只需輸入名冊中的姓名。開課前 7 天起，課堂會鎖定，無法新增或取消預約。</p>
+          <p className="mt-2">預約時只需輸入名冊中的姓名。開課前 7 天起停止新增或取消預約。</p>
         </div>
 
         <div className="mt-6 grid gap-3 sm:grid-cols-2">

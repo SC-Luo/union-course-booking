@@ -1033,6 +1033,58 @@ export async function upsertCourse(course: Omit<Course, "sessions">) {
   }
 }
 
+
+export async function deleteSessionsByIds(sessionIds: string[]) {
+  const uniqueSessionIds = Array.from(new Set(sessionIds.filter(Boolean)));
+  if (uniqueSessionIds.length === 0) return;
+
+  const db = getFirestoreDb();
+  if (!db) {
+    const data = readBookingData();
+    const idSet = new Set(uniqueSessionIds);
+
+    data.courses = data.courses.map((course) => ({
+      ...course,
+      sessions: course.sessions.filter((session) => !idSet.has(session.id)),
+    }));
+
+    data.courseSessions = data.courseSessions?.filter((session) => !idSet.has(session.id)) ?? [];
+    data.reservations = data.reservations.filter((reservation) => !idSet.has(reservation.sessionId));
+    data.attendanceRecords =
+      data.attendanceRecords?.filter((record) => !idSet.has(record.sessionId)) ?? [];
+
+    writeBookingData(data);
+    return;
+  }
+
+  try {
+    for (let index = 0; index < uniqueSessionIds.length; index += 450) {
+      const batch = db.batch();
+      uniqueSessionIds.slice(index, index + 450).forEach((sessionId) => {
+        batch.delete(db.collection("sessions").doc(sessionId));
+        batch.delete(db.collection("courseSessions").doc(sessionId));
+      });
+      await batch.commit();
+    }
+  } catch (error) {
+    console.warn("Firestore session delete failed, falling back to local booking data.", error);
+    const data = readBookingData();
+    const idSet = new Set(uniqueSessionIds);
+
+    data.courses = data.courses.map((course) => ({
+      ...course,
+      sessions: course.sessions.filter((session) => !idSet.has(session.id)),
+    }));
+
+    data.courseSessions = data.courseSessions?.filter((session) => !idSet.has(session.id)) ?? [];
+    data.reservations = data.reservations.filter((reservation) => !idSet.has(reservation.sessionId));
+    data.attendanceRecords =
+      data.attendanceRecords?.filter((record) => !idSet.has(record.sessionId)) ?? [];
+
+    writeBookingData(data);
+  }
+}
+
 export async function upsertSession(session: CourseSession) {
   const db = getFirestoreDb();
   if (!db) {

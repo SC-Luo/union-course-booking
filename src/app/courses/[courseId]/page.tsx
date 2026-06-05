@@ -1,6 +1,5 @@
 /* eslint-disable @next/next/no-html-link-for-pages */
 import { notFound } from "next/navigation";
-import { CourseStatusBadge } from "@/components/status-badge";
 import { StudentShell } from "@/components/page-shell";
 import { getCourseCatalog } from "@/lib/booking-repository";
 import {
@@ -10,18 +9,23 @@ import {
   getCourse,
   getCourseModeInfo,
   getRemainingSeats,
-  getSessionStatus,
   getWeekday,
   isBookingCourse,
+  isSessionBookableByStatus,
 } from "@/lib/course-utils";
+import type { CourseSession } from "@/lib/types";
 import { getCourseTypeName } from "@/lib/course-coding";
 
 type PageProps = {
   params: Promise<{ courseId: string }>;
 };
 
-type SessionStatus = ReturnType<typeof getSessionStatus> | "locked";
-type CourseSessionForStatus = Parameters<typeof getSessionStatus>[0];
+type SessionTone = "available" | "makeup" | "locked" | "full" | "closed";
+type SessionDisplayState = {
+  canBook: boolean;
+  label: string;
+  tone: SessionTone;
+};
 
 function parseTaiwanDateTime(value?: string) {
   const normalized = value?.trim();
@@ -37,29 +41,58 @@ function parseTaiwanDateTime(value?: string) {
   return new Date(`${year}-${month}-${day}T${hour}:${minute}:00+08:00`);
 }
 
-function getFrontSessionStatus(session: CourseSessionForStatus): SessionStatus {
-  const baseStatus = getSessionStatus(session);
-
-  if (baseStatus !== "available") {
-    return baseStatus;
-  }
-
-  if (!canChangeReservation(session)) {
-    return "locked";
-  }
-
+function hasSessionEnded(session: Pick<CourseSession, "date" | "endTime">) {
   const classEndTime = parseTaiwanDateTime(`${session.date} ${session.endTime || "23:59"}`);
-  if (classEndTime && Date.now() > classEndTime.getTime()) {
-    return "locked";
-  }
-
-  return baseStatus;
+  return Boolean(classEndTime && Date.now() > classEndTime.getTime());
 }
 
-function getDisabledButtonText(status: SessionStatus) {
-  if (status === "locked") return "已鎖定";
-  if (status === "full") return "已額滿";
-  return "無法預約";
+function getSessionDisplayState(
+  session: CourseSession,
+  courseIsActive: boolean,
+): SessionDisplayState {
+  const status = String(session.sessionStatus ?? session.status ?? "scheduled").trim() || "scheduled";
+
+  if (!courseIsActive || session.isActive === false) {
+    return { canBook: false, label: "未開放", tone: "closed" };
+  }
+
+  if (status === "cancelled") {
+    return { canBook: false, label: "已取消", tone: "closed" };
+  }
+
+  if (status === "suspended") {
+    return { canBook: false, label: "本堂停課", tone: "closed" };
+  }
+
+  if (status === "rescheduled") {
+    return { canBook: false, label: "已調課", tone: "closed" };
+  }
+
+  if (!isSessionBookableByStatus(session)) {
+    return { canBook: false, label: "暫不開放", tone: "closed" };
+  }
+
+  if (getRemainingSeats(session) <= 0) {
+    return { canBook: false, label: "已額滿", tone: "full" };
+  }
+
+  if (!canChangeReservation(session) || hasSessionEnded(session)) {
+    return { canBook: false, label: "報名截止", tone: "locked" };
+  }
+
+  if (status === "makeup") {
+    return { canBook: true, label: "補課", tone: "makeup" };
+  }
+
+  return { canBook: true, label: "可預約", tone: "available" };
+}
+
+function sessionBadgeClass(tone: SessionTone) {
+  if (tone === "available") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (tone === "makeup") return "border-sky-200 bg-sky-50 text-sky-700";
+  if (tone === "full") return "border-amber-200 bg-amber-50 text-amber-700";
+  if (tone === "locked") return "border-zinc-200 bg-zinc-100 text-zinc-600";
+  return "border-zinc-200 bg-zinc-100 text-zinc-600";
 }
 
 export default async function CourseDetailPage({ params }: PageProps) {
@@ -143,8 +176,8 @@ export default async function CourseDetailPage({ params }: PageProps) {
               </div>
               <div className="grid gap-3">
                 {sessions.map((session) => {
-                  const status = getFrontSessionStatus(session);
-                  const canBook = isBookingMode && status === "available";
+                  const displayState = getSessionDisplayState(session, course.isActive);
+                  const canBook = isBookingMode && displayState.canBook;
 
                   return (
                     <div
@@ -159,8 +192,14 @@ export default async function CourseDetailPage({ params }: PageProps) {
                       </div>
                       <div>
                         <div className="mb-2 flex flex-wrap items-center gap-2">
-                          {isBookingMode ? <CourseStatusBadge status={status} /> : <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-black text-amber-900">固定課表</span>}
-                          {isBookingMode ? <span className="text-sm text-zinc-500">變更截止：{formatReservationCutoff(session)}</span> : null}
+                          {isBookingMode ? (
+                            <span className={`rounded-full border px-3 py-1 text-xs font-black ${sessionBadgeClass(displayState.tone)}`}>
+                              {displayState.label}
+                            </span>
+                          ) : (
+                            <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-black text-amber-900">固定課表</span>
+                          )}
+                          {isBookingMode ? <span className="text-sm text-zinc-500">報名截止：{formatReservationCutoff(session)}</span> : null}
                         </div>
                         <p className="text-lg font-semibold text-zinc-950">{session.startTime}-{session.endTime}</p>
                         <p className="mt-1 text-sm text-zinc-600">地點：{session.location}</p>
@@ -177,7 +216,7 @@ export default async function CourseDetailPage({ params }: PageProps) {
                           </a>
                         ) : (
                           <button disabled className="rounded-md bg-zinc-200 px-4 py-3 text-sm font-medium text-zinc-500">
-                            {getDisabledButtonText(status)}
+                            {displayState.label}
                           </button>
                         )
                       ) : (

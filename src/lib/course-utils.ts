@@ -23,9 +23,13 @@ export const DEFAULT_CATEGORY_COLORS: Record<string, string> = {
   R: "#f59e0b",
 };
 
-export function resolveCategoryColor(categoryId?: string, categoryColor?: string) {
+export function resolveCategoryColor(
+  categoryId?: string,
+  categoryColor?: string,
+) {
   if (categoryColor) return categoryColor;
-  if (categoryId && DEFAULT_CATEGORY_COLORS[categoryId]) return DEFAULT_CATEGORY_COLORS[categoryId];
+  if (categoryId && DEFAULT_CATEGORY_COLORS[categoryId])
+    return DEFAULT_CATEGORY_COLORS[categoryId];
   return "#6b7280";
 }
 
@@ -34,15 +38,26 @@ export function resolveCourseColor(
   category?: Pick<CourseCategory, "color" | "id"> | null,
 ) {
   if (course?.color) return course.color;
-  return resolveCategoryColor(category?.id ?? course?.categoryId, category?.color);
+  return resolveCategoryColor(
+    category?.id ?? course?.categoryId,
+    category?.color,
+  );
 }
 
-export function getCategoryName(categoryId: string, categories: CourseCategory[]) {
-  return categories.find((category) => category.id === categoryId)?.name ?? categoryId;
+export function getCategoryName(
+  categoryId: string,
+  categories: CourseCategory[],
+) {
+  return (
+    categories.find((category) => category.id === categoryId)?.name ??
+    categoryId
+  );
 }
 
-
-export type NormalizedCourseMode = "booking_flexible" | "fixed_roster" | "subsidy_roster";
+export type NormalizedCourseMode =
+  | "booking_flexible"
+  | "fixed_roster"
+  | "subsidy_roster";
 
 export type CourseModeInfo = {
   mode: NormalizedCourseMode;
@@ -55,23 +70,51 @@ export type CourseModeInfo = {
 };
 
 function normalizeModeText(value?: string | null) {
-  return String(value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
 }
 
 export function getNormalizedCourseMode(
-  course?: Partial<Pick<Course, "courseMode" | "rosterType" | "bookingOpen">> | null,
+  course?: Partial<
+    Pick<Course, "courseMode" | "rosterType" | "bookingOpen">
+  > | null,
 ): NormalizedCourseMode {
   const mode = normalizeModeText(course?.courseMode);
 
-  if (["booking_flexible", "booking", "reservation", "booking_flex", "flexible_booking"].includes(mode)) {
+  if (
+    [
+      "booking_flexible",
+      "booking",
+      "reservation",
+      "booking_flex",
+      "flexible_booking",
+    ].includes(mode)
+  ) {
     return "booking_flexible";
   }
 
-  if (["subsidy_roster", "subsidy_fixed_roster", "grant_roster", "funded_roster"].includes(mode)) {
+  if (
+    [
+      "subsidy_roster",
+      "subsidy_fixed_roster",
+      "grant_roster",
+      "funded_roster",
+    ].includes(mode)
+  ) {
     return "subsidy_roster";
   }
 
-  if (["fixed_roster", "roster_fixed", "fixed_roster_exam", "roster", "attendance_roster"].includes(mode)) {
+  if (
+    [
+      "fixed_roster",
+      "roster_fixed",
+      "fixed_roster_exam",
+      "roster",
+      "attendance_roster",
+    ].includes(mode)
+  ) {
     return "fixed_roster";
   }
 
@@ -98,16 +141,26 @@ export function getNormalizedCourseMode(
   return "booking_flexible";
 }
 
-export function isBookingCourse(course?: Partial<Pick<Course, "courseMode" | "rosterType" | "bookingOpen">> | null) {
+export function isBookingCourse(
+  course?: Partial<
+    Pick<Course, "courseMode" | "rosterType" | "bookingOpen">
+  > | null,
+) {
   return getNormalizedCourseMode(course) === "booking_flexible";
 }
 
-export function isFixedRosterCourse(course?: Partial<Pick<Course, "courseMode" | "rosterType" | "bookingOpen">> | null) {
+export function isFixedRosterCourse(
+  course?: Partial<
+    Pick<Course, "courseMode" | "rosterType" | "bookingOpen">
+  > | null,
+) {
   return !isBookingCourse(course);
 }
 
 export function getCourseModeInfo(
-  course?: Partial<Pick<Course, "courseMode" | "rosterType" | "bookingOpen">> | null,
+  course?: Partial<
+    Pick<Course, "courseMode" | "rosterType" | "bookingOpen">
+  > | null,
 ): CourseModeInfo {
   const mode = getNormalizedCourseMode(course);
 
@@ -117,7 +170,8 @@ export function getCourseModeInfo(
       label: "預約制課程",
       shortLabel: "預約制",
       frontTitle: "選擇上課單元與時段",
-      frontDescription: "這類課程可由學員自行選擇可預約時段；名額額滿、鎖定或停課時不可預約。",
+      frontDescription:
+        "這類課程可由學員自行選擇可預約時段；名額額滿、鎖定或停課時不可預約。",
       badgeClassName: "border-emerald-200 bg-emerald-50 text-emerald-800",
       isBookingEnabled: true,
     };
@@ -129,7 +183,8 @@ export function getCourseModeInfo(
       label: "補助固定名冊",
       shortLabel: "補助名冊",
       frontTitle: "固定課表與出席紀錄",
-      frontDescription: "這類課程以正式名冊為準，不開放自行預約。系統將用於每堂點名、出缺勤累計與補助課程紀錄。",
+      frontDescription:
+        "這類課程以正式名冊為準，不開放自行預約。系統將用於每堂點名、出缺勤累計與補助課程紀錄。",
       badgeClassName: "border-sky-200 bg-sky-50 text-sky-800",
       isBookingEnabled: false,
     };
@@ -140,12 +195,12 @@ export function getCourseModeInfo(
     label: "固定名冊課程",
     shortLabel: "固定名冊",
     frontTitle: "固定課表與出席紀錄",
-    frontDescription: "這類課程以班級名冊為準，不開放自行預約。學員依既定課表出席，系統將用於每堂點名與出缺勤累計。",
+    frontDescription:
+      "這類課程以班級名冊為準，不開放自行預約。學員依既定課表出席，系統將用於每堂點名與出缺勤累計。",
     badgeClassName: "border-amber-200 bg-amber-50 text-amber-900",
     isBookingEnabled: false,
   };
 }
-
 
 function normalizeLookupValue(value: string | undefined) {
   return decodeURIComponent(value ?? "")
@@ -166,12 +221,21 @@ export function getCourse(courseId: string, courses: Course[]) {
       course.title,
     ];
 
-    return candidates.some((candidate) => normalizeLookupValue(candidate) === lookup);
+    return candidates.some(
+      (candidate) => normalizeLookupValue(candidate) === lookup,
+    );
   });
 }
 
-export function getCourseSeriesId(course: Pick<Course, "seriesId" | "courseSeriesId" | "courseMasterId" | "id">) {
-  return course.seriesId ?? course.courseSeriesId ?? course.courseMasterId ?? `series-${course.id}`;
+export function getCourseSeriesId(
+  course: Pick<Course, "seriesId" | "courseSeriesId" | "courseMasterId" | "id">,
+) {
+  return (
+    course.seriesId ??
+    course.courseSeriesId ??
+    course.courseMasterId ??
+    `series-${course.id}`
+  );
 }
 
 export function getOfferingId(course: Pick<Course, "offeringId" | "id">) {
@@ -179,7 +243,17 @@ export function getOfferingId(course: Pick<Course, "offeringId" | "id">) {
 }
 
 export function getSeriesForCourse(
-  course: Pick<Course, "seriesId" | "courseSeriesId" | "courseMasterId" | "id" | "title" | "categoryId" | "description" | "color">,
+  course: Pick<
+    Course,
+    | "seriesId"
+    | "courseSeriesId"
+    | "courseMasterId"
+    | "id"
+    | "title"
+    | "categoryId"
+    | "description"
+    | "color"
+  >,
   seriesList: CourseSeries[],
 ) {
   const seriesId = getCourseSeriesId(course);
@@ -196,12 +270,27 @@ export function getSeriesForCourse(
 }
 
 export function getOfferingForCourse(
-  course: Pick<Course, "id" | "offeringId" | "seriesId" | "courseSeriesId" | "courseMasterId" | "title" | "displayTitle" | "year" | "termLabel" | "shortName">,
+  course: Pick<
+    Course,
+    | "id"
+    | "offeringId"
+    | "seriesId"
+    | "courseSeriesId"
+    | "courseMasterId"
+    | "title"
+    | "displayTitle"
+    | "year"
+    | "termLabel"
+    | "shortName"
+  >,
   offerings: CourseOffering[],
 ) {
   const offeringId = getOfferingId(course);
   return (
-    offerings.find((offering) => offering.id === offeringId || offering.legacyCourseId === course.id) ?? {
+    offerings.find(
+      (offering) =>
+        offering.id === offeringId || offering.legacyCourseId === course.id,
+    ) ?? {
       id: offeringId,
       seriesId: getCourseSeriesId(course as Course),
       legacyCourseId: course.id,
@@ -215,31 +304,86 @@ export function getOfferingForCourse(
   );
 }
 
-export function getOfferingDisplayName(offering?: Pick<CourseOffering, "displayTitle" | "displayName" | "classDisplayName" | "title">) {
-  return offering?.displayTitle ?? offering?.displayName ?? offering?.classDisplayName ?? offering?.title ?? "未設定年度期別班級";
+export function getOfferingDisplayName(
+  offering?: Pick<
+    CourseOffering,
+    "displayTitle" | "displayName" | "classDisplayName" | "title"
+  >,
+) {
+  return (
+    offering?.displayTitle ??
+    offering?.displayName ??
+    offering?.classDisplayName ??
+    offering?.title ??
+    "未設定年度期別班級"
+  );
 }
 
-export function getOfferingPeriodLabel(offering?: Pick<CourseOffering, "year" | "termLabel" | "displayTitle" | "displayName" | "title">) {
+export function getOfferingPeriodLabel(
+  offering?: Pick<
+    CourseOffering,
+    "year" | "termLabel" | "displayTitle" | "displayName" | "title"
+  >,
+) {
   if (!offering) return "未設定年度期別";
-  const parts = [offering.year ? `${offering.year}年` : "", offering.termLabel ?? ""].filter(Boolean);
+  const parts = [
+    offering.year ? `${offering.year}年` : "",
+    offering.termLabel ?? "",
+  ].filter(Boolean);
   if (parts.length > 0) return parts.join("｜");
-  return offering.displayTitle ?? offering.displayName ?? offering.title ?? "未設定年度期別";
+  return (
+    offering.displayTitle ??
+    offering.displayName ??
+    offering.title ??
+    "未設定年度期別"
+  );
 }
 
-export function getEnrollmentOfferingId(enrollment: Pick<Enrollment, "offeringId" | "courseOfferingId">) {
+export function getEnrollmentOfferingId(
+  enrollment: Pick<Enrollment, "offeringId" | "courseOfferingId">,
+) {
   return enrollment.offeringId ?? enrollment.courseOfferingId ?? "";
 }
 
-export function getEnrollmentSeatLabel(enrollment?: Pick<Enrollment, "seatNo" | "seatNumber">, student?: Pick<Student, "seatNumber">) {
-  return enrollment?.seatNo ?? (enrollment?.seatNumber != null ? String(enrollment.seatNumber) : student?.seatNumber != null ? String(student.seatNumber) : "");
+export function getEnrollmentSeatLabel(
+  enrollment?: Pick<Enrollment, "seatNo" | "seatNumber">,
+  student?: Pick<Student, "seatNumber">,
+) {
+  return (
+    enrollment?.seatNo ??
+    (enrollment?.seatNumber != null
+      ? String(enrollment.seatNumber)
+      : student?.seatNumber != null
+        ? String(student.seatNumber)
+        : "")
+  );
 }
 
-export function getStudentEnrollments(student: Pick<Student, "id" | "offeringId" | "classId" | "seatNumber" | "source" | "sourceSheet" | "sourceRow" | "isActive">, enrollments: Enrollment[], courses: Course[]) {
-  const direct = enrollments.filter((enrollment) => enrollment.studentId === student.id);
+export function getStudentEnrollments(
+  student: Pick<
+    Student,
+    | "id"
+    | "offeringId"
+    | "classId"
+    | "seatNumber"
+    | "source"
+    | "sourceSheet"
+    | "sourceRow"
+    | "isActive"
+  >,
+  enrollments: Enrollment[],
+  courses: Course[],
+) {
+  const direct = enrollments.filter(
+    (enrollment) => enrollment.studentId === student.id,
+  );
   if (direct.length > 0) return direct;
 
-  const legacyCourse = student.classId ? courses.find((course) => course.id === student.classId) : undefined;
-  const offeringId = student.offeringId ?? legacyCourse?.offeringId ?? student.classId;
+  const legacyCourse = student.classId
+    ? courses.find((course) => course.id === student.classId)
+    : undefined;
+  const offeringId =
+    student.offeringId ?? legacyCourse?.offeringId ?? student.classId;
   if (!offeringId) return [];
 
   return [
@@ -262,17 +406,29 @@ export function getRemainingSeats(session: CourseSession) {
   return Math.max(session.capacity - session.bookedCount, 0);
 }
 
+export function isSessionBookableByStatus(session: CourseSession) {
+  const status = session.status ?? session.sessionStatus ?? "scheduled";
+  return (
+    session.isActive !== false &&
+    status !== "cancelled" &&
+    status !== "suspended"
+  );
+}
+
 export function getSessionStatus(session: CourseSession): CourseStatus {
-  if (!session.isActive) return "closed";
+  if (!isSessionBookableByStatus(session)) return "closed";
   if (getRemainingSeats(session) <= 0) return "full";
   return "available";
 }
 
 export function getCourseStatus(course: Course): CourseStatus {
   if (!course.isActive) return "closed";
-  const activeSessions = course.sessions.filter((session) => session.isActive);
+  const activeSessions = course.sessions.filter((session) =>
+    isSessionBookableByStatus(session),
+  );
   if (activeSessions.length === 0) return "closed";
-  if (activeSessions.every((session) => getRemainingSeats(session) <= 0)) return "full";
+  if (activeSessions.every((session) => getRemainingSeats(session) <= 0))
+    return "full";
   return "available";
 }
 
@@ -282,7 +438,10 @@ function parseDateTimeValue(value: string) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-export function getReservationCutoff(session: Pick<CourseSession, "date"> & Partial<Pick<CourseSession, "bookingDeadline">>) {
+export function getReservationCutoff(
+  session: Pick<CourseSession, "date"> &
+    Partial<Pick<CourseSession, "bookingDeadline">>,
+) {
   const courseDate = parseDateTimeValue(`${session.date}T00:00:00`);
   if (!courseDate) return new Date(0);
 
@@ -293,43 +452,66 @@ export function getReservationCutoff(session: Pick<CourseSession, "date"> & Part
   if (session.bookingDeadline) {
     const parsedDeadline = parseDateTimeValue(session.bookingDeadline);
     if (parsedDeadline) {
-      return parsedDeadline.getTime() < weeklyLockDeadline.getTime() ? parsedDeadline : weeklyLockDeadline;
+      return parsedDeadline.getTime() < weeklyLockDeadline.getTime()
+        ? parsedDeadline
+        : weeklyLockDeadline;
     }
   }
 
   return weeklyLockDeadline;
 }
 
-export function canChangeReservation(session: Pick<CourseSession, "date"> & Partial<Pick<CourseSession, "bookingDeadline">>) {
+export function canChangeReservation(
+  session: Pick<CourseSession, "date"> &
+    Partial<Pick<CourseSession, "bookingDeadline">>,
+) {
   return new Date() <= getReservationCutoff(session);
 }
 
-export function formatReservationCutoff(session: Pick<CourseSession, "date"> & Partial<Pick<CourseSession, "bookingDeadline">>) {
+export function formatReservationCutoff(
+  session: Pick<CourseSession, "date"> &
+    Partial<Pick<CourseSession, "bookingDeadline">>,
+) {
   const cutoff = getReservationCutoff(session);
-  if (Number.isNaN(cutoff.getTime()) || cutoff.getTime() === 0) return "未設定截止時間";
+  if (Number.isNaN(cutoff.getTime()) || cutoff.getTime() === 0)
+    return "未設定截止時間";
 
   const year = cutoff.getFullYear();
   const month = String(cutoff.getMonth() + 1).padStart(2, "0");
   const day = String(cutoff.getDate()).padStart(2, "0");
   const hour = String(cutoff.getHours()).padStart(2, "0");
   const minute = String(cutoff.getMinutes()).padStart(2, "0");
-  return `鎖定：${year}-${month}-${day} ${hour}:${minute}`;
+  return `${year}-${month}-${day} ${hour}:${minute}`;
 }
 
-export function getSession(sessionId: string, courses: Course[]): CourseSession | undefined;
-export function getSession(course: Pick<Course, "sessions"> | null | undefined, sessionId: string): CourseSession | undefined;
+export function getSession(
+  sessionId: string,
+  courses: Course[],
+): CourseSession | undefined;
+export function getSession(
+  course: Pick<Course, "sessions"> | null | undefined,
+  sessionId: string,
+): CourseSession | undefined;
 export function getSession(
   first: string | Pick<Course, "sessions"> | null | undefined,
   second: Course[] | string,
 ): CourseSession | undefined {
   if (typeof first === "string" && Array.isArray(second)) {
     const lookup = normalizeLookupValue(first);
-    return second.flatMap((course) => course.sessions).find((session) => session.id === first || normalizeLookupValue(session.id) === lookup);
+    return second
+      .flatMap((course) => course.sessions)
+      .find(
+        (session) =>
+          session.id === first || normalizeLookupValue(session.id) === lookup,
+      );
   }
 
   if (typeof second === "string" && first && typeof first !== "string") {
     const lookup = normalizeLookupValue(second);
-    return first.sessions.find((session) => session.id === second || normalizeLookupValue(session.id) === lookup);
+    return first.sessions.find(
+      (session) =>
+        session.id === second || normalizeLookupValue(session.id) === lookup,
+    );
   }
 
   return undefined;

@@ -2,12 +2,16 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { inferCategoryFromCode, inferCourseTypeFromCode } from "@/lib/course-coding";
+import {
+  inferCategoryFromCode,
+  inferCourseTypeFromCode,
+} from "@/lib/course-coding";
 import { syncGoogleSheets } from "@/lib/google-sheets-sync";
 import {
   buildSessionDeadline,
   cancelReservationByStaff,
   deleteCourseSessionsAndReservations,
+  deleteSessionsByIds,
   deleteManagedDocument,
   deleteStudentIdentityDocument,
   getBookingData,
@@ -30,7 +34,17 @@ import {
   addStudentToSessionRoster,
   ensureSessionRosterReservation,
 } from "@/lib/booking-repository";
-import type { AttendanceStatus, CourseCategory, CourseMode, CourseOffering, CourseSeries, CourseSession, Student, StudentCourseRecord, Instructor } from "@/lib/types";
+import type {
+  AttendanceStatus,
+  CourseCategory,
+  CourseMode,
+  CourseOffering,
+  CourseSeries,
+  CourseSession,
+  Student,
+  StudentCourseRecord,
+  Instructor,
+} from "@/lib/types";
 
 function slugify(input: string) {
   return input
@@ -46,7 +60,11 @@ function normalizeHexColor(value: FormDataEntryValue | null) {
   return /^#[0-9A-Fa-f]{6}$/.test(color) ? color : undefined;
 }
 
-function generateCourseCode(courseType: string, categoryId: string, existingCodes: Array<string | undefined>) {
+function generateCourseCode(
+  courseType: string,
+  categoryId: string,
+  existingCodes: Array<string | undefined>,
+) {
   const prefix = `${courseType}-${categoryId}`;
   const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const pattern = new RegExp(`^${escapedPrefix}(\\d{3})$`);
@@ -59,7 +77,12 @@ function generateCourseCode(courseType: string, categoryId: string, existingCode
   return `${prefix}${String(maxSequence + 1).padStart(3, "0")}`;
 }
 
-function buildSessionId(courseId: string, date: string, startTime: string, topic: string) {
+function buildSessionId(
+  courseId: string,
+  date: string,
+  startTime: string,
+  topic: string,
+) {
   const time = startTime.replace(":", "");
   const topicSlug = slugify(topic || "session");
   return `${courseId}-${date}-${time}-${topicSlug}`;
@@ -72,7 +95,7 @@ function addDays(date: Date, days: number) {
 }
 
 function formatDate(date: Date) {
-  return date.toISOString().slice(0, 10);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function encodePathSegment(segment: string) {
@@ -92,7 +115,9 @@ function encodeRouteSegment(segment: string) {
 
 function buildAdminSessionReservationsPath(sessionId: string) {
   const safeSessionId = encodeRouteSegment(sessionId);
-  return safeSessionId ? `/admin/sessions/${safeSessionId}/reservations` : "/admin/course-sessions";
+  return safeSessionId
+    ? `/admin/sessions/${safeSessionId}/reservations`
+    : "/admin/course-sessions";
 }
 
 function encodeQueryString(query: string) {
@@ -109,7 +134,10 @@ function encodeQueryString(query: string) {
     .join("&");
 }
 
-function safeRedirectPath(path: string | null | undefined, fallback = "/admin") {
+function safeRedirectPath(
+  path: string | null | undefined,
+  fallback = "/admin",
+) {
   const raw = String(path ?? "").trim();
 
   if (!raw || !raw.startsWith("/admin") || raw.startsWith("//")) {
@@ -121,7 +149,8 @@ function safeRedirectPath(path: string | null | undefined, fallback = "/admin") 
   const hash = hashIndex >= 0 ? raw.slice(hashIndex + 1) : "";
 
   const queryIndex = beforeHash.indexOf("?");
-  const pathname = queryIndex >= 0 ? beforeHash.slice(0, queryIndex) : beforeHash;
+  const pathname =
+    queryIndex >= 0 ? beforeHash.slice(0, queryIndex) : beforeHash;
   const query = queryIndex >= 0 ? beforeHash.slice(queryIndex + 1) : "";
 
   const safePathname = pathname.split("/").map(encodePathSegment).join("/");
@@ -131,7 +160,10 @@ function safeRedirectPath(path: string | null | undefined, fallback = "/admin") 
   return `${safePathname}${safeQuery}${safeHash}`;
 }
 
-function normalizeAdminRedirect(value: FormDataEntryValue | null, fallback: string) {
+function normalizeAdminRedirect(
+  value: FormDataEntryValue | null,
+  fallback: string,
+) {
   return safeRedirectPath(String(value ?? "").trim(), fallback);
 }
 
@@ -147,11 +179,20 @@ function normalizeNumber(value: FormDataEntryValue | null, fallback?: number) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function buildManagedId(prefix: string, parts: Array<string | number | undefined>) {
-  return `${prefix}-${parts.map((part) => slugify(String(part ?? ""))).filter(Boolean).join("-")}`;
+function buildManagedId(
+  prefix: string,
+  parts: Array<string | number | undefined>,
+) {
+  return `${prefix}-${parts
+    .map((part) => slugify(String(part ?? "")))
+    .filter(Boolean)
+    .join("-")}`;
 }
 
-function normalizeCourseMode(value: FormDataEntryValue | string | null | undefined, fallback?: string): CourseMode | undefined {
+function normalizeCourseMode(
+  value: FormDataEntryValue | string | null | undefined,
+  fallback?: string,
+): CourseMode | undefined {
   const raw = String(value ?? fallback ?? "").trim();
   if (!raw) return undefined;
 
@@ -177,7 +218,8 @@ function computeLeaveHoursFromTimeRange(start?: string, end?: string) {
   };
   const startMinutes = parse(start);
   const endMinutes = parse(end);
-  if (startMinutes == null || endMinutes == null || endMinutes <= startMinutes) return undefined;
+  if (startMinutes == null || endMinutes == null || endMinutes <= startMinutes)
+    return undefined;
   return Math.max(0.5, Math.round(((endMinutes - startMinutes) / 60) * 2) / 2);
 }
 
@@ -191,7 +233,8 @@ export async function syncGoogleSheetsAction(formData: FormData) {
   const result = await syncGoogleSheets("all");
 
   if (!result.ok) {
-    const status = result.reason === "not-configured" ? "not-configured" : "failed";
+    const status =
+      result.reason === "not-configured" ? "not-configured" : "failed";
     redirect(`/admin/exports?googleSheetsSync=${status}`);
   }
 
@@ -202,19 +245,35 @@ export async function syncGoogleSheetsAction(formData: FormData) {
 export async function updateAttendanceAction(formData: FormData) {
   const reservationId = String(formData.get("reservationId") ?? "");
   const sessionId = String(formData.get("sessionId") ?? "");
-  const attendanceStatus = String(formData.get("attendanceStatus") ?? "") as AttendanceStatus;
+  const attendanceStatus = String(
+    formData.get("attendanceStatus") ?? "",
+  ) as AttendanceStatus;
   const leaveHoursRaw = Number(formData.get("leaveHours") ?? 0);
-  const leaveHours = Number.isFinite(leaveHoursRaw) && leaveHoursRaw > 0 ? leaveHoursRaw : undefined;
-  const leaveStartTime = String(formData.get("leaveStartTime") ?? "").trim() || undefined;
-  const leaveEndTime = String(formData.get("leaveEndTime") ?? "").trim() || undefined;
+  const leaveHours =
+    Number.isFinite(leaveHoursRaw) && leaveHoursRaw > 0
+      ? leaveHoursRaw
+      : undefined;
+  const leaveStartTime =
+    String(formData.get("leaveStartTime") ?? "").trim() || undefined;
+  const leaveEndTime =
+    String(formData.get("leaveEndTime") ?? "").trim() || undefined;
   const lateTime = String(formData.get("lateTime") ?? "").trim() || undefined;
-  const effectiveLeaveHours = attendanceStatus === "leave" ? computeLeaveHoursFromTimeRange(leaveStartTime, leaveEndTime) ?? leaveHours : leaveHours;
+  const effectiveLeaveHours =
+    attendanceStatus === "leave"
+      ? (computeLeaveHoursFromTimeRange(leaveStartTime, leaveEndTime) ??
+        leaveHours)
+      : leaveHours;
   const redirectTo = normalizeAdminRedirect(
     formData.get("redirectTo"),
     buildAdminSessionReservationsPath(sessionId),
   );
 
-  await updateReservationAttendance(reservationId, attendanceStatus, { leaveHours: effectiveLeaveHours, leaveStartTime, leaveEndTime, lateTime });
+  await updateReservationAttendance(reservationId, attendanceStatus, {
+    leaveHours: effectiveLeaveHours,
+    leaveStartTime,
+    leaveEndTime,
+    lateTime,
+  });
   revalidatePath("/admin");
   revalidatePath("/admin/stats");
   if (sessionId) revalidatePath(buildAdminSessionReservationsPath(sessionId));
@@ -227,19 +286,32 @@ export async function updateRosterAttendanceAction(formData: FormData) {
   const sessionId = String(formData.get("sessionId") ?? "");
   const courseId = String(formData.get("courseId") ?? "");
   const studentId = String(formData.get("studentId") ?? "");
-  const attendanceStatus = String(formData.get("attendanceStatus") ?? "") as AttendanceStatus;
+  const attendanceStatus = String(
+    formData.get("attendanceStatus") ?? "",
+  ) as AttendanceStatus;
   const leaveHoursRaw = Number(formData.get("leaveHours") ?? 0);
-  const leaveHours = Number.isFinite(leaveHoursRaw) && leaveHoursRaw > 0 ? leaveHoursRaw : undefined;
-  const leaveStartTime = String(formData.get("leaveStartTime") ?? "").trim() || undefined;
-  const leaveEndTime = String(formData.get("leaveEndTime") ?? "").trim() || undefined;
+  const leaveHours =
+    Number.isFinite(leaveHoursRaw) && leaveHoursRaw > 0
+      ? leaveHoursRaw
+      : undefined;
+  const leaveStartTime =
+    String(formData.get("leaveStartTime") ?? "").trim() || undefined;
+  const leaveEndTime =
+    String(formData.get("leaveEndTime") ?? "").trim() || undefined;
   const lateTime = String(formData.get("lateTime") ?? "").trim() || undefined;
-  const effectiveLeaveHours = attendanceStatus === "leave" ? computeLeaveHoursFromTimeRange(leaveStartTime, leaveEndTime) ?? leaveHours : leaveHours;
+  const effectiveLeaveHours =
+    attendanceStatus === "leave"
+      ? (computeLeaveHoursFromTimeRange(leaveStartTime, leaveEndTime) ??
+        leaveHours)
+      : leaveHours;
   const redirectTo = normalizeAdminRedirect(
     formData.get("redirectTo"),
     buildAdminSessionReservationsPath(sessionId),
   );
 
-  let targetReservationId = reservationId.startsWith("roster-") ? "" : reservationId;
+  let targetReservationId = reservationId.startsWith("roster-")
+    ? ""
+    : reservationId;
 
   if (!targetReservationId && studentId && courseId && sessionId) {
     const data = await getBookingData();
@@ -253,7 +325,11 @@ export async function updateRosterAttendanceAction(formData: FormData) {
     if (existing) {
       targetReservationId = existing.id;
     } else {
-      const result = await ensureSessionRosterReservation(studentId, courseId, sessionId);
+      const result = await ensureSessionRosterReservation(
+        studentId,
+        courseId,
+        sessionId,
+      );
       if (result.ok) {
         targetReservationId = result.reservation.id;
       } else {
@@ -270,7 +346,18 @@ export async function updateRosterAttendanceAction(formData: FormData) {
   }
 
   if (targetReservationId) {
-    await updateReservationAttendanceBySessionStudent(targetReservationId, sessionId, studentId, attendanceStatus, { leaveHours: effectiveLeaveHours, leaveStartTime, leaveEndTime, lateTime });
+    await updateReservationAttendanceBySessionStudent(
+      targetReservationId,
+      sessionId,
+      studentId,
+      attendanceStatus,
+      {
+        leaveHours: effectiveLeaveHours,
+        leaveStartTime,
+        leaveEndTime,
+        lateTime,
+      },
+    );
   }
 
   revalidatePath("/admin");
@@ -280,14 +367,15 @@ export async function updateRosterAttendanceAction(formData: FormData) {
   redirect(redirectTo);
 }
 
-
 export async function bookRosterStudentByStaffAction(formData: FormData) {
   const studentId = String(formData.get("studentId") ?? "").trim();
   const courseId = String(formData.get("courseId") ?? "").trim();
   const sessionId = String(formData.get("sessionId") ?? "").trim();
   const redirectTo = normalizeAdminRedirect(
     formData.get("redirectTo"),
-    sessionId ? `${buildAdminSessionReservationsPath(sessionId)}#attendance-list` : "/admin/course-sessions",
+    sessionId
+      ? `${buildAdminSessionReservationsPath(sessionId)}#attendance-list`
+      : "/admin/course-sessions",
   );
 
   if (!studentId || !courseId || !sessionId) {
@@ -295,7 +383,9 @@ export async function bookRosterStudentByStaffAction(formData: FormData) {
   }
 
   const data = await getBookingData();
-  const course = (data.courses ?? []).find((item) => item.id === courseId || item.offeringId === courseId);
+  const course = (data.courses ?? []).find(
+    (item) => item.id === courseId || item.offeringId === courseId,
+  );
   const session = course?.sessions?.find((item) => item.id === sessionId);
 
   if (!course || !session) {
@@ -311,7 +401,8 @@ export async function bookRosterStudentByStaffAction(formData: FormData) {
 
   if (!existing) {
     const bookedCount = (data.reservations ?? []).filter(
-      (reservation) => reservation.sessionId === session.id && reservation.status === "booked",
+      (reservation) =>
+        reservation.sessionId === session.id && reservation.status === "booked",
     ).length;
     const capacity = Number(session.capacity ?? 0);
 
@@ -320,7 +411,11 @@ export async function bookRosterStudentByStaffAction(formData: FormData) {
     }
   }
 
-  const result = await ensureSessionRosterReservation(studentId, course.id, session.id);
+  const result = await ensureSessionRosterReservation(
+    studentId,
+    course.id,
+    session.id,
+  );
 
   revalidatePath("/");
   revalidatePath("/admin");
@@ -337,13 +432,14 @@ export async function bookRosterStudentByStaffAction(formData: FormData) {
   redirect(appendAdminQuery(redirectTo, "rosterBooking=success"));
 }
 
-
 export async function markAllSessionStudentsAttendedAction(formData: FormData) {
   const sessionId = String(formData.get("sessionId") ?? "").trim();
   const courseId = String(formData.get("courseId") ?? "").trim();
   const redirectTo = normalizeAdminRedirect(
     formData.get("redirectTo"),
-    sessionId ? `${buildAdminSessionReservationsPath(sessionId)}#attendance-list` : "/admin/course-sessions",
+    sessionId
+      ? `${buildAdminSessionReservationsPath(sessionId)}#attendance-list`
+      : "/admin/course-sessions",
   );
 
   if (!sessionId || !courseId) {
@@ -351,7 +447,9 @@ export async function markAllSessionStudentsAttendedAction(formData: FormData) {
   }
 
   const data = await getBookingData();
-  const course = (data.courses ?? []).find((item) => item.id === courseId || item.offeringId === courseId);
+  const course = (data.courses ?? []).find(
+    (item) => item.id === courseId || item.offeringId === courseId,
+  );
   const session = course?.sessions?.find((item) => item.id === sessionId);
 
   if (!course || !session) {
@@ -359,16 +457,34 @@ export async function markAllSessionStudentsAttendedAction(formData: FormData) {
   }
 
   const offeringCandidates = new Set(
-    [course.id, course.offeringId, session.offeringId].filter(Boolean).map(String),
+    [course.id, course.offeringId, session.offeringId]
+      .filter(Boolean)
+      .map(String),
   );
   const seriesCandidates = new Set(
-    [course.seriesId, course.courseMasterId, course.courseSeriesId, session.seriesId].filter(Boolean).map(String),
+    [
+      course.seriesId,
+      course.courseMasterId,
+      course.courseSeriesId,
+      session.seriesId,
+    ]
+      .filter(Boolean)
+      .map(String),
   );
 
   const rosterStudentIds = (data.enrollments ?? [])
-    .filter((enrollment) => !["cancelled", "inactive", "withdrawn", "deleted"].includes(String(enrollment.status ?? "active")))
+    .filter(
+      (enrollment) =>
+        !["cancelled", "inactive", "withdrawn", "deleted"].includes(
+          String(enrollment.status ?? "active"),
+        ),
+    )
     .filter((enrollment) => {
-      const enrollmentOfferingIds = [enrollment.offeringId, enrollment.courseOfferingId, enrollment.courseId]
+      const enrollmentOfferingIds = [
+        enrollment.offeringId,
+        enrollment.courseOfferingId,
+        enrollment.courseId,
+      ]
         .filter(Boolean)
         .map(String);
 
@@ -376,7 +492,10 @@ export async function markAllSessionStudentsAttendedAction(formData: FormData) {
         return enrollmentOfferingIds.some((id) => offeringCandidates.has(id));
       }
 
-      const enrollmentSeriesIds = [enrollment.seriesId, enrollment.courseMasterId]
+      const enrollmentSeriesIds = [
+        enrollment.seriesId,
+        enrollment.courseMasterId,
+      ]
         .filter(Boolean)
         .map(String);
 
@@ -401,13 +520,14 @@ export async function markAllSessionStudentsAttendedAction(formData: FormData) {
   redirect(redirectTo);
 }
 
-
 export async function cancelReservationByStaffAction(formData: FormData) {
   const reservationId = String(formData.get("reservationId") ?? "");
   const sessionId = String(formData.get("sessionId") ?? "");
   const redirectTo = normalizeAdminRedirect(
     formData.get("redirectTo"),
-    sessionId ? buildAdminSessionReservationsPath(sessionId) : "/admin/course-sessions",
+    sessionId
+      ? buildAdminSessionReservationsPath(sessionId)
+      : "/admin/course-sessions",
   );
 
   if (reservationId) {
@@ -428,13 +548,14 @@ export async function cancelReservationByStaffAction(formData: FormData) {
   redirect(redirectTo);
 }
 
-
 export async function saveReservationLessonNotesAction(formData: FormData) {
   const reservationId = String(formData.get("reservationId") ?? "").trim();
   const sessionId = String(formData.get("sessionId") ?? "").trim();
   const redirectTo = normalizeAdminRedirect(
     formData.get("redirectTo"),
-    sessionId ? buildAdminSessionReservationsPath(sessionId) : "/admin/course-sessions",
+    sessionId
+      ? buildAdminSessionReservationsPath(sessionId)
+      : "/admin/course-sessions",
   );
 
   if (!reservationId) {
@@ -442,8 +563,10 @@ export async function saveReservationLessonNotesAction(formData: FormData) {
   }
 
   const update: { homework?: string; note?: string } = {};
-  if (formData.has("homework")) update.homework = String(formData.get("homework") ?? "").trim();
-  if (formData.has("note")) update.note = String(formData.get("note") ?? "").trim();
+  if (formData.has("homework"))
+    update.homework = String(formData.get("homework") ?? "").trim();
+  if (formData.has("note"))
+    update.note = String(formData.get("note") ?? "").trim();
 
   await updateReservationLessonNotes(reservationId, update);
 
@@ -452,7 +575,9 @@ export async function saveReservationLessonNotesAction(formData: FormData) {
   redirect(redirectTo);
 }
 
-export async function saveReservationLessonNotesInlineAction(formData: FormData) {
+export async function saveReservationLessonNotesInlineAction(
+  formData: FormData,
+) {
   const reservationId = String(formData.get("reservationId") ?? "").trim();
   const sessionId = String(formData.get("sessionId") ?? "").trim();
 
@@ -461,8 +586,10 @@ export async function saveReservationLessonNotesInlineAction(formData: FormData)
   }
 
   const update: { homework?: string; note?: string } = {};
-  if (formData.has("homework")) update.homework = String(formData.get("homework") ?? "").trim();
-  if (formData.has("note")) update.note = String(formData.get("note") ?? "").trim();
+  if (formData.has("homework"))
+    update.homework = String(formData.get("homework") ?? "").trim();
+  if (formData.has("note"))
+    update.note = String(formData.get("note") ?? "").trim();
 
   await updateReservationLessonNotes(reservationId, update);
 
@@ -492,7 +619,9 @@ export async function saveSessionJournalInlineAction(formData: FormData) {
   }
 
   const data = await getBookingData();
-  const session = data.courses.flatMap((course) => course.sessions ?? []).find((item) => item.id === sessionId);
+  const session = data.courses
+    .flatMap((course) => course.sessions ?? [])
+    .find((item) => item.id === sessionId);
   if (!session) {
     return { ok: false as const, reason: "session-not-found" as const };
   }
@@ -500,11 +629,20 @@ export async function saveSessionJournalInlineAction(formData: FormData) {
   const nextSession: CourseSession = {
     ...session,
     [field]: value,
-    abnormalResolvedStatus: field === "followUpNote"
-      ? (value ? "resolved" : session.abnormalStatus ? "processing" : "unresolved")
-      : field === "abnormalStatus"
-        ? (session.followUpNote ? "resolved" : value ? "processing" : "unresolved")
-        : session.abnormalResolvedStatus,
+    abnormalResolvedStatus:
+      field === "followUpNote"
+        ? value
+          ? "resolved"
+          : session.abnormalStatus
+            ? "processing"
+            : "unresolved"
+        : field === "abnormalStatus"
+          ? session.followUpNote
+            ? "resolved"
+            : value
+              ? "processing"
+              : "unresolved"
+          : session.abnormalResolvedStatus,
     updatedAt: new Date().toISOString(),
   };
 
@@ -514,7 +652,9 @@ export async function saveSessionJournalInlineAction(formData: FormData) {
 }
 
 export async function saveCategoryAction(formData: FormData) {
-  const id = String(formData.get("id") ?? "").trim().toUpperCase();
+  const id = String(formData.get("id") ?? "")
+    .trim()
+    .toUpperCase();
   const name = String(formData.get("name") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
   const color = normalizeHexColor(formData.get("color"));
@@ -523,7 +663,9 @@ export async function saveCategoryAction(formData: FormData) {
     redirect("/admin/categories?error=invalid");
   }
 
-  const existing = (await getBookingData()).categories.find((category) => category.id === id);
+  const existing = (await getBookingData()).categories.find(
+    (category) => category.id === id,
+  );
 
   const category: CourseCategory = {
     id,
@@ -531,7 +673,9 @@ export async function saveCategoryAction(formData: FormData) {
     name,
     description,
     sortOrder: existing?.sortOrder ?? 0,
-    isActive: formData.get("isActive") ? formData.get("isActive") !== "false" : (existing?.isActive ?? true),
+    isActive: formData.get("isActive")
+      ? formData.get("isActive") !== "false"
+      : (existing?.isActive ?? true),
     color: color ?? existing?.color,
   };
 
@@ -540,7 +684,7 @@ export async function saveCategoryAction(formData: FormData) {
   revalidatePath("/admin");
   revalidatePath("/admin/categories");
   revalidatePath("/admin/courses");
-  redirect("/admin/categories?saved=1");
+  redirect("/admin/course-categories?saved=1");
 }
 
 export async function disableCategoryAction(formData: FormData) {
@@ -552,7 +696,7 @@ export async function disableCategoryAction(formData: FormData) {
   revalidatePath("/admin/categories");
   revalidatePath("/admin/courses");
   revalidatePath("/admin/course-categories");
-  redirect("/admin/categories?saved=1");
+  redirect("/admin/course-categories?saved=1");
 }
 
 export async function deleteCategoryAction(formData: FormData) {
@@ -564,7 +708,7 @@ export async function deleteCategoryAction(formData: FormData) {
     data.courses.some((course) => course.categoryId === id);
 
   if (!id || hasRelations) {
-    redirect("/admin/categories?error=category-in-use");
+    redirect("/admin/course-categories?error=category-in-use");
   }
 
   await deleteManagedDocument("categories", id);
@@ -573,14 +717,18 @@ export async function deleteCategoryAction(formData: FormData) {
   revalidatePath("/admin/categories");
   revalidatePath("/admin/courses");
   revalidatePath("/admin/course-categories");
-  redirect("/admin/categories?saved=1");
+  redirect("/admin/course-categories?saved=1");
 }
 
 export async function saveCourseSeriesAction(formData: FormData) {
   const currentId = String(formData.get("id") ?? "").trim();
   const title = String(formData.get("title") ?? "").trim();
-  const categoryId = String(formData.get("categoryId") ?? "").trim().toUpperCase();
-  const courseType = String(formData.get("courseType") ?? "").trim().toUpperCase();
+  const categoryId = String(formData.get("categoryId") ?? "")
+    .trim()
+    .toUpperCase();
+  const courseType = String(formData.get("courseType") ?? "")
+    .trim()
+    .toUpperCase();
   const now = new Date().toISOString();
 
   if (!title || !categoryId || !courseType) {
@@ -588,11 +736,13 @@ export async function saveCourseSeriesAction(formData: FormData) {
   }
 
   const data = await getBookingData();
-  const existing = currentId ? data.courseSeries.find((series) => series.id === currentId) : undefined;
+  const existing = currentId
+    ? data.courseSeries.find((series) => series.id === currentId)
+    : undefined;
   const shouldKeepExistingCode = Boolean(
     existing?.code &&
-      existing.categoryId === categoryId &&
-      existing.courseType === courseType,
+    existing.categoryId === categoryId &&
+    existing.courseType === courseType,
   );
   const code = shouldKeepExistingCode
     ? existing?.code
@@ -603,8 +753,13 @@ export async function saveCourseSeriesAction(formData: FormData) {
           .filter((series) => series.id !== currentId)
           .map((series) => series.code),
       );
-  const id = currentId || buildManagedId("course-master", [categoryId, courseType, code || title]);
-  const defaultCapacity = normalizeNumber(formData.get("defaultCapacity"), existing?.defaultCapacity);
+  const id =
+    currentId ||
+    buildManagedId("course-master", [categoryId, courseType, code || title]);
+  const defaultCapacity = normalizeNumber(
+    formData.get("defaultCapacity"),
+    existing?.defaultCapacity,
+  );
   const color = normalizeHexColor(formData.get("color"));
 
   const series: CourseSeries = {
@@ -615,11 +770,24 @@ export async function saveCourseSeriesAction(formData: FormData) {
     name: String(formData.get("name") ?? title).trim() || title,
     categoryId,
     courseType,
-    defaultCourseMode: normalizeCourseMode(formData.get("defaultCourseMode"), existing?.defaultCourseMode),
+    defaultCourseMode: normalizeCourseMode(
+      formData.get("defaultCourseMode"),
+      existing?.defaultCourseMode,
+    ),
     defaultCapacity,
     defaultLocation: String(formData.get("defaultLocation") ?? "").trim(),
-    defaultInstructorId: String(formData.get("defaultInstructorId") ?? existing?.defaultInstructorId ?? "").trim() || undefined,
-    defaultInstructorName: String(formData.get("defaultInstructorName") ?? existing?.defaultInstructorName ?? "").trim() || undefined,
+    defaultInstructorId:
+      String(
+        formData.get("defaultInstructorId") ??
+          existing?.defaultInstructorId ??
+          "",
+      ).trim() || undefined,
+    defaultInstructorName:
+      String(
+        formData.get("defaultInstructorName") ??
+          existing?.defaultInstructorName ??
+          "",
+      ).trim() || undefined,
     description: String(formData.get("description") ?? "").trim(),
     color: color ?? existing?.color,
     isActive: formData.get("isActive") !== "false",
@@ -658,8 +826,18 @@ export async function deleteCourseSeriesAction(formData: FormData) {
   const id = String(formData.get("id") ?? "").trim();
   const data = await getBookingData();
   const hasRelations =
-    data.courseOfferings.some((offering) => offering.seriesId === id || offering.courseSeriesId === id || offering.courseMasterId === id) ||
-    data.courses.some((course) => course.seriesId === id || course.courseSeriesId === id || course.courseMasterId === id);
+    data.courseOfferings.some(
+      (offering) =>
+        offering.seriesId === id ||
+        offering.courseSeriesId === id ||
+        offering.courseMasterId === id,
+    ) ||
+    data.courses.some(
+      (course) =>
+        course.seriesId === id ||
+        course.courseSeriesId === id ||
+        course.courseMasterId === id,
+    );
 
   if (!id || hasRelations) {
     redirect("/admin/course-masters?error=in-use");
@@ -689,22 +867,51 @@ export async function saveCourseOfferingAction(formData: FormData) {
 
   const data = await getBookingData();
   const series = data.courseSeries.find((item) => item.id === seriesId);
-  const existing = currentId ? data.courseOfferings.find((offering) => offering.id === currentId) : undefined;
-  const termNumber = normalizeNumber(formData.get("termNumber"), Number(term)) || existing?.termNumber;
-  const termLabel = String(formData.get("termLabel") ?? existing?.termLabel ?? (termNumber ? `第${termNumber}期` : `第${term}期`)).trim();
+  const existing = currentId
+    ? data.courseOfferings.find((offering) => offering.id === currentId)
+    : undefined;
+  const termNumber =
+    normalizeNumber(formData.get("termNumber"), Number(term)) ||
+    existing?.termNumber;
+  const termLabel = String(
+    formData.get("termLabel") ??
+      existing?.termLabel ??
+      (termNumber ? `第${termNumber}期` : `第${term}期`),
+  ).trim();
   const id = currentId || buildManagedId("offering", [seriesId, year, term]);
-  const title = String(formData.get("title") ?? existing?.title ?? series?.title ?? "").trim();
-  const classDisplayName = String(formData.get("classDisplayName") ?? "").trim() || `${title}｜${year}年｜${termLabel}`;
-  const legacyCourseId = String(formData.get("legacyCourseId") ?? existing?.legacyCourseId ?? `class-${id}`).trim();
-  const capacity = normalizeNumber(formData.get("capacity"), existing?.capacity ?? series?.defaultCapacity);
+  const title = String(
+    formData.get("title") ?? existing?.title ?? series?.title ?? "",
+  ).trim();
+  const classDisplayName =
+    String(formData.get("classDisplayName") ?? "").trim() ||
+    `${title}｜${year}年｜${termLabel}`;
+  const legacyCourseId = String(
+    formData.get("legacyCourseId") ?? existing?.legacyCourseId ?? `class-${id}`,
+  ).trim();
+  const capacity = normalizeNumber(
+    formData.get("capacity"),
+    existing?.capacity ?? series?.defaultCapacity,
+  );
   const color = normalizeHexColor(formData.get("color"));
   const isActive = formData.get("isActive") !== "false";
-  const bookingStatus = String(formData.get("bookingStatus") ?? existing?.bookingStatus ?? (isActive ? "open" : "closed")).trim();
+  const bookingStatus = String(
+    formData.get("bookingStatus") ??
+      existing?.bookingStatus ??
+      (isActive ? "open" : "closed"),
+  ).trim();
   const courseMode =
-    normalizeCourseMode(formData.get("courseMode"), existing?.courseMode ?? series?.defaultCourseMode) ??
-    (String(formData.get("rosterType") ?? existing?.rosterType ?? "").trim() === "booking" ? "booking_flexible" : "fixed_roster");
+    normalizeCourseMode(
+      formData.get("courseMode"),
+      existing?.courseMode ?? series?.defaultCourseMode,
+    ) ??
+    (String(formData.get("rosterType") ?? existing?.rosterType ?? "").trim() ===
+    "booking"
+      ? "booking_flexible"
+      : "fixed_roster");
   const rosterType = inferRosterTypeFromCourseMode(courseMode);
-  const bookingOpen = courseMode === "booking_flexible" && (bookingStatus === "open" || bookingStatus === "active");
+  const bookingOpen =
+    courseMode === "booking_flexible" &&
+    (bookingStatus === "open" || bookingStatus === "active");
 
   const offering: CourseOffering = {
     ...(existing ?? {}),
@@ -713,34 +920,85 @@ export async function saveCourseOfferingAction(formData: FormData) {
     courseSeriesId: seriesId,
     courseMasterId: seriesId,
     legacyCourseId,
-    categoryId: String(formData.get("categoryId") ?? series?.categoryId ?? existing?.categoryId ?? "").trim() || undefined,
-    code: String(formData.get("code") ?? existing?.code ?? "").trim() || undefined,
+    categoryId:
+      String(
+        formData.get("categoryId") ??
+          series?.categoryId ??
+          existing?.categoryId ??
+          "",
+      ).trim() || undefined,
+    code:
+      String(formData.get("code") ?? existing?.code ?? "").trim() || undefined,
     title,
     displayTitle: classDisplayName,
     displayName: classDisplayName,
-    shortName: String(formData.get("shortName") ?? existing?.shortName ?? "").trim() || undefined,
+    shortName:
+      String(formData.get("shortName") ?? existing?.shortName ?? "").trim() ||
+      undefined,
     year,
     term,
     termNumber,
     termLabel,
-    classIdentifier: String(formData.get("classIdentifier") ?? existing?.classIdentifier ?? `${year}-${term}`).trim(),
+    classIdentifier: String(
+      formData.get("classIdentifier") ??
+        existing?.classIdentifier ??
+        `${year}-${term}`,
+    ).trim(),
     classDisplayName,
     rosterType,
-    courseType: String(formData.get("courseType") ?? existing?.courseType ?? series?.courseType ?? "").trim() || undefined,
+    courseType:
+      String(
+        formData.get("courseType") ??
+          existing?.courseType ??
+          series?.courseType ??
+          "",
+      ).trim() || undefined,
     courseMode,
-    sourceSheet: String(formData.get("sourceSheet") ?? existing?.sourceSheet ?? "").trim() || undefined,
-    location: String(formData.get("location") ?? existing?.location ?? series?.defaultLocation ?? "").trim() || undefined,
+    sourceSheet:
+      String(
+        formData.get("sourceSheet") ?? existing?.sourceSheet ?? "",
+      ).trim() || undefined,
+    location:
+      String(
+        formData.get("location") ??
+          existing?.location ??
+          series?.defaultLocation ??
+          "",
+      ).trim() || undefined,
     capacity,
-    primaryInstructorId: String(formData.get("primaryInstructorId") ?? existing?.primaryInstructorId ?? "").trim() || undefined,
-    primaryInstructorName: String(formData.get("primaryInstructorName") ?? existing?.primaryInstructorName ?? "").trim() || undefined,
-    assistantInstructorIds: normalizeStringList(formData.get("assistantInstructorIds")),
-    assistantInstructorNames: normalizeStringList(formData.get("assistantInstructorNames")),
+    primaryInstructorId:
+      String(
+        formData.get("primaryInstructorId") ??
+          existing?.primaryInstructorId ??
+          "",
+      ).trim() || undefined,
+    primaryInstructorName:
+      String(
+        formData.get("primaryInstructorName") ??
+          existing?.primaryInstructorName ??
+          "",
+      ).trim() || undefined,
+    assistantInstructorIds: normalizeStringList(
+      formData.get("assistantInstructorIds"),
+    ),
+    assistantInstructorNames: normalizeStringList(
+      formData.get("assistantInstructorNames"),
+    ),
     bookingStatus,
     bookingOpen,
-    status: bookingStatus === "closed" ? "closed" : bookingStatus === "draft" ? "draft" : "open",
+    status:
+      bookingStatus === "closed"
+        ? "closed"
+        : bookingStatus === "draft"
+          ? "draft"
+          : "open",
     color: color ?? existing?.color ?? series?.color,
-    startDate: String(formData.get("startDate") ?? existing?.startDate ?? "").trim() || undefined,
-    endDate: String(formData.get("endDate") ?? existing?.endDate ?? "").trim() || undefined,
+    startDate:
+      String(formData.get("startDate") ?? existing?.startDate ?? "").trim() ||
+      undefined,
+    endDate:
+      String(formData.get("endDate") ?? existing?.endDate ?? "").trim() ||
+      undefined,
     notes: String(formData.get("notes") ?? "").trim(),
     isActive,
     createdAt: existing?.createdAt ?? now,
@@ -755,7 +1013,12 @@ export async function saveCourseOfferingAction(formData: FormData) {
     courseType: offering.courseType,
     title,
     categoryId: offering.categoryId ?? series?.categoryId ?? "O",
-    description: String(formData.get("description") ?? existing?.notes ?? series?.description ?? "").trim(),
+    description: String(
+      formData.get("description") ??
+        existing?.notes ??
+        series?.description ??
+        "",
+    ).trim(),
     defaultLocation: offering.location ?? series?.defaultLocation ?? "",
     notes: offering.notes ?? "",
     isActive,
@@ -784,7 +1047,9 @@ export async function saveCourseOfferingAction(formData: FormData) {
     assistantInstructorNames: offering.assistantInstructorNames,
     bookingOpen: offering.bookingOpen,
     status: offering.status,
-    createdAt: data.courses.find((course) => course.id === legacyCourseId)?.createdAt ?? now,
+    createdAt:
+      data.courses.find((course) => course.id === legacyCourseId)?.createdAt ??
+      now,
     updatedAt: now,
   });
 
@@ -805,7 +1070,8 @@ export async function disableCourseOfferingAction(formData: FormData) {
   const legacyCourseId = String(formData.get("legacyCourseId") ?? "").trim();
   const nextActive = String(formData.get("isActive") ?? "false") === "true";
   await setDocumentActive("courseOfferings", id, nextActive);
-  if (legacyCourseId) await setDocumentActive("courses", legacyCourseId, nextActive);
+  if (legacyCourseId)
+    await setDocumentActive("courses", legacyCourseId, nextActive);
   revalidatePath("/");
   revalidatePath("/admin");
   revalidatePath("/admin/categories");
@@ -823,10 +1089,24 @@ export async function deleteCourseOfferingAction(formData: FormData) {
   const legacyCourseId = String(formData.get("legacyCourseId") ?? "").trim();
   const data = await getBookingData();
   const hasRelations =
-    data.enrollments.some((enrollment) => enrollment.offeringId === id || enrollment.courseOfferingId === id || enrollment.courseId === legacyCourseId) ||
-    data.students.some((student) => student.offeringId === id || student.classId === legacyCourseId) ||
-    data.reservations.some((reservation) => reservation.offeringId === id || reservation.courseId === legacyCourseId) ||
-    data.courses.some((course) => course.id === legacyCourseId && course.sessions.length > 0);
+    data.enrollments.some(
+      (enrollment) =>
+        enrollment.offeringId === id ||
+        enrollment.courseOfferingId === id ||
+        enrollment.courseId === legacyCourseId,
+    ) ||
+    data.students.some(
+      (student) =>
+        student.offeringId === id || student.classId === legacyCourseId,
+    ) ||
+    data.reservations.some(
+      (reservation) =>
+        reservation.offeringId === id ||
+        reservation.courseId === legacyCourseId,
+    ) ||
+    data.courses.some(
+      (course) => course.id === legacyCourseId && course.sessions.length > 0,
+    );
 
   if (!id || hasRelations) {
     redirect("/admin/course-offerings?error=in-use");
@@ -845,14 +1125,26 @@ export async function deleteCourseOfferingAction(formData: FormData) {
   redirect("/admin/course-offerings?saved=1");
 }
 
-
 export async function saveCourseAction(formData: FormData) {
   const currentId = String(formData.get("id") ?? "").trim();
-  const redirectTo = normalizeAdminRedirect(formData.get("redirectTo"), currentId ? `/admin/courses/${currentId}` : "/admin/courses");
-  const currentCode = String(formData.get("code") ?? "").trim().toUpperCase();
+  const redirectTo = normalizeAdminRedirect(
+    formData.get("redirectTo"),
+    currentId ? `/admin/courses/${currentId}` : "/admin/courses",
+  );
+  const currentCode = String(formData.get("code") ?? "")
+    .trim()
+    .toUpperCase();
   const title = String(formData.get("title") ?? "").trim();
-  const categoryId = String(formData.get("categoryId") ?? inferCategoryFromCode(currentCode)).trim().toUpperCase();
-  const courseType = String(formData.get("courseType") ?? inferCourseTypeFromCode(currentCode) ?? "SF").trim().toUpperCase();
+  const categoryId = String(
+    formData.get("categoryId") ?? inferCategoryFromCode(currentCode),
+  )
+    .trim()
+    .toUpperCase();
+  const courseType = String(
+    formData.get("courseType") ?? inferCourseTypeFromCode(currentCode) ?? "SF",
+  )
+    .trim()
+    .toUpperCase();
   const color = normalizeHexColor(formData.get("color"));
 
   if (!title || !categoryId || !courseType) {
@@ -860,14 +1152,31 @@ export async function saveCourseAction(formData: FormData) {
   }
 
   const data = await getBookingData();
-  const existingCourse = currentId ? data.courses.find((course) => course.id === currentId) : undefined;
-  const capacityMode = String(formData.get("capacityMode") ?? existingCourse?.capacityMode ?? "course") === "session" ? "session" : "course";
-  const parsedTotalCapacity = Number(formData.get("totalCapacity") ?? existingCourse?.totalCapacity ?? 0);
-  const totalCapacity = Number.isFinite(parsedTotalCapacity) && parsedTotalCapacity > 0 ? parsedTotalCapacity : undefined;
+  const existingCourse = currentId
+    ? data.courses.find((course) => course.id === currentId)
+    : undefined;
+  const capacityMode =
+    String(
+      formData.get("capacityMode") ?? existingCourse?.capacityMode ?? "course",
+    ) === "session"
+      ? "session"
+      : "course";
+  const parsedTotalCapacity = Number(
+    formData.get("totalCapacity") ?? existingCourse?.totalCapacity ?? 0,
+  );
+  const totalCapacity =
+    Number.isFinite(parsedTotalCapacity) && parsedTotalCapacity > 0
+      ? parsedTotalCapacity
+      : undefined;
 
   const code =
     existingCourse?.code ??
-    (currentCode || generateCourseCode(courseType, categoryId, data.courses.map((course) => course.code)));
+    (currentCode ||
+      generateCourseCode(
+        courseType,
+        categoryId,
+        data.courses.map((course) => course.code),
+      ));
   const id = currentId || `${code.toLowerCase()}-${slugify(title)}`;
 
   await upsertCourse({
@@ -890,7 +1199,11 @@ export async function saveCourseAction(formData: FormData) {
   revalidatePath("/admin/courses");
   revalidatePath(`/admin/courses/${id}`);
   revalidatePath(redirectTo.split("#")[0] || `/admin/courses/${id}`);
-  redirect(redirectTo.includes("?") ? `${redirectTo}&saved=1` : `${redirectTo}?saved=1`);
+  redirect(
+    redirectTo.includes("?")
+      ? `${redirectTo}&saved=1`
+      : `${redirectTo}?saved=1`,
+  );
 }
 
 export async function disableCourseAction(formData: FormData) {
@@ -907,7 +1220,8 @@ export async function disableCourseAction(formData: FormData) {
 export async function saveSessionAction(formData: FormData) {
   const courseId = String(formData.get("courseId") ?? "").trim();
   const redirectTo = String(formData.get("redirectTo") ?? "").trim();
-  const id = String(formData.get("id") ?? "").trim() || `session-${crypto.randomUUID()}`;
+  const id =
+    String(formData.get("id") ?? "").trim() || `session-${crypto.randomUUID()}`;
   const date = String(formData.get("date") ?? "").trim();
   const startTime = String(formData.get("startTime") ?? "").trim();
   const endTime = String(formData.get("endTime") ?? "").trim();
@@ -918,20 +1232,75 @@ export async function saveSessionAction(formData: FormData) {
   }
 
   const data = await getBookingData();
-  const existingSession = data.courses.flatMap((course) => course.sessions).find((session) => session.id === id);
-  const bookedCount = Math.max(Number(formData.get("bookedCount") ?? existingSession?.bookedCount ?? 0), 0);
+  const existingSession = data.courses
+    .flatMap((course) => course.sessions)
+    .find((session) => session.id === id);
+  const bookedCount = Math.max(
+    Number(formData.get("bookedCount") ?? existingSession?.bookedCount ?? 0),
+    0,
+  );
+  const status =
+    String(
+      formData.get("status") ??
+        formData.get("sessionStatus") ??
+        existingSession?.status ??
+        existingSession?.sessionStatus ??
+        "scheduled",
+    ).trim() || "scheduled";
+  const isActive = formData.has("isActive")
+    ? formData.get("isActive") !== "false"
+    : status !== "cancelled" && status !== "suspended";
+  const instructorId = String(
+    formData.get("instructorId") ?? existingSession?.instructorId ?? "",
+  ).trim();
+  const assistantInstructorIds = Array.from(
+    new Set(
+      formData
+        .getAll("assistantInstructorIds")
+        .map((value) => String(value).trim())
+        .filter(Boolean),
+    ),
+  );
+  const instructorName = instructorId
+    ? data.instructors?.find((instructor) => instructor.id === instructorId)
+        ?.name
+    : existingSession?.instructorName;
+  const assistantInstructorNames = assistantInstructorIds
+    .map(
+      (assistantId) =>
+        data.instructors?.find((instructor) => instructor.id === assistantId)
+          ?.name,
+    )
+    .filter((name): name is string => Boolean(name));
+  const now = new Date().toISOString();
   const session: CourseSession = {
+    ...existingSession,
     id,
     courseId,
     date,
     startTime,
     endTime,
-    topic: String(formData.get("topic") ?? "").trim(),
-    location: String(formData.get("location") ?? "").trim(),
+    topic: String(formData.get("topic") ?? existingSession?.topic ?? "").trim(),
+    location: String(
+      formData.get("location") ?? existingSession?.location ?? "",
+    ).trim(),
     capacity: Math.max(capacity, bookedCount),
     bookedCount,
-    bookingDeadline: String(formData.get("bookingDeadline") ?? "").trim() || buildSessionDeadline(date),
-    isActive: formData.get("isActive") !== "false",
+    bookingDeadline:
+      String(
+        formData.get("bookingDeadline") ??
+          existingSession?.bookingDeadline ??
+          "",
+      ).trim() || buildSessionDeadline(date),
+    isActive,
+    status,
+    sessionStatus: status,
+    instructorId: instructorId || undefined,
+    instructorName,
+    assistantInstructorIds,
+    assistantInstructorNames,
+    createdAt: existingSession?.createdAt ?? now,
+    updatedAt: now,
   };
 
   await upsertSession(session);
@@ -939,17 +1308,25 @@ export async function saveSessionAction(formData: FormData) {
   revalidatePath(`/courses/${courseId}`);
   revalidatePath("/admin");
   revalidatePath("/admin/courses");
+  revalidatePath("/admin/course-sessions");
   revalidatePath(`/admin/courses/${courseId}`);
   revalidatePath(`/admin/courses/${courseId}/sessions`);
+  revalidatePath(`/admin/sessions/${id}/reservations`);
   redirect(redirectTo || `/admin/courses/${courseId}/sessions?saved=1`);
 }
 
 export async function bulkCreateSessionsAction(formData: FormData) {
   const courseId = String(formData.get("courseId") ?? "").trim();
-  const redirectTo = normalizeAdminRedirect(formData.get("redirectTo"), courseId ? `/admin/courses/${courseId}` : "/admin/courses");
+  const redirectTo = normalizeAdminRedirect(
+    formData.get("redirectTo"),
+    courseId ? `/admin/courses/${courseId}` : "/admin/courses",
+  );
   const startDate = String(formData.get("startDate") ?? "").trim();
   const endDate = String(formData.get("endDate") ?? "").trim();
-  const weekdays = formData.getAll("weekdays").map((value) => Number(value));
+  const weekdays = formData
+    .getAll("weekdays")
+    .map((value) => Number(value))
+    .filter((value) => Number.isInteger(value) && value >= 0 && value <= 6);
   const startTime = String(formData.get("startTime") ?? "").trim();
   const endTime = String(formData.get("endTime") ?? "").trim();
   const capacity = Number(formData.get("capacity") ?? 0);
@@ -957,8 +1334,26 @@ export async function bulkCreateSessionsAction(formData: FormData) {
   const location = String(formData.get("location") ?? "").trim();
   const bookingDeadline = String(formData.get("bookingDeadline") ?? "").trim();
   const isActive = formData.get("isActive") !== "false";
+  const syncExistingSessions = String(formData.get("syncExistingSessions") ?? "false") === "true";
+  const instructorId = String(formData.get("instructorId") ?? "").trim();
+  const assistantInstructorIds = Array.from(
+    new Set(
+      formData
+        .getAll("assistantInstructorIds")
+        .map((value) => String(value).trim())
+        .filter(Boolean),
+    ),
+  );
 
-  if (!courseId || !startDate || !endDate || weekdays.length === 0 || !startTime || !endTime || capacity < 0) {
+  if (
+    !courseId ||
+    !startDate ||
+    !endDate ||
+    weekdays.length === 0 ||
+    !startTime ||
+    !endTime ||
+    capacity < 0
+  ) {
     redirect(appendAdminQuery(redirectTo, "error=invalid"));
   }
 
@@ -968,21 +1363,52 @@ export async function bulkCreateSessionsAction(formData: FormData) {
     redirect("/admin/courses?error=invalid");
   }
 
-  const existingKeys = new Set(course.sessions.map((session) => `${session.courseId}|${session.date}|${session.startTime}`));
+  const instructorName = instructorId ? getInstructorNameFromAnySource(data, instructorId) : "";
+  const assistantInstructorNames = getInstructorNamesFromIds(data, assistantInstructorIds);
+
   const start = new Date(`${startDate}T00:00:00`);
   const end = new Date(`${endDate}T00:00:00`);
-  const created: CourseSession[] = [];
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
+    redirect(appendAdminQuery(redirectTo, "error=invalid"));
+  }
 
+  const expectedDateSet = new Set<string>();
   for (let current = start; current <= end; current = addDays(current, 1)) {
     if (!weekdays.includes(current.getDay())) continue;
+    expectedDateSet.add(formatDate(current));
+  }
 
-    const date = formatDate(current);
-    const key = `${courseId}|${date}|${startTime}`;
-    if (existingKeys.has(key)) continue;
+  if (expectedDateSet.size === 0) {
+    redirect(appendAdminQuery(redirectTo, "error=invalid"));
+  }
 
-    const id = buildSessionId(courseId, date, startTime, topic);
-    created.push({
-      id,
+  const existingSessionsInRange = (course.sessions ?? []).filter((session) => {
+    if (!session.date) return false;
+    const sessionDate = new Date(`${session.date}T00:00:00`);
+    return !Number.isNaN(sessionDate.getTime()) && sessionDate >= start && sessionDate <= end;
+  });
+
+  const hasExistingRecords = existingSessionsInRange.some((session) => {
+    const bookedCount = Number(session.bookedCount ?? 0);
+    const hasReservations = data.reservations?.some((reservation) => reservation.sessionId === session.id) ?? false;
+    const hasAttendanceRecords =
+      data.attendanceRecords?.some((record) => record.sessionId === session.id) ?? false;
+    return bookedCount > 0 || hasReservations || hasAttendanceRecords;
+  });
+
+  if (syncExistingSessions && hasExistingRecords) {
+    redirect(appendAdminQuery(redirectTo, "error=has-records"));
+  }
+
+  if (syncExistingSessions && existingSessionsInRange.length > 0) {
+    await deleteSessionsByIds(existingSessionsInRange.map((session) => session.id));
+  }
+
+  let changedCount = 0;
+
+  for (const date of expectedDateSet) {
+    const session: CourseSession = {
+      id: buildSessionId(courseId, date, startTime, topic),
       courseId,
       date,
       startTime,
@@ -993,27 +1419,32 @@ export async function bulkCreateSessionsAction(formData: FormData) {
       bookedCount: 0,
       bookingDeadline: bookingDeadline || buildSessionDeadline(date),
       isActive,
-    });
-    existingKeys.add(key);
-  }
-
-  if (created.length === 0) {
-    redirect(appendAdminQuery(redirectTo, "error=invalid"));
-  }
-
-  for (const session of created) {
+      status: "scheduled",
+      sessionStatus: "scheduled",
+      instructorId: instructorId || undefined,
+      instructorName: instructorName || undefined,
+      assistantInstructorIds,
+      assistantInstructorNames,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
     await upsertSession(session);
+    changedCount += 1;
+  }
+
+  if (changedCount === 0) {
+    redirect(appendAdminQuery(redirectTo, "error=invalid"));
   }
 
   revalidatePath("/");
   revalidatePath(`/courses/${courseId}`);
   revalidatePath("/admin");
   revalidatePath("/admin/courses");
+  revalidatePath("/admin/course-sessions");
   revalidatePath(`/admin/courses/${courseId}`);
   revalidatePath(`/admin/courses/${courseId}/sessions`);
   redirect(appendAdminQuery(redirectTo, "saved=1"));
 }
-
 export async function disableSessionAction(formData: FormData) {
   const id = String(formData.get("id") ?? "").trim();
   const courseId = String(formData.get("courseId") ?? "").trim();
@@ -1053,7 +1484,9 @@ export async function bulkDisableSessionsAction(formData: FormData) {
 }
 
 function normalizeIdLast3(value: FormDataEntryValue | null) {
-  return String(value ?? "").replace(/\D/g, "").slice(-3);
+  return String(value ?? "")
+    .replace(/\D/g, "")
+    .slice(-3);
 }
 
 function normalizeRosterText(value: FormDataEntryValue | null) {
@@ -1066,7 +1499,9 @@ function splitRosterLine(line: string) {
 }
 
 function getRosterColumnIndex(headers: string[], aliases: string[]) {
-  return headers.findIndex((header) => aliases.some((alias) => header.includes(alias)));
+  return headers.findIndex((header) =>
+    aliases.some((alias) => header.includes(alias)),
+  );
 }
 
 function getRosterCell(cells: string[], index: number) {
@@ -1081,10 +1516,21 @@ function buildStudentReturnUrl(classId: string, extra?: string) {
 async function resolveRosterContext(classId: string) {
   const data = await getBookingData();
   const course = data.courses.find((item) => item.id === classId);
-  const offering = data.courseOfferings.find((item) => item.legacyCourseId === classId || item.id === course?.offeringId);
+  const offering = data.courseOfferings.find(
+    (item) => item.legacyCourseId === classId || item.id === course?.offeringId,
+  );
   const offeringId = offering?.id ?? course?.offeringId ?? classId;
-  const seriesId = offering?.seriesId ?? offering?.courseMasterId ?? course?.seriesId ?? course?.courseMasterId ?? `series-${classId}`;
-  const courseTitle = offering?.displayTitle ?? course?.displayTitle ?? course?.title ?? "未命名課程";
+  const seriesId =
+    offering?.seriesId ??
+    offering?.courseMasterId ??
+    course?.seriesId ??
+    course?.courseMasterId ??
+    `series-${classId}`;
+  const courseTitle =
+    offering?.displayTitle ??
+    course?.displayTitle ??
+    course?.title ??
+    "未命名課程";
   return { data, course, offering, offeringId, seriesId, courseTitle };
 }
 
@@ -1103,7 +1549,8 @@ export async function saveStudentAction(formData: FormData) {
     redirect(buildStudentReturnUrl(classId || "all", "error=invalid"));
   }
 
-  const { data, course, offering, offeringId, seriesId, courseTitle } = await resolveRosterContext(classId);
+  const { data, course, offering, offeringId, seriesId, courseTitle } =
+    await resolveRosterContext(classId);
   const now = new Date().toISOString();
   const matchedStudent = rawId
     ? data.students.find((student) => student.id === rawId)
@@ -1172,7 +1619,8 @@ export async function bulkImportStudentsAction(formData: FormData) {
     redirect(buildStudentReturnUrl(classId || "all", "error=invalid"));
   }
 
-  const { data, course, offering, offeringId, seriesId, courseTitle } = await resolveRosterContext(classId);
+  const { data, course, offering, offeringId, seriesId, courseTitle } =
+    await resolveRosterContext(classId);
   const lines = rosterText
     .split(/\r?\n/g)
     .map((line) => line.trim())
@@ -1183,16 +1631,38 @@ export async function bulkImportStudentsAction(formData: FormData) {
   }
 
   const firstCells = splitRosterLine(lines[0]);
-  const hasHeader = firstCells.some((cell) => /姓名|身分證|後三碼|手機|電話|座號|生日|備註|組別|班別/i.test(cell));
+  const hasHeader = firstCells.some((cell) =>
+    /姓名|身分證|後三碼|手機|電話|座號|生日|備註|組別|班別/i.test(cell),
+  );
   const headers = hasHeader ? firstCells : [];
   const rows = hasHeader ? lines.slice(1) : lines;
-  const nameIndex = hasHeader ? getRosterColumnIndex(headers, ["姓名", "學員", "name"]) : 0;
-  const idIndex = hasHeader ? getRosterColumnIndex(headers, ["身分證後三碼", "後三碼", "末三碼", "idNumberLast3", "idLast3"]) : 1;
-  const phoneIndex = hasHeader ? getRosterColumnIndex(headers, ["手機", "電話", "phone"]) : 2;
-  const birthdayIndex = hasHeader ? getRosterColumnIndex(headers, ["生日", "birthday"]) : 3;
-  const seatIndex = hasHeader ? getRosterColumnIndex(headers, ["座號", "seat"]) : 4;
-  const groupIndex = hasHeader ? getRosterColumnIndex(headers, ["組別", "班別", "分組", "group"]) : 5;
-  const noteIndex = hasHeader ? getRosterColumnIndex(headers, ["備註", "note"]) : 6;
+  const nameIndex = hasHeader
+    ? getRosterColumnIndex(headers, ["姓名", "學員", "name"])
+    : 0;
+  const idIndex = hasHeader
+    ? getRosterColumnIndex(headers, [
+        "身分證後三碼",
+        "後三碼",
+        "末三碼",
+        "idNumberLast3",
+        "idLast3",
+      ])
+    : 1;
+  const phoneIndex = hasHeader
+    ? getRosterColumnIndex(headers, ["手機", "電話", "phone"])
+    : 2;
+  const birthdayIndex = hasHeader
+    ? getRosterColumnIndex(headers, ["生日", "birthday"])
+    : 3;
+  const seatIndex = hasHeader
+    ? getRosterColumnIndex(headers, ["座號", "seat"])
+    : 4;
+  const groupIndex = hasHeader
+    ? getRosterColumnIndex(headers, ["組別", "班別", "分組", "group"])
+    : 5;
+  const noteIndex = hasHeader
+    ? getRosterColumnIndex(headers, ["備註", "note"])
+    : 6;
 
   let importedCount = 0;
   const now = new Date().toISOString();
@@ -1201,9 +1671,16 @@ export async function bulkImportStudentsAction(formData: FormData) {
     const cells = splitRosterLine(row);
     const name = getRosterCell(cells, nameIndex);
     const idNumberLast3 = normalizeIdLast3(getRosterCell(cells, idIndex));
-    const seatNumber = Number(getRosterCell(cells, seatIndex) || importedCount + 1);
+    const seatNumber = Number(
+      getRosterCell(cells, seatIndex) || importedCount + 1,
+    );
 
-    if (!name || idNumberLast3.length !== 3 || !Number.isFinite(seatNumber) || seatNumber <= 0) {
+    if (
+      !name ||
+      idNumberLast3.length !== 3 ||
+      !Number.isFinite(seatNumber) ||
+      seatNumber <= 0
+    ) {
       continue;
     }
 
@@ -1275,12 +1752,15 @@ export async function disableStudentAction(formData: FormData) {
   redirect(`/admin/students?classId=${encodeURIComponent(classId)}&saved=1`);
 }
 
-
 function normalizeEligibilityStatus(value: FormDataEntryValue | string | null) {
   const raw = String(value ?? "").trim();
   if (!raw) return "上課中";
-  if (["可上課", "上課中", "是", "Y", "YES", "否", "N", "NO"].includes(raw)) return "上課中";
-  if (["已結訓", "已完成", "completed", "已通過", "通過", "passed"].includes(raw)) return "已結訓";
+  if (["可上課", "上課中", "是", "Y", "YES", "否", "N", "NO"].includes(raw))
+    return "上課中";
+  if (
+    ["已結訓", "已完成", "completed", "已通過", "通過", "passed"].includes(raw)
+  )
+    return "已結訓";
   if (["未加入", "取消", "退出", "withdrawn"].includes(raw)) return "未加入";
   return raw;
 }
@@ -1291,10 +1771,18 @@ function appendAdminQuery(url: string, extra: string) {
   return `${base}${separator}${extra}${hash ? `#${hash}` : ""}`;
 }
 
-function buildStudentsReturn(params: Record<string, string | number | undefined>, extra?: string) {
+function buildStudentsReturn(
+  params: Record<string, string | number | undefined>,
+  extra?: string,
+) {
   const query = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined && String(value).trim() !== "" && String(value) !== "all") query.set(key, String(value));
+    if (
+      value !== undefined &&
+      String(value).trim() !== "" &&
+      String(value) !== "all"
+    )
+      query.set(key, String(value));
   });
   if (extra) {
     for (const part of extra.split("&")) {
@@ -1306,27 +1794,56 @@ function buildStudentsReturn(params: Record<string, string | number | undefined>
   return `/admin/students${qs ? `?${qs}` : ""}`;
 }
 
-async function resolveEligibilityContext(seriesId: string, yearValue: string, targetOfferingId?: string) {
+async function resolveEligibilityContext(
+  seriesId: string,
+  yearValue: string,
+  targetOfferingId?: string,
+) {
   const data = await getBookingData();
-  const directSeries = data.courseSeries.find((item) => item.id === seriesId || (item as CourseSeries & { courseMasterId?: string }).courseMasterId === seriesId);
+  const directSeries = data.courseSeries.find(
+    (item) =>
+      item.id === seriesId ||
+      (item as CourseSeries & { courseMasterId?: string }).courseMasterId ===
+        seriesId,
+  );
   const relatedOffering = data.courseOfferings.find(
-    (item) => item.seriesId === seriesId || item.courseMasterId === seriesId || item.courseSeriesId === seriesId || item.id === seriesId || item.legacyCourseId === seriesId,
+    (item) =>
+      item.seriesId === seriesId ||
+      item.courseMasterId === seriesId ||
+      item.courseSeriesId === seriesId ||
+      item.id === seriesId ||
+      item.legacyCourseId === seriesId,
   );
   const targetOffering = targetOfferingId
-    ? data.courseOfferings.find((item) => item.id === targetOfferingId || item.legacyCourseId === targetOfferingId)
+    ? data.courseOfferings.find(
+        (item) =>
+          item.id === targetOfferingId ||
+          item.legacyCourseId === targetOfferingId,
+      )
     : undefined;
-  const fallbackSeriesId = relatedOffering?.seriesId || relatedOffering?.courseMasterId || relatedOffering?.courseSeriesId || seriesId;
-  const series: CourseSeries | undefined = directSeries ?? (relatedOffering
-    ? {
-        id: fallbackSeriesId,
-        title: relatedOffering.title,
-        categoryId: relatedOffering.categoryId ?? "",
-        courseType: relatedOffering.courseType,
-        color: relatedOffering.color,
-        isActive: relatedOffering.isActive ?? true,
-      }
-    : undefined);
-  const year = Number(yearValue || targetOffering?.year || relatedOffering?.year || new Date().getFullYear() - 1911);
+  const fallbackSeriesId =
+    relatedOffering?.seriesId ||
+    relatedOffering?.courseMasterId ||
+    relatedOffering?.courseSeriesId ||
+    seriesId;
+  const series: CourseSeries | undefined =
+    directSeries ??
+    (relatedOffering
+      ? {
+          id: fallbackSeriesId,
+          title: relatedOffering.title,
+          categoryId: relatedOffering.categoryId ?? "",
+          courseType: relatedOffering.courseType,
+          color: relatedOffering.color,
+          isActive: relatedOffering.isActive ?? true,
+        }
+      : undefined);
+  const year = Number(
+    yearValue ||
+      targetOffering?.year ||
+      relatedOffering?.year ||
+      new Date().getFullYear() - 1911,
+  );
 
   if (!seriesId || !series || !Number.isFinite(year)) {
     return { data, series: undefined, targetOffering, year: undefined };
@@ -1335,18 +1852,25 @@ async function resolveEligibilityContext(seriesId: string, yearValue: string, ta
   return { data, series, targetOffering, year };
 }
 
-function getOrCreateStudentIdentity(data: Awaited<ReturnType<typeof getBookingData>>, input: {
-  id?: string;
-  name: string;
-  idNumberLast3: string;
-  phone?: string;
-  birthday?: string;
-  note?: string;
-}) {
+function getOrCreateStudentIdentity(
+  data: Awaited<ReturnType<typeof getBookingData>>,
+  input: {
+    id?: string;
+    name: string;
+    idNumberLast3: string;
+    phone?: string;
+    birthday?: string;
+    note?: string;
+  },
+) {
   const now = new Date().toISOString();
   const existing = input.id
     ? data.students.find((student) => student.id === input.id)
-    : data.students.find((student) => student.name === input.name && student.idNumberLast3 === input.idNumberLast3);
+    : data.students.find(
+        (student) =>
+          student.name === input.name &&
+          student.idNumberLast3 === input.idNumberLast3,
+      );
 
   const id = existing?.id ?? `student-${crypto.randomUUID()}`;
   const student: Student = {
@@ -1374,17 +1898,30 @@ export async function saveStudentEligibilityAction(formData: FormData) {
   const birthday = String(formData.get("birthday") ?? "").trim();
   const seriesId = String(formData.get("seriesId") ?? "").trim();
   const yearValue = String(formData.get("year") ?? "").trim();
-  const eligibilityStatus = normalizeEligibilityStatus(formData.get("eligibilityStatus"));
-  const targetOfferingId = String(formData.get("targetOfferingId") ?? "").trim();
+  const eligibilityStatus = normalizeEligibilityStatus(
+    formData.get("eligibilityStatus"),
+  );
+  const targetOfferingId = String(
+    formData.get("targetOfferingId") ?? "",
+  ).trim();
   const note = String(formData.get("note") ?? "").trim();
 
-  const { data, series, targetOffering, year } = await resolveEligibilityContext(seriesId, yearValue, targetOfferingId);
+  const { data, series, targetOffering, year } =
+    await resolveEligibilityContext(seriesId, yearValue, targetOfferingId);
   if (!name || idNumberLast3.length !== 3 || !series || !year) {
-    redirect(buildStudentsReturn({ seriesId, year: yearValue }, "error=invalid"));
+    redirect(
+      buildStudentsReturn({ seriesId, year: yearValue }, "error=invalid"),
+    );
   }
 
   const now = new Date().toISOString();
-  const { student } = getOrCreateStudentIdentity(data, { name, idNumberLast3, phone, birthday, note });
+  const { student } = getOrCreateStudentIdentity(data, {
+    name,
+    idNumberLast3,
+    phone,
+    birthday,
+    note,
+  });
   await upsertStudent(student);
 
   const record: StudentCourseRecord = {
@@ -1418,27 +1955,68 @@ export async function bulkImportStudentEligibilitiesAction(formData: FormData) {
   const seriesId = String(formData.get("seriesId") ?? "").trim();
   const yearValue = String(formData.get("year") ?? "").trim();
   const rosterText = normalizeRosterText(formData.get("rosterText"));
-  const { data, series, year } = await resolveEligibilityContext(seriesId, yearValue);
+  const { data, series, year } = await resolveEligibilityContext(
+    seriesId,
+    yearValue,
+  );
 
   if (!series || !year || !rosterText) {
-    redirect(buildStudentsReturn({ seriesId, year: yearValue }, "error=invalid"));
+    redirect(
+      buildStudentsReturn({ seriesId, year: yearValue }, "error=invalid"),
+    );
   }
 
-  const lines = rosterText.split(/\r?\n/g).map((line) => line.trim()).filter(Boolean);
-  if (lines.length === 0) redirect(buildStudentsReturn({ seriesId, year }, "error=invalid"));
+  const lines = rosterText
+    .split(/\r?\n/g)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0)
+    redirect(buildStudentsReturn({ seriesId, year }, "error=invalid"));
 
   const firstCells = splitRosterLine(lines[0]);
-  const hasHeader = firstCells.some((cell) => /姓名|身分證|後三碼|手機|電話|生日|資格|美容丙級|檢定|通過|備註/i.test(cell));
+  const hasHeader = firstCells.some((cell) =>
+    /姓名|身分證|後三碼|手機|電話|生日|資格|美容丙級|檢定|通過|備註/i.test(
+      cell,
+    ),
+  );
   const headers = hasHeader ? firstCells : [];
   const rows = hasHeader ? lines.slice(1) : lines;
 
-  const nameIndex = hasHeader ? getRosterColumnIndex(headers, ["姓名", "學員", "name"]) : 0;
-  const idIndex = hasHeader ? getRosterColumnIndex(headers, ["身分證後三碼", "後三碼", "末三碼", "idNumberLast3", "idLast3"]) : 1;
-  const phoneIndex = hasHeader ? getRosterColumnIndex(headers, ["手機", "電話", "phone"]) : 2;
-  const birthdayIndex = hasHeader ? getRosterColumnIndex(headers, ["生日", "birthday"]) : 3;
-  const statusIndex = hasHeader ? getRosterColumnIndex(headers, ["資格狀態", "上課資格", "課程資格", "美容丙級", "狀態", "是否通過", "通過"]) : 4;
-  const examTermIndex = hasHeader ? getRosterColumnIndex(headers, ["檢定梯次", "梯次", "年度課程", "期別"]) : 5;
-  const noteIndex = hasHeader ? getRosterColumnIndex(headers, ["備註", "note"]) : 6;
+  const nameIndex = hasHeader
+    ? getRosterColumnIndex(headers, ["姓名", "學員", "name"])
+    : 0;
+  const idIndex = hasHeader
+    ? getRosterColumnIndex(headers, [
+        "身分證後三碼",
+        "後三碼",
+        "末三碼",
+        "idNumberLast3",
+        "idLast3",
+      ])
+    : 1;
+  const phoneIndex = hasHeader
+    ? getRosterColumnIndex(headers, ["手機", "電話", "phone"])
+    : 2;
+  const birthdayIndex = hasHeader
+    ? getRosterColumnIndex(headers, ["生日", "birthday"])
+    : 3;
+  const statusIndex = hasHeader
+    ? getRosterColumnIndex(headers, [
+        "資格狀態",
+        "上課資格",
+        "課程資格",
+        "美容丙級",
+        "狀態",
+        "是否通過",
+        "通過",
+      ])
+    : 4;
+  const examTermIndex = hasHeader
+    ? getRosterColumnIndex(headers, ["檢定梯次", "梯次", "年度課程", "期別"])
+    : 5;
+  const noteIndex = hasHeader
+    ? getRosterColumnIndex(headers, ["備註", "note"])
+    : 6;
 
   let importedCount = 0;
   const now = new Date().toISOString();
@@ -1455,10 +2033,19 @@ export async function bulkImportStudentEligibilitiesAction(formData: FormData) {
     const eligibilityStatus = normalizeEligibilityStatus(rawStatus);
     const examTerm = getRosterCell(cells, examTermIndex);
     const targetOffering = examTerm
-      ? data.courseOfferings.find((offering) =>
-          (offering.seriesId === series.id || offering.courseMasterId === series.id) &&
-          String(offering.year) === String(year) &&
-          [offering.id, offering.legacyCourseId, offering.termLabel, String(offering.term ?? ""), offering.shortName, offering.code].some((value) => String(value ?? "").includes(examTerm)),
+      ? data.courseOfferings.find(
+          (offering) =>
+            (offering.seriesId === series.id ||
+              offering.courseMasterId === series.id) &&
+            String(offering.year) === String(year) &&
+            [
+              offering.id,
+              offering.legacyCourseId,
+              offering.termLabel,
+              String(offering.term ?? ""),
+              offering.shortName,
+              offering.code,
+            ].some((value) => String(value ?? "").includes(examTerm)),
         )
       : undefined;
 
@@ -1496,7 +2083,12 @@ export async function bulkImportStudentEligibilitiesAction(formData: FormData) {
 
   revalidatePath("/");
   revalidatePath("/admin/students");
-  redirect(buildStudentsReturn({ seriesId: series.id, year }, `saved=1&imported=${importedCount}`));
+  redirect(
+    buildStudentsReturn(
+      { seriesId: series.id, year },
+      `saved=1&imported=${importedCount}`,
+    ),
+  );
 }
 
 export async function saveStudentIdentityAction(formData: FormData) {
@@ -1516,7 +2108,10 @@ export async function saveStudentIdentityAction(formData: FormData) {
   const now = new Date().toISOString();
   const existing = rawId
     ? data.students.find((student) => student.id === rawId)
-    : data.students.find((student) => student.name === name && student.idNumberLast3 === idNumberLast3);
+    : data.students.find(
+        (student) =>
+          student.name === name && student.idNumberLast3 === idNumberLast3,
+      );
 
   await upsertStudent({
     ...(existing ?? {}),
@@ -1541,7 +2136,10 @@ export async function saveStudentIdentityAction(formData: FormData) {
 export async function updateStudentIdentityStatusAction(formData: FormData) {
   const studentId = String(formData.get("studentId") ?? "").trim();
   const status = String(formData.get("status") ?? "active").trim();
-  const redirectTo = normalizeAdminRedirect(formData.get("redirectTo"), "/admin/students?mode=students#student-list");
+  const redirectTo = normalizeAdminRedirect(
+    formData.get("redirectTo"),
+    "/admin/students?mode=students#student-list",
+  );
   if (!studentId) {
     redirect(appendAdminQuery(redirectTo, "error=invalid"));
   }
@@ -1567,7 +2165,10 @@ export async function updateStudentIdentityStatusAction(formData: FormData) {
 
 export async function hardDeleteStudentIdentityAction(formData: FormData) {
   const studentId = String(formData.get("studentId") ?? "").trim();
-  const redirectTo = normalizeAdminRedirect(formData.get("redirectTo"), "/admin/students?mode=students#student-list");
+  const redirectTo = normalizeAdminRedirect(
+    formData.get("redirectTo"),
+    "/admin/students?mode=students#student-list",
+  );
   if (!studentId) {
     redirect(appendAdminQuery(redirectTo, "error=invalid"));
   }
@@ -1580,7 +2181,10 @@ export async function hardDeleteStudentIdentityAction(formData: FormData) {
 
 export async function deleteStudentIdentityAction(formData: FormData) {
   const studentId = String(formData.get("studentId") ?? "").trim();
-  const redirectTo = normalizeAdminRedirect(formData.get("redirectTo"), "/admin/students?mode=students#student-list");
+  const redirectTo = normalizeAdminRedirect(
+    formData.get("redirectTo"),
+    "/admin/students?mode=students#student-list",
+  );
   if (!studentId) {
     redirect(appendAdminQuery(redirectTo, "error=invalid"));
   }
@@ -1591,9 +2195,17 @@ export async function deleteStudentIdentityAction(formData: FormData) {
   redirect(appendAdminQuery(redirectTo, "saved=1"));
 }
 
-export async function deleteSelectedStudentIdentitiesAction(formData: FormData) {
-  const studentIds = formData.getAll("studentIds").map((value) => String(value ?? "").trim()).filter(Boolean);
-  const redirectTo = normalizeAdminRedirect(formData.get("redirectTo"), "/admin/students?mode=students#student-list");
+export async function deleteSelectedStudentIdentitiesAction(
+  formData: FormData,
+) {
+  const studentIds = formData
+    .getAll("studentIds")
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean);
+  const redirectTo = normalizeAdminRedirect(
+    formData.get("redirectTo"),
+    "/admin/students?mode=students#student-list",
+  );
   if (studentIds.length === 0) {
     redirect(appendAdminQuery(redirectTo, "error=invalid"));
   }
@@ -1604,7 +2216,9 @@ export async function deleteSelectedStudentIdentitiesAction(formData: FormData) 
 
   revalidatePath("/");
   revalidatePath("/admin/students");
-  redirect(appendAdminQuery(redirectTo, `saved=1&imported=${studentIds.length}`));
+  redirect(
+    appendAdminQuery(redirectTo, `saved=1&imported=${studentIds.length}`),
+  );
 }
 
 export async function bulkImportStudentIdentitiesAction(formData: FormData) {
@@ -1612,19 +2226,43 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
   if (!rosterText) redirect("/admin/students?mode=students&error=invalid");
 
   const data = await getBookingData();
-  const lines = rosterText.split(/\r?\n/g).map((line) => line.trim()).filter(Boolean);
-  if (lines.length === 0) redirect("/admin/students?mode=students&error=invalid");
+  const lines = rosterText
+    .split(/\r?\n/g)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0)
+    redirect("/admin/students?mode=students&error=invalid");
 
   const firstCells = splitRosterLine(lines[0]);
-  const hasHeader = firstCells.some((cell) => /姓名|學員|身分證|後三碼|末三碼|手機|電話|生日|會員|備註/i.test(cell));
+  const hasHeader = firstCells.some((cell) =>
+    /姓名|學員|身分證|後三碼|末三碼|手機|電話|生日|會員|備註/i.test(cell),
+  );
   const headers = hasHeader ? firstCells : [];
   const rows = hasHeader ? lines.slice(1) : lines;
-  const nameIndex = hasHeader ? getRosterColumnIndex(headers, ["姓名", "學員", "name"]) : 0;
-  const idIndex = hasHeader ? getRosterColumnIndex(headers, ["身分證後三碼", "後三碼", "末三碼", "idNumberLast3", "idLast3"]) : 1;
-  const phoneIndex = hasHeader ? getRosterColumnIndex(headers, ["手機", "電話", "phone"]) : 2;
-  const birthdayIndex = hasHeader ? getRosterColumnIndex(headers, ["生日", "birthday"]) : 3;
-  const memberIndex = hasHeader ? getRosterColumnIndex(headers, ["會員編號", "會員", "memberNo", "member"]) : 4;
-  const noteIndex = hasHeader ? getRosterColumnIndex(headers, ["備註", "note"]) : 5;
+  const nameIndex = hasHeader
+    ? getRosterColumnIndex(headers, ["姓名", "學員", "name"])
+    : 0;
+  const idIndex = hasHeader
+    ? getRosterColumnIndex(headers, [
+        "身分證後三碼",
+        "後三碼",
+        "末三碼",
+        "idNumberLast3",
+        "idLast3",
+      ])
+    : 1;
+  const phoneIndex = hasHeader
+    ? getRosterColumnIndex(headers, ["手機", "電話", "phone"])
+    : 2;
+  const birthdayIndex = hasHeader
+    ? getRosterColumnIndex(headers, ["生日", "birthday"])
+    : 3;
+  const memberIndex = hasHeader
+    ? getRosterColumnIndex(headers, ["會員編號", "會員", "memberNo", "member"])
+    : 4;
+  const noteIndex = hasHeader
+    ? getRosterColumnIndex(headers, ["備註", "note"])
+    : 5;
 
   let importedCount = 0;
   const now = new Date().toISOString();
@@ -1635,14 +2273,18 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
     const idNumberLast3 = normalizeIdLast3(getRosterCell(cells, idIndex));
     if (!name || idNumberLast3.length !== 3) continue;
 
-    const existing = data.students.find((student) => student.name === name && student.idNumberLast3 === idNumberLast3);
+    const existing = data.students.find(
+      (student) =>
+        student.name === name && student.idNumberLast3 === idNumberLast3,
+    );
     await upsertStudent({
       ...(existing ?? {}),
       id: existing?.id ?? `student-${crypto.randomUUID()}`,
       name,
       idNumberLast3,
       phone: getRosterCell(cells, phoneIndex) || existing?.phone || "",
-      birthday: getRosterCell(cells, birthdayIndex) || existing?.birthday || null,
+      birthday:
+        getRosterCell(cells, birthdayIndex) || existing?.birthday || null,
       memberNo: getRosterCell(cells, memberIndex) || existing?.memberNo,
       note: getRosterCell(cells, noteIndex) || existing?.note,
       source: existing?.source ?? "Excel / CSV 學員總表匯入",
@@ -1658,16 +2300,29 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
   redirect(`/admin/students?mode=students&saved=1&imported=${importedCount}`);
 }
 
-export async function assignStudentsToCourseEligibilityAction(formData: FormData) {
-  const studentIds = formData.getAll("studentIds").map((value) => String(value ?? "").trim()).filter(Boolean);
+export async function assignStudentsToCourseEligibilityAction(
+  formData: FormData,
+) {
+  const studentIds = formData
+    .getAll("studentIds")
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean);
   const seriesId = String(formData.get("seriesId") ?? "").trim();
   const yearValue = String(formData.get("year") ?? "").trim();
-  const eligibilityStatus = normalizeEligibilityStatus(formData.get("eligibilityStatus"));
-  const targetOfferingId = String(formData.get("targetOfferingId") ?? "").trim();
+  const eligibilityStatus = normalizeEligibilityStatus(
+    formData.get("eligibilityStatus"),
+  );
+  const targetOfferingId = String(
+    formData.get("targetOfferingId") ?? "",
+  ).trim();
   const note = String(formData.get("note") ?? "").trim();
-  const redirectTo = normalizeAdminRedirect(formData.get("redirectTo"), buildStudentsReturn({ mode: "eligibility", seriesId, year: yearValue }));
+  const redirectTo = normalizeAdminRedirect(
+    formData.get("redirectTo"),
+    buildStudentsReturn({ mode: "eligibility", seriesId, year: yearValue }),
+  );
 
-  const { data, series, targetOffering, year } = await resolveEligibilityContext(seriesId, yearValue, targetOfferingId);
+  const { data, series, targetOffering, year } =
+    await resolveEligibilityContext(seriesId, yearValue, targetOfferingId);
   if (!series || !year || studentIds.length === 0) {
     redirect(appendAdminQuery(redirectTo, "error=invalid"));
   }
@@ -1683,13 +2338,16 @@ export async function assignStudentsToCourseEligibilityAction(formData: FormData
       (record) =>
         record.id === recordId ||
         (record.studentId === student.id &&
-          (record.seriesId === series.id || record.courseMasterId === series.id) &&
+          (record.seriesId === series.id ||
+            record.courseMasterId === series.id) &&
           String(record.year ?? record.sourceRocYear ?? "") === String(year)),
     );
 
     if (targetOffering) {
       const enrollmentId = `enroll-${student.id}-${targetOffering.id}`;
-      const existingEnrollment = data.enrollments?.find((item) => item.id === enrollmentId);
+      const existingEnrollment = data.enrollments?.find(
+        (item) => item.id === enrollmentId,
+      );
       const enrollmentStatus = isClearingEligibility
         ? "withdrawn"
         : eligibilityStatus === "已結訓"
@@ -1706,12 +2364,17 @@ export async function assignStudentsToCourseEligibilityAction(formData: FormData
         courseMasterId: series.id,
         enrollmentType: "roster",
         status: enrollmentStatus,
-        joinedAt: existingEnrollment?.joinedAt ?? (isClearingEligibility ? undefined : now),
+        joinedAt:
+          existingEnrollment?.joinedAt ??
+          (isClearingEligibility ? undefined : now),
         leftAt: isClearingEligibility ? now : existingEnrollment?.leftAt,
         year,
         term: targetOffering.term,
         termLabel: targetOffering.termLabel,
-        classDisplayName: targetOffering.displayTitle ?? targetOffering.displayName ?? targetOffering.title,
+        classDisplayName:
+          targetOffering.displayTitle ??
+          targetOffering.displayName ??
+          targetOffering.title,
         note,
         createdAt: existingEnrollment?.createdAt ?? now,
         updatedAt: now,
@@ -1737,7 +2400,10 @@ export async function assignStudentsToCourseEligibilityAction(formData: FormData
       year,
       term: targetOffering?.term,
       termLabel: targetOffering?.termLabel,
-      classDisplayName: targetOffering?.displayTitle ?? targetOffering?.displayName ?? targetOffering?.title,
+      classDisplayName:
+        targetOffering?.displayTitle ??
+        targetOffering?.displayName ??
+        targetOffering?.title,
       note,
       importedAt: existingRecord?.importedAt ?? now,
       createdAt: existingRecord?.createdAt ?? now,
@@ -1750,16 +2416,26 @@ export async function assignStudentsToCourseEligibilityAction(formData: FormData
   // 成功時只 revalidate，不 redirect，降低後台點選狀態後畫面跳動。
 }
 
-export async function bulkUpdateStudentCourseEligibilityAction(formData: FormData) {
-  const recordIds = formData.getAll("recordIds").map((value) => String(value ?? "").trim()).filter(Boolean);
+export async function bulkUpdateStudentCourseEligibilityAction(
+  formData: FormData,
+) {
+  const recordIds = formData
+    .getAll("recordIds")
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean);
   const seriesId = String(formData.get("seriesId") ?? "").trim();
   const yearValue = String(formData.get("year") ?? "").trim();
-  const eligibilityStatus = normalizeEligibilityStatus(formData.get("eligibilityStatus"));
-  const targetOfferingId = String(formData.get("targetOfferingId") ?? "").trim();
+  const eligibilityStatus = normalizeEligibilityStatus(
+    formData.get("eligibilityStatus"),
+  );
+  const targetOfferingId = String(
+    formData.get("targetOfferingId") ?? "",
+  ).trim();
   const note = String(formData.get("note") ?? "").trim();
   const redirectTo = normalizeAdminRedirect(
     formData.get("redirectTo"),
-    buildStudentsReturn({ mode: "eligibility", seriesId, year: yearValue }) + "#qualification-bulk",
+    buildStudentsReturn({ mode: "eligibility", seriesId, year: yearValue }) +
+      "#qualification-bulk",
   );
 
   if (recordIds.length === 0) {
@@ -1768,21 +2444,32 @@ export async function bulkUpdateStudentCourseEligibilityAction(formData: FormDat
 
   const data = await getBookingData();
   const targetOffering = targetOfferingId
-    ? data.courseOfferings.find((item) => item.id === targetOfferingId || item.legacyCourseId === targetOfferingId)
+    ? data.courseOfferings.find(
+        (item) =>
+          item.id === targetOfferingId ||
+          item.legacyCourseId === targetOfferingId,
+      )
     : undefined;
   const year = Number(yearValue || targetOffering?.year || "");
   let updatedCount = 0;
 
   for (const recordId of recordIds) {
-    const existing = data.studentCourseRecords.find((record) => record.id === recordId);
+    const existing = data.studentCourseRecords.find(
+      (record) => record.id === recordId,
+    );
     if (!existing) continue;
 
     const isClearingEligibility = eligibilityStatus === "未加入";
     if (isClearingEligibility) {
-      const removeSeriesId = existing.seriesId || existing.courseMasterId || seriesId;
+      const removeSeriesId =
+        existing.seriesId || existing.courseMasterId || seriesId;
       const removeYear = existing.year ?? existing.sourceRocYear ?? yearValue;
       if (removeSeriesId && removeYear) {
-        await removeStudentCourseEligibility(existing.studentId, removeSeriesId, removeYear);
+        await removeStudentCourseEligibility(
+          existing.studentId,
+          removeSeriesId,
+          removeYear,
+        );
         updatedCount += 1;
       }
       continue;
@@ -1797,7 +2484,9 @@ export async function bulkUpdateStudentCourseEligibilityAction(formData: FormDat
       sourceRocYear: Number.isFinite(year) ? year : existing.sourceRocYear,
       term: targetOffering ? targetOffering.term : existing.term,
       termLabel: targetOffering ? targetOffering.termLabel : existing.termLabel,
-      classDisplayName: targetOffering ? (targetOffering.displayTitle ?? targetOffering.title) : existing.classDisplayName,
+      classDisplayName: targetOffering
+        ? (targetOffering.displayTitle ?? targetOffering.title)
+        : existing.classDisplayName,
       note: note || existing.note,
       updatedAt: new Date().toISOString(),
     });
@@ -1813,28 +2502,61 @@ export async function updateStudentCourseEligibilityAction(formData: FormData) {
   const recordId = String(formData.get("recordId") ?? "").trim();
   const seriesId = String(formData.get("seriesId") ?? "").trim();
   const yearValue = String(formData.get("year") ?? "").trim();
-  const eligibilityStatus = normalizeEligibilityStatus(formData.get("eligibilityStatus"));
-  const targetOfferingId = String(formData.get("targetOfferingId") ?? "").trim();
+  const eligibilityStatus = normalizeEligibilityStatus(
+    formData.get("eligibilityStatus"),
+  );
+  const targetOfferingId = String(
+    formData.get("targetOfferingId") ?? "",
+  ).trim();
   const note = String(formData.get("note") ?? "").trim();
   const data = await getBookingData();
-  const existing = data.studentCourseRecords.find((record) => record.id === recordId);
-  const targetOffering = targetOfferingId ? data.courseOfferings.find((item) => item.id === targetOfferingId) : undefined;
+  const existing = data.studentCourseRecords.find(
+    (record) => record.id === recordId,
+  );
+  const targetOffering = targetOfferingId
+    ? data.courseOfferings.find((item) => item.id === targetOfferingId)
+    : undefined;
 
   if (!existing) {
-    redirect(buildStudentsReturn({ mode: "eligibility", seriesId, year: yearValue }, "error=invalid"));
+    redirect(
+      buildStudentsReturn(
+        { mode: "eligibility", seriesId, year: yearValue },
+        "error=invalid",
+      ),
+    );
   }
 
-  const year = Number(yearValue || existing.year || existing.sourceRocYear || targetOffering?.year || "");
+  const year = Number(
+    yearValue ||
+      existing.year ||
+      existing.sourceRocYear ||
+      targetOffering?.year ||
+      "",
+  );
   const isClearingEligibility = eligibilityStatus === "未加入";
   if (isClearingEligibility) {
-    const removeSeriesId = existing.seriesId || existing.courseMasterId || seriesId;
+    const removeSeriesId =
+      existing.seriesId || existing.courseMasterId || seriesId;
     const removeYear = existing.year ?? existing.sourceRocYear ?? yearValue;
     if (removeSeriesId && removeYear) {
-      await removeStudentCourseEligibility(existing.studentId, removeSeriesId, removeYear);
+      await removeStudentCourseEligibility(
+        existing.studentId,
+        removeSeriesId,
+        removeYear,
+      );
     }
     revalidatePath("/");
     revalidatePath("/admin/students");
-    redirect(buildStudentsReturn({ mode: "eligibility", seriesId: existing.seriesId, year: year || existing.year }, "saved=1"));
+    redirect(
+      buildStudentsReturn(
+        {
+          mode: "eligibility",
+          seriesId: existing.seriesId,
+          year: year || existing.year,
+        },
+        "saved=1",
+      ),
+    );
   }
 
   await upsertStudentCourseRecord({
@@ -1853,9 +2575,17 @@ export async function updateStudentCourseEligibilityAction(formData: FormData) {
 
   revalidatePath("/");
   revalidatePath("/admin/students");
-  redirect(buildStudentsReturn({ mode: "eligibility", seriesId: existing.seriesId, year: year || existing.year }, "saved=1"));
+  redirect(
+    buildStudentsReturn(
+      {
+        mode: "eligibility",
+        seriesId: existing.seriesId,
+        year: year || existing.year,
+      },
+      "saved=1",
+    ),
+  );
 }
-
 
 export async function addStudentToSessionRosterAction(formData: FormData) {
   const studentId = String(formData.get("studentId") ?? "").trim();
@@ -1870,7 +2600,11 @@ export async function addStudentToSessionRosterAction(formData: FormData) {
     redirect(appendAdminQuery(redirectTo, "error=invalid"));
   }
 
-  const result = await addStudentToSessionRoster(studentId, courseId, sessionId);
+  const result = await addStudentToSessionRoster(
+    studentId,
+    courseId,
+    sessionId,
+  );
   revalidatePath("/");
   revalidatePath("/admin/students");
   revalidatePath("/admin/course-sessions");
@@ -1884,8 +2618,8 @@ export async function addStudentToSessionRosterAction(formData: FormData) {
   redirect(appendAdminQuery(redirectTo, "saved=1"));
 }
 
-
 export async function saveInstructorIdentityAction(formData: FormData) {
+  const instructorId = String(formData.get("instructorId") ?? "").trim();
   const name = String(formData.get("name") ?? "").trim();
   const phone = String(formData.get("phone") ?? "").trim();
   const specialties = formData
@@ -1893,6 +2627,9 @@ export async function saveInstructorIdentityAction(formData: FormData) {
     .map((value) => String(value ?? "").trim())
     .filter(Boolean);
   const note = String(formData.get("note") ?? "").trim();
+  const isActive = formData.has("isActive")
+    ? formData.getAll("isActive").includes("true")
+    : true;
 
   if (!name) {
     redirect(buildStudentsReturn({ mode: "instructors" }, "error=invalid"));
@@ -1900,12 +2637,12 @@ export async function saveInstructorIdentityAction(formData: FormData) {
 
   const data = await getBookingData();
   const now = new Date().toISOString();
-  const existing = data.instructors?.find(
-    (item) =>
-      item.name === name &&
-      (phone ? item.phone === phone : true),
-  );
-  const id = existing?.id ?? `instructor-${crypto.randomUUID()}`;
+  const existing =
+    data.instructors?.find((item) => item.id === instructorId) ??
+    data.instructors?.find(
+      (item) => item.name === name && (phone ? item.phone === phone : true),
+    );
+  const id = existing?.id ?? (instructorId || `instructor-${crypto.randomUUID()}`);
 
   await upsertInstructor({
     ...(existing ?? {}),
@@ -1915,7 +2652,7 @@ export async function saveInstructorIdentityAction(formData: FormData) {
     specialties,
     note,
     source: existing?.source ?? "後台手動建立",
-    isActive: true,
+    isActive,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   });
@@ -1936,12 +2673,20 @@ export async function deleteInstructorIdentityAction(formData: FormData) {
   redirect(buildStudentsReturn({ mode: "instructors" }, "saved=1"));
 }
 
-
-function getInstructorFromRoster(instructors: Instructor[] | undefined, instructorId: string) {
-  return (instructors ?? []).find((instructor) => instructor.id === instructorId);
+function getInstructorFromRoster(
+  instructors: Instructor[] | undefined,
+  instructorId: string,
+) {
+  return (instructors ?? []).find(
+    (instructor) => instructor.id === instructorId,
+  );
 }
 
-function addInstructorNameCandidate(candidates: Map<string, string>, id?: unknown, name?: unknown) {
+function addInstructorNameCandidate(
+  candidates: Map<string, string>,
+  id?: unknown,
+  name?: unknown,
+) {
   const normalizedName = String(name ?? "").trim();
   const normalizedId = String(id ?? "").trim() || normalizedName;
   if (normalizedId && normalizedName && !candidates.has(normalizedId)) {
@@ -1949,12 +2694,29 @@ function addInstructorNameCandidate(candidates: Map<string, string>, id?: unknow
   }
 }
 
-function collectInstructorNameCandidates(candidates: Map<string, string>, record: any) {
+function collectInstructorNameCandidates(
+  candidates: Map<string, string>,
+  record: any,
+) {
   if (!record) return;
-  addInstructorNameCandidate(candidates, record.primaryInstructorId ?? record.instructorId ?? record.defaultInstructorId, record.primaryInstructorName ?? record.instructorName ?? record.defaultInstructorName);
-  const assistantIds = Array.isArray(record.assistantInstructorIds) ? record.assistantInstructorIds : [];
-  const assistantNames = Array.isArray(record.assistantInstructorNames) ? record.assistantInstructorNames : [];
-  assistantNames.forEach((name: string, index: number) => addInstructorNameCandidate(candidates, assistantIds[index] ?? name, name));
+  addInstructorNameCandidate(
+    candidates,
+    record.primaryInstructorId ??
+      record.instructorId ??
+      record.defaultInstructorId,
+    record.primaryInstructorName ??
+      record.instructorName ??
+      record.defaultInstructorName,
+  );
+  const assistantIds = Array.isArray(record.assistantInstructorIds)
+    ? record.assistantInstructorIds
+    : [];
+  const assistantNames = Array.isArray(record.assistantInstructorNames)
+    ? record.assistantInstructorNames
+    : [];
+  assistantNames.forEach((name: string, index: number) =>
+    addInstructorNameCandidate(candidates, assistantIds[index] ?? name, name),
+  );
 }
 
 function getInstructorNameFromAnySource(data: any, instructorId: string) {
@@ -1964,11 +2726,23 @@ function getInstructorNameFromAnySource(data: any, instructorId: string) {
   if (rosterName) return rosterName;
 
   const candidates = new Map<string, string>();
-  (data.courses ?? []).forEach((record: any) => collectInstructorNameCandidates(candidates, record));
-  (data.courseOfferings ?? []).forEach((record: any) => collectInstructorNameCandidates(candidates, record));
-  (data.courseSeries ?? []).forEach((record: any) => collectInstructorNameCandidates(candidates, record));
-  (data.courseSessions ?? []).forEach((record: any) => collectInstructorNameCandidates(candidates, record));
-  (data.courses ?? []).flatMap((course: any) => course.sessions ?? []).forEach((record: any) => collectInstructorNameCandidates(candidates, record));
+  (data.courses ?? []).forEach((record: any) =>
+    collectInstructorNameCandidates(candidates, record),
+  );
+  (data.courseOfferings ?? []).forEach((record: any) =>
+    collectInstructorNameCandidates(candidates, record),
+  );
+  (data.courseSeries ?? []).forEach((record: any) =>
+    collectInstructorNameCandidates(candidates, record),
+  );
+  (data.courseSessions ?? []).forEach((record: any) =>
+    collectInstructorNameCandidates(candidates, record),
+  );
+  (data.courses ?? [])
+    .flatMap((course: any) => course.sessions ?? [])
+    .forEach((record: any) =>
+      collectInstructorNameCandidates(candidates, record),
+    );
   return candidates.get(id) ?? id;
 }
 
@@ -1982,7 +2756,9 @@ export async function saveSessionJournalAction(formData: FormData) {
   const sessionId = String(formData.get("sessionId") ?? "").trim();
   const redirectTo = normalizeAdminRedirect(
     formData.get("redirectTo"),
-    sessionId ? buildAdminSessionReservationsPath(sessionId) : "/admin/course-sessions",
+    sessionId
+      ? buildAdminSessionReservationsPath(sessionId)
+      : "/admin/course-sessions",
   );
 
   if (!sessionId) {
@@ -1990,7 +2766,9 @@ export async function saveSessionJournalAction(formData: FormData) {
   }
 
   const data = await getBookingData();
-  const session = data.courses.flatMap((course) => course.sessions ?? []).find((item) => item.id === sessionId);
+  const session = data.courses
+    .flatMap((course) => course.sessions ?? [])
+    .find((item) => item.id === sessionId);
 
   if (!session) {
     redirect(redirectTo);
@@ -1999,15 +2777,36 @@ export async function saveSessionJournalAction(formData: FormData) {
   const now = new Date().toISOString();
   const abnormalStatus = String(formData.get("abnormalStatus") ?? "").trim();
   const followUpNote = String(formData.get("followUpNote") ?? "").trim();
-  const abnormalResolvedStatus = followUpNote ? "resolved" : abnormalStatus ? "processing" : "unresolved";
+  const abnormalResolvedStatus = followUpNote
+    ? "resolved"
+    : abnormalStatus
+      ? "processing"
+      : "unresolved";
   const instructorId = String(formData.get("instructorId") ?? "").trim();
   const instructorName = getInstructorNameFromAnySource(data, instructorId);
-  const assistantInstructorIds = Array.from(new Set(formData.getAll("assistantInstructorIds").map((value) => String(value).trim()).filter(Boolean)));
-  const assistantInstructorNames = getInstructorNamesFromIds(data, assistantInstructorIds);
-  const date = String(formData.get("date") ?? session.date ?? "").trim() || session.date;
-  const startTime = String(formData.get("startTime") ?? session.startTime ?? "").trim() || session.startTime;
-  const endTime = String(formData.get("endTime") ?? session.endTime ?? "").trim() || session.endTime;
-  const location = String(formData.get("location") ?? session.location ?? "").trim() || session.location;
+  const assistantInstructorIds = Array.from(
+    new Set(
+      formData
+        .getAll("assistantInstructorIds")
+        .map((value) => String(value).trim())
+        .filter(Boolean),
+    ),
+  );
+  const assistantInstructorNames = getInstructorNamesFromIds(
+    data,
+    assistantInstructorIds,
+  );
+  const date =
+    String(formData.get("date") ?? session.date ?? "").trim() || session.date;
+  const startTime =
+    String(formData.get("startTime") ?? session.startTime ?? "").trim() ||
+    session.startTime;
+  const endTime =
+    String(formData.get("endTime") ?? session.endTime ?? "").trim() ||
+    session.endTime;
+  const location =
+    String(formData.get("location") ?? session.location ?? "").trim() ||
+    session.location;
   const topic = String(formData.get("topic") ?? session.topic ?? "").trim();
 
   const updatedSession: CourseSession = {
@@ -2021,15 +2820,48 @@ export async function saveSessionJournalAction(formData: FormData) {
     instructorName: instructorName || undefined,
     assistantInstructorIds,
     assistantInstructorNames,
-    sessionStatus: String(formData.get("sessionStatus") ?? session.sessionStatus ?? session.status ?? "scheduled"),
-    attendanceStatus: String(formData.get("attendanceStatus") ?? session.attendanceStatus ?? "not_started"),
-    teachingContent: formData.has("teachingContent") ? String(formData.get("teachingContent") ?? "").trim() : session.teachingContent,
-    teacherNote: formData.has("teacherNote") ? String(formData.get("teacherNote") ?? "").trim() : session.teacherNote,
-    assistantNote: formData.has("assistantNote") ? String(formData.get("assistantNote") ?? "").trim() : session.assistantNote,
-    adminNote: formData.has("adminNote") ? String(formData.get("adminNote") ?? "").trim() : session.adminNote,
-    abnormalStatus: formData.has("abnormalStatus") ? abnormalStatus : session.abnormalStatus,
-    followUpNote: formData.has("followUpNote") ? followUpNote : session.followUpNote,
-    abnormalResolvedStatus: formData.has("abnormalStatus") || formData.has("followUpNote") ? abnormalResolvedStatus : session.abnormalResolvedStatus,
+    status: String(
+      formData.get("sessionStatus") ??
+        session.sessionStatus ??
+        session.status ??
+        "scheduled",
+    ),
+    sessionStatus: String(
+      formData.get("sessionStatus") ??
+        session.sessionStatus ??
+        session.status ??
+        "scheduled",
+    ),
+    isActive: formData.has("sessionStatus")
+      ? !["cancelled", "suspended"].includes(String(formData.get("sessionStatus") ?? ""))
+      : session.isActive,
+    attendanceStatus: String(
+      formData.get("attendanceStatus") ??
+        session.attendanceStatus ??
+        "not_started",
+    ),
+    teachingContent: formData.has("teachingContent")
+      ? String(formData.get("teachingContent") ?? "").trim()
+      : session.teachingContent,
+    teacherNote: formData.has("teacherNote")
+      ? String(formData.get("teacherNote") ?? "").trim()
+      : session.teacherNote,
+    assistantNote: formData.has("assistantNote")
+      ? String(formData.get("assistantNote") ?? "").trim()
+      : session.assistantNote,
+    adminNote: formData.has("adminNote")
+      ? String(formData.get("adminNote") ?? "").trim()
+      : session.adminNote,
+    abnormalStatus: formData.has("abnormalStatus")
+      ? abnormalStatus
+      : session.abnormalStatus,
+    followUpNote: formData.has("followUpNote")
+      ? followUpNote
+      : session.followUpNote,
+    abnormalResolvedStatus:
+      formData.has("abnormalStatus") || formData.has("followUpNote")
+        ? abnormalResolvedStatus
+        : session.abnormalResolvedStatus,
     updatedAt: now,
   };
 

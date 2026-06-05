@@ -6,7 +6,7 @@ import { getBookingData } from "@/lib/booking-repository";
 export const dynamic = "force-dynamic";
 
 type PageProps = {
-  searchParams: Promise<{ saved?: string; error?: string; month?: string; offeringId?: string; schedule?: string }>;
+  searchParams: Promise<{ saved?: string; error?: string; month?: string; offeringId?: string; categoryId?: string; schedule?: string; batch?: string; bulkUpdated?: string }>;
 };
 
 const calendarWeekdayLabels = ["日", "一", "二", "三", "四", "五", "六"];
@@ -124,6 +124,70 @@ function SessionInstructorFields({
       </div>
     </section>
   );
+}
+
+
+function getClassRowCategoryId(row: any) {
+  return row.course?.categoryId ?? row.offering?.categoryId ?? row.series?.categoryId ?? "uncategorized";
+}
+
+function getClassRowCategoryName(row: any, categories: any[]) {
+  const categoryId = getClassRowCategoryId(row);
+  const category = categories.find((item) => item.id === categoryId || item.code === categoryId);
+  return category?.name ?? row.series?.categoryName ?? row.offering?.categoryName ?? row.course?.categoryName ?? "未分類";
+}
+
+function getClassRowSessionStats(row: any) {
+  const sessions = row.course?.sessions ?? [];
+  const total = sessions.length;
+  const cancelled = sessions.filter((session: any) => session?.status === "cancelled" || session?.sessionStatus === "cancelled" || session?.isActive === false).length;
+  return { total, normal: Math.max(total - cancelled, 0), cancelled };
+}
+
+function inferBulkScheduleDefaults(selectedClassRow: any, visibleSessionRows: any[]) {
+  const sessions = visibleSessionRows
+    .map((row) => row.session)
+    .filter((session) => session?.isActive !== false && session?.status !== "cancelled" && session?.sessionStatus !== "cancelled")
+    .sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`));
+
+  const defaultStartDate = sessions[0]?.date ?? selectedClassRow?.offering?.startDate ?? "";
+  const defaultEndDate = sessions[sessions.length - 1]?.date ?? selectedClassRow?.offering?.endDate ?? "";
+  const weekdaySet = new Set<number>();
+  sessions.forEach((session) => {
+    if (!session.date) return;
+    const date = new Date(`${session.date}T00:00:00`);
+    if (!Number.isNaN(date.getTime())) weekdaySet.add(date.getDay());
+  });
+
+  const defaultStartTime = sessions[0]?.startTime ?? selectedClassRow?.offering?.startTime ?? "10:00";
+  const defaultEndTime = sessions[0]?.endTime ?? selectedClassRow?.offering?.endTime ?? "12:00";
+  const defaultTopic = sessions.find((session) => session.topic)?.topic ?? "";
+  const defaultCapacity =
+    sessions[0]?.capacity ??
+    selectedClassRow?.offering?.capacity ??
+    selectedClassRow?.course?.totalCapacity ??
+    selectedClassRow?.series?.defaultCapacity ??
+    12;
+  const defaultLocation =
+    sessions.find((session) => session.location)?.location ??
+    selectedClassRow?.offering?.location ??
+    selectedClassRow?.course?.defaultLocation ??
+    selectedClassRow?.series?.defaultLocation ??
+    "";
+  const hasExistingSessions = sessions.length > 0;
+
+  return {
+    sessions,
+    hasExistingSessions,
+    defaultStartDate,
+    defaultEndDate,
+    defaultWeekdays: weekdaySet,
+    defaultStartTime,
+    defaultEndTime,
+    defaultTopic,
+    defaultCapacity,
+    defaultLocation,
+  };
 }
 
 function getMonthDate(month?: string) {
@@ -275,7 +339,7 @@ function GlobalCalendar({ sessionRows, monthParam }: { sessionRows: any[]; month
 }
 
 export default async function CourseSessionsPage({ searchParams }: PageProps) {
-  const { saved, error, month, offeringId, schedule } = await searchParams;
+  const { saved, error, month, offeringId, categoryId, schedule, bulkUpdated } = await searchParams;
   const { categories, courses, courseOfferings, courseSeries, instructors = [] } = await getBookingData();
   const allCourses = courses as any[];
   const offerings = courseOfferings as any[];
@@ -287,6 +351,23 @@ export default async function CourseSessionsPage({ searchParams }: PageProps) {
     const color = getCourseColor(course, offering, series, categories);
     return { course, offering, series, color };
   });
+  const categoryTabs = [
+    { id: "all", name: "全部" },
+    ...Array.from(
+      new Map(
+        classRows.map((row) => {
+          const categoryId = getClassRowCategoryId(row);
+          return [categoryId, { id: categoryId, name: getClassRowCategoryName(row, categories) }];
+        }),
+      ).values(),
+    ),
+  ];
+
+  const validCategoryIds = new Set(categoryTabs.map((category) => category.id));
+  const selectedCategoryId = categoryId && validCategoryIds.has(categoryId) ? categoryId : "all";
+  const filteredClassRows = selectedCategoryId === "all"
+    ? classRows
+    : classRows.filter((row) => getClassRowCategoryId(row) === selectedCategoryId);
 
   const sessionRows = allCourses
     .flatMap((course) => {
@@ -310,6 +391,7 @@ export default async function CourseSessionsPage({ searchParams }: PageProps) {
     : [];
   const defaultPrimaryInstructorId = selectedClassRow?.offering?.primaryInstructorId ?? selectedClassRow?.course?.primaryInstructorId ?? selectedClassRow?.series?.defaultInstructorId;
   const defaultAssistantInstructorIds = selectedClassRow?.offering?.assistantInstructorIds ?? selectedClassRow?.course?.assistantInstructorIds ?? [];
+  const bulkScheduleDefaults = selectedClassRow ? inferBulkScheduleDefaults(selectedClassRow, visibleSessionRows) : undefined;
 
   return (
     <AdminShell currentSection="course-settings.session">
@@ -324,7 +406,7 @@ export default async function CourseSessionsPage({ searchParams }: PageProps) {
         </div>
       </section>
 
-      {saved ? <p className="mb-4 rounded-2xl border border-[#d8b69f] bg-[#fff6ed] px-4 py-3 text-sm text-[#8B5035]">已更新場次。</p> : null}
+      {saved ? <p className="mb-4 rounded-2xl border border-[#d8b69f] bg-[#fff6ed] px-4 py-3 text-sm text-[#8B5035]">已更新場次{bulkUpdated ? ` ${bulkUpdated} 筆` : ""}。</p> : null}
       {error ? <p className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">無法完成操作，請確認欄位。</p> : null}
 
       <section className="mb-6 rounded-[30px] border border-[#ead8ca] bg-[#fffdf9] p-5 shadow-[0_16px_45px_rgba(90,55,38,0.07)] sm:p-6">
@@ -343,28 +425,78 @@ export default async function CourseSessionsPage({ searchParams }: PageProps) {
             </div>
           ) : null}
         </div>
-        <div className="mt-5 flex gap-3 overflow-x-auto pb-1">
-          <Link
-            href={`/admin/course-sessions?offeringId=all${monthQuery}`}
-            className={selectedOfferingId === "all" ? "shrink-0 rounded-2xl bg-[#E85F00] px-5 py-3 text-sm font-black text-white shadow-sm" : "shrink-0 rounded-2xl border border-[#ead8ca] bg-white px-5 py-3 text-sm font-black text-[#5A3726] hover:bg-[#fff6ed]"}
-          >
-            全部
-          </Link>
-          {classRows.map(({ course, offering, series, color }) => {
-            const currentOfferingId = offering?.id ?? course.offeringId ?? course.id;
-            const active = selectedOfferingId === currentOfferingId;
-            return (
-              <Link
-                key={currentOfferingId}
-                href={`/admin/course-sessions?offeringId=${encodeURIComponent(currentOfferingId)}${monthQuery}`}
-                className={active ? "shrink-0 rounded-2xl border px-5 py-3 text-sm font-black shadow-sm" : "shrink-0 rounded-2xl border border-[#ead8ca] bg-white px-5 py-3 text-sm font-black text-[#5A3726] hover:bg-[#fff6ed]"}
-                style={active ? { borderColor: color, backgroundColor: `${color}18`, color } : undefined}
-              >
-                <span className="mr-2 inline-flex h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} />
-                {course.shortName ?? offering?.shortName ?? series?.title ?? course.title}
-              </Link>
-            );
-          })}
+        <div className="mt-5 space-y-4">
+          {categoryTabs.length > 2 ? (
+            <div className="flex flex-wrap gap-2">
+              {categoryTabs.map((category) => {
+                const isActive = selectedCategoryId === category.id;
+                const nextHref =
+                  category.id === "all"
+                    ? `/admin/course-sessions?offeringId=all${monthQuery}`
+                    : `/admin/course-sessions?categoryId=${encodeURIComponent(category.id)}&offeringId=all${monthQuery}`;
+                return (
+                  <Link
+                    key={category.id}
+                    href={nextHref}
+                    className={isActive ? "rounded-2xl bg-[#E85F00] px-4 py-2 text-sm font-black text-white shadow-sm" : "rounded-2xl border border-[#ead8ca] bg-white px-4 py-2 text-sm font-black text-[#5A3726] hover:bg-[#fff6ed]"}
+                  >
+                    {category.name}
+                  </Link>
+                );
+              })}
+            </div>
+          ) : null}
+
+          <div className="rounded-[24px] border border-[#f0dfd2] bg-[#fffaf5] p-3">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <p className="text-sm font-black text-[#5A3726]">
+                {selectedCategoryId === "all"
+                  ? "全部年度課程"
+                  : `${categoryTabs.find((category) => category.id === selectedCategoryId)?.name ?? "年度課程"}年度課程`}
+              </p>
+              <span className="text-xs font-bold text-[#9a877a]">{filteredClassRows.length} 個課程</span>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+              {filteredClassRows.map(({ course, offering, series, color }) => {
+                const currentOfferingId = offering?.id ?? course.offeringId ?? course.id;
+                const active = selectedOfferingId === currentOfferingId;
+                const stats = getClassRowSessionStats({ course, offering, series, color });
+                const title = course.shortName ?? offering?.shortName ?? series?.title ?? course.title;
+                const year = offering?.year ?? course.year;
+                const term = offering?.term ?? offering?.period ?? course.term;
+                const termLabel = year && term ? `${year}-${term}` : year ? `${year}年` : term ? `第${term}期` : "年度課";
+                const hrefCategory = selectedCategoryId === "all" ? "" : `categoryId=${encodeURIComponent(selectedCategoryId)}&`;
+                return (
+                  <Link
+                    key={currentOfferingId}
+                    href={`/admin/course-sessions?${hrefCategory}offeringId=${encodeURIComponent(currentOfferingId)}${monthQuery}`}
+                    className={
+                      active
+                        ? "relative min-h-[74px] overflow-hidden rounded-2xl border bg-white px-3 py-2 shadow-sm ring-4 ring-[#E85F00]/10"
+                        : "relative min-h-[74px] overflow-hidden rounded-2xl border border-[#ead8ca] bg-white px-3 py-2 shadow-sm transition hover:-translate-y-0.5 hover:bg-[#fffdf9] hover:shadow-md"
+                    }
+                    style={active ? { borderColor: color } : undefined}
+                  >
+                    <span className="absolute inset-y-0 left-0 w-1.5" style={{ backgroundColor: color }} />
+                    <div className="min-w-0 pl-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="line-clamp-2 text-xs font-black leading-5 text-[#1f1712]">{title}</p>
+                        <span className="shrink-0 rounded-full bg-[#fff6ed] px-2 py-0.5 text-[10px] font-black text-[#8a5a3b]">{termLabel}</span>
+                      </div>
+                      <p className="mt-1 line-clamp-1 text-[11px] font-bold text-[#8a7c72]">
+                        {stats.total > 0 ? `已排 ${stats.total} 堂${stats.cancelled ? `｜取消 ${stats.cancelled}` : ""}` : "尚未排課"}
+                      </p>
+                    </div>
+                  </Link>
+                );
+              })}
+              {filteredClassRows.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-[#ead8ca] bg-white px-4 py-6 text-sm font-bold text-[#8a7c72]">
+                  目前沒有符合分類的年度課程。
+                </div>
+              ) : null}
+            </div>
+          </div>
         </div>
       </section>
 
@@ -398,25 +530,42 @@ export default async function CourseSessionsPage({ searchParams }: PageProps) {
               <form action={bulkCreateSessionsAction} className="mt-5 grid gap-4 sm:grid-cols-2">
                 <input type="hidden" name="courseId" value={selectedClassRow.course.id} />
                 <input type="hidden" name="redirectTo" value={scheduleCloseHref} />
+                <input type="hidden" name="syncExistingSessions" value="true" />
                 <SessionInstructorFields eligibleInstructors={eligibleSessionInstructors} defaultPrimaryInstructorId={defaultPrimaryInstructorId} defaultAssistantInstructorIds={defaultAssistantInstructorIds} />
-                <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">開始日期<input required type="date" name="startDate" defaultValue={selectedClassRow.offering?.startDate ?? ""} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
-                <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">結束日期<input required type="date" name="endDate" defaultValue={selectedClassRow.offering?.endDate ?? ""} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
-                <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">開始時間<input required type="time" name="startTime" defaultValue="10:00" className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
-                <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">結束時間<input required type="time" name="endTime" defaultValue="12:00" className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
+
+                {bulkScheduleDefaults?.hasExistingSessions ? (
+                  <div className="sm:col-span-2 rounded-[24px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+                    <p className="font-black">這次會更新既有批次課堂</p>
+                    <p className="mt-1">
+                      系統會依下方日期與星期重新整理這個年度課程：保留並更新符合規則的課堂、新增缺少的課堂，並把不在新規則內的舊課堂標記為已取消，不會刪除預約與點名紀錄。
+                    </p>
+                  </div>
+                ) : (
+                  <div className="sm:col-span-2 rounded-[24px] border border-[#ead8ca] bg-[#fffdf9] px-4 py-3 text-sm leading-6 text-[#8a7c72]">
+                    尚未建立批次課堂。請設定日期、時間與上課星期後建立課堂。
+                  </div>
+                )}
+
+                <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">開始日期<input required type="date" name="startDate" defaultValue={bulkScheduleDefaults?.defaultStartDate ?? ""} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
+                <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">結束日期<input required type="date" name="endDate" defaultValue={bulkScheduleDefaults?.defaultEndDate ?? ""} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
+                <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">開始時間<input required type="time" name="startTime" defaultValue={bulkScheduleDefaults?.defaultStartTime ?? "10:00"} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
+                <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">結束時間<input required type="time" name="endTime" defaultValue={bulkScheduleDefaults?.defaultEndTime ?? "12:00"} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
                 <div className="sm:col-span-2 grid gap-2 text-sm font-semibold text-[#4e4038]">
                   上課星期
                   <div className="flex flex-wrap gap-2 rounded-2xl border border-[#ead8ca] bg-[#fffdf9] p-3">
                     {["日", "一", "二", "三", "四", "五", "六"].map((label, index) => (
                       <label key={label} className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-[#ead8ca] bg-white px-3 py-2 text-xs font-bold text-[#5A3726] has-[:checked]:border-[#E85F00] has-[:checked]:bg-[#fff1e7] has-[:checked]:text-[#E85F00]">
-                        <input type="checkbox" name="weekdays" value={index} className="h-4 w-4 accent-[#E85F00]" />週{label}
+                        <input type="checkbox" name="weekdays" value={index} defaultChecked={bulkScheduleDefaults?.defaultWeekdays.has(index) ?? false} className="h-4 w-4 accent-[#E85F00]" />週{label}
                       </label>
                     ))}
                   </div>
                 </div>
-                <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">單元<input name="topic" className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" placeholder="例如 彩妝" /></label>
-                <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">名額<input required type="number" min={0} name="capacity" defaultValue={selectedClassRow.offering?.capacity ?? selectedClassRow.course.totalCapacity ?? selectedClassRow.series?.defaultCapacity ?? 12} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
-                <label className="grid gap-2 text-sm font-semibold text-[#4e4038] sm:col-span-2">地點<input name="location" defaultValue={selectedClassRow.offering?.location ?? selectedClassRow.course.defaultLocation ?? selectedClassRow.series?.defaultLocation ?? ""} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
-                <button className="sm:col-span-2 rounded-2xl bg-[#5A3726] px-4 py-3 text-sm font-black text-white shadow-sm hover:brightness-105">建立批次課堂</button>
+                <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">單元<input name="topic" defaultValue={bulkScheduleDefaults?.defaultTopic ?? ""} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" placeholder="例如 彩妝" /></label>
+                <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">名額<input required type="number" min={0} name="capacity" defaultValue={bulkScheduleDefaults?.defaultCapacity ?? 12} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
+                <label className="grid gap-2 text-sm font-semibold text-[#4e4038] sm:col-span-2">地點<input name="location" defaultValue={bulkScheduleDefaults?.defaultLocation ?? ""} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
+                <button className="sm:col-span-2 rounded-2xl bg-[#5A3726] px-4 py-3 text-sm font-black text-white shadow-sm hover:brightness-105">
+                  {bulkScheduleDefaults?.hasExistingSessions ? "更新這批課堂" : "建立批次課堂"}
+                </button>
               </form>
             )}
           </div>
