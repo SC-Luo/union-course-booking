@@ -29,6 +29,14 @@ function statusPillClass(status?: string, isActive?: boolean) {
   return "border-emerald-200 bg-emerald-50 text-emerald-700";
 }
 
+function isArchivedOffering(offering: any) {
+  return offering?.status === "archived" || offering?.bookingStatus === "archived";
+}
+
+function isArchivedClassRow(course: any, offering: any) {
+  return isArchivedOffering(offering) || course?.status === "archived" || course?.bookingStatus === "archived";
+}
+
 function getOffering(course: any, offerings: any[]) {
   return offerings.find((item) => item.id === course.offeringId || item.legacyCourseId === course.id);
 }
@@ -345,12 +353,14 @@ export default async function CourseSessionsPage({ searchParams }: PageProps) {
   const offerings = courseOfferings as any[];
   const seriesList = courseSeries as any[];
 
-  const classRows = allCourses.map((course) => {
-    const offering = getOffering(course, offerings);
-    const series = getSeries(course, offering, seriesList);
-    const color = getCourseColor(course, offering, series, categories);
-    return { course, offering, series, color };
-  });
+  const classRows = allCourses
+    .map((course) => {
+      const offering = getOffering(course, offerings);
+      const series = getSeries(course, offering, seriesList);
+      const color = getCourseColor(course, offering, series, categories);
+      return { course, offering, series, color };
+    })
+    .filter((row) => !isArchivedClassRow(row.course, row.offering));
   const categoryTabs = [
     { id: "all", name: "全部" },
     ...Array.from(
@@ -372,6 +382,7 @@ export default async function CourseSessionsPage({ searchParams }: PageProps) {
   const sessionRows = allCourses
     .flatMap((course) => {
       const offering = getOffering(course, offerings);
+      if (isArchivedClassRow(course, offering)) return [];
       const series = getSeries(course, offering, seriesList);
       const color = getCourseColor(course, offering, series, categories);
       return (course.sessions ?? []).map((session: any) => ({ course, session, offering, series, color }));
@@ -380,6 +391,7 @@ export default async function CourseSessionsPage({ searchParams }: PageProps) {
 
   const selectedOfferingId = offeringId && classRows.some((row) => row.offering?.id === offeringId) ? offeringId : "all";
   const selectedClassRow = selectedOfferingId === "all" ? undefined : classRows.find((row) => row.offering?.id === selectedOfferingId);
+  const selectedClassArchived = isArchivedOffering(selectedClassRow?.offering);
   const visibleSessionRows = selectedOfferingId === "all" ? sessionRows : sessionRows.filter((row) => row.offering?.id === selectedOfferingId);
   const monthQuery = month ? `&month=${encodeURIComponent(month)}` : "";
   const scheduleCloseHref = `/admin/course-sessions?offeringId=${encodeURIComponent(selectedOfferingId)}${monthQuery}`;
@@ -415,10 +427,10 @@ export default async function CourseSessionsPage({ searchParams }: PageProps) {
             <p className="text-sm font-bold text-[#B46F4A]">課程篩選</p>
             <h2 className="mt-1 text-xl font-black text-[#1f1712]">先選年度課程，再看日曆與新增課堂</h2>
             <p className="mt-1 text-sm leading-6 text-[#8a7c72]">
-              選定年度課程後，日曆只顯示該班課堂；新增單堂與批次排課在此頁展開，不必離開日曆。
+              選定年度課程後，日曆只顯示該班課堂；新增單堂與批次排課在此頁展開，不必離開日曆。已封存年度課程會自動退出課堂管理流程。
             </p>
           </div>
-          {selectedClassRow ? (
+          {selectedClassRow && !selectedClassArchived ? (
             <div className="flex shrink-0 flex-wrap gap-2">
               <Link href={scheduleSingleHref} className="rounded-2xl bg-[#E85F00] px-4 py-3 text-sm font-black text-white shadow-sm hover:brightness-105">新增單堂</Link>
               <Link href={scheduleBulkHref} className="rounded-2xl bg-[#5A3726] px-4 py-3 text-sm font-black text-white shadow-sm hover:brightness-105">批次排課</Link>
@@ -492,7 +504,7 @@ export default async function CourseSessionsPage({ searchParams }: PageProps) {
               })}
               {filteredClassRows.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-[#ead8ca] bg-white px-4 py-6 text-sm font-bold text-[#8a7c72]">
-                  目前沒有符合分類的年度課程。
+                  目前沒有可排課的年度課程；已封存課程不會顯示在課堂日誌。
                 </div>
               ) : null}
             </div>
@@ -513,7 +525,12 @@ export default async function CourseSessionsPage({ searchParams }: PageProps) {
               <Link href={scheduleCloseHref} className="rounded-full border border-[#ead8ca] bg-[#fffaf5] px-4 py-2 text-sm font-black text-[#5A3726] hover:bg-[#fff6ed]">關閉</Link>
             </div>
 
-            {scheduleMode === "single" ? (
+            {selectedClassArchived ? (
+              <div className="mt-5 rounded-[24px] border border-zinc-200 bg-zinc-50 px-5 py-4 text-sm leading-6 text-zinc-700">
+                <p className="font-black text-zinc-800">此年度課程已封存，僅供查閱。</p>
+                <p className="mt-1">封存後不可新增或批次重排課堂。如需補排，請先回年度課程解除封存。</p>
+              </div>
+            ) : scheduleMode === "single" ? (
               <form action={saveSessionAction} className="mt-5 grid gap-4 sm:grid-cols-2">
                 <input type="hidden" name="courseId" value={selectedClassRow.course.id} />
                 <input type="hidden" name="redirectTo" value={scheduleCloseHref} />

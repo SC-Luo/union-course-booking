@@ -8,7 +8,7 @@ tags:
   - ai-changelog
   - project-memory
 created: 2026-05-27
-updated: 2026-06-05
+updated: 2026-06-08
 status: active
 summary: 影響後續 AI 接手、產品方向、技術架構、資料結構或開發流程的重要變更。
 related:
@@ -20,6 +20,28 @@ related:
 # CHANGELOG_AI
 
 本文件只記錄會影響後續 AI 接手、產品方向、技術架構、資料結構或開發流程的重要變更。不要貼完整聊天紀錄，也不要記錄每一行小改動。
+
+## 2026-06-08
+
+### 本次變更
+
+- 系統 UI 架構開始整理為三角色入口：學員中心、授課工作台、秘書處後台。
+- 學員端入口已完成精簡，不再顯示授課工作台與秘書處後台入口，並移除多餘輔助說明文字。
+- 學員首頁將「日曆看課」收斂為「近期課程」，並移除主視覺重複按鈕、統計膠囊與重複分類標籤。
+- 年度課程頁改採 Modal 操作模式，移除展開式大型表單與卡片上過多低頻操作。
+- 年度課程頁新增課程類別 + 課程狀態兩階段篩選。
+- 年度課程管理 Modal 新增課程狀態控制台概念，將草稿、開放報名、停止報名、已封存集中管理。
+- 課堂日誌總覽 `/admin/course-sessions` 已改為排除已封存年度課程，封存課程不再進入選擇器、課程卡片與排課流程。
+- 共用 `SessionInfoModalCard` 支援自訂 trigger / panel 樣式，並修正 `panelClassName` 覆蓋基礎樣式造成的跑版問題。
+- 講師單堂授課頁開始收斂為摘要 / 點名 / 紀錄結構，課堂設定與課堂紀錄改為 Modal。
+- 2026-06-08 已實際重跑 `npm.cmd run lint` 與 `npm.cmd run build`，目前通過。
+
+### 後續注意
+
+- 學員端入口已由使用者確認 OK。
+- 年度課程頁、課堂日誌頁、授課工作台與秘書處後台仍需人工驗收。
+- 本次交接提到的 `src__app__admin__course-offerings__page.v7_1.fixed.tsx` 不在 repo 內；目前應以 `src/app/admin/course-offerings/page.tsx` 為準。
+- 工作區仍有兩個未追蹤暫存檔：`src/app/src__app__page.current.tsx.tsx`、`src/app/teaching/sessions/[sessionId]/src__app__teaching__sessions__[sessionId]__page.current.tsx`。
 
 ## 2026-05-28
 
@@ -101,3 +123,9 @@ related:
 
 - 下一階段可擴充批次課堂管理，但要避免直接刪除已有預約或出席紀錄的課堂。
 - 工作區目前仍有本機資料檔與未追蹤暫存檔，整理提交前需先判斷是否納入版本控制。
+## 2026-06-11
+
+### 文件補強
+
+- 新增 `specs/system-architecture.md`，集中整理系統總覽、前端 / 後端功能、資料模型、Firebase / Firestore 串接、JSON fallback、批次同步腳本、Google Sheets 同步與部署方式。
+- 之後若要快速理解「資料平常怎麼寫進 Firestore」與「JSON 批次同步怎麼推上去」，優先讀這份文件。

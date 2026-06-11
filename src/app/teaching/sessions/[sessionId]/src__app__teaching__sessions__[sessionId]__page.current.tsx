@@ -2,7 +2,6 @@ import Link from "next/link";
 import { AttendanceStatusControls } from "@/app/admin/sessions/[sessionId]/reservations/attendance-status-controls";
 import { ReservationNoteAutosave } from "@/app/admin/sessions/[sessionId]/reservations/reservation-note-autosave";
 import { SessionJournalAutosave } from "@/app/admin/sessions/[sessionId]/reservations/session-journal-autosave";
-import { SessionInfoModalCard } from "@/app/admin/sessions/[sessionId]/reservations/session-info-modal-card";
 import { completeTeachingAttendanceAction, saveTeachingJournalAction, updateTeachingAttendanceAction } from "@/app/teaching/actions";
 import { getBookingData } from "@/lib/booking-repository";
 import { TeachingSectionTabs } from "./teaching-section-tabs";
@@ -724,197 +723,6 @@ export default async function TeachingSessionPage({
   );
   const hasAbnormal = Boolean(String(session.abnormalStatus ?? "").trim());
   const hasFollowUp = Boolean(String(session.followUpNote ?? "").trim());
-  const sessionStatusOptions = [
-    { value: "scheduled", label: "正常上課" },
-    { value: "suspended", label: "停課" },
-    { value: "makeup", label: "補課" },
-    { value: "rescheduled", label: "調課" },
-    { value: "cancelled", label: "取消" },
-  ];
-  const attendanceWorkflowOptions = [
-    { value: "not_started", label: "尚未開始" },
-    { value: "in_progress", label: "點名中" },
-    { value: "completed", label: "已完成" },
-  ];
-  const currentSessionStatusLabel =
-    sessionStatusOptions.find((item) => item.value === sessionStatus)?.label ??
-    "正常上課";
-  const currentAttendanceStatusLabel =
-    attendanceWorkflowOptions.find((item) => item.value === attendanceStatus)
-      ?.label ?? "尚未開始";
-
-  const primaryAttendanceActionLabel =
-    attendanceStatus === "not_started"
-      ? "開始點名"
-      : attendanceStatus === "completed"
-        ? "查看點名"
-        : "繼續點名";
-
-  const sessionStatusModal = (
-    <SessionInfoModalCard
-      title="課堂狀態"
-      eyebrow="狀態管理"
-      triggerLabel="調整"
-      closeLabel="關閉"
-      triggerClassName="inline-flex h-9 items-center justify-center rounded-full border border-[#dbcabd] bg-white px-3 text-xs font-black text-[#5A3726] shadow-sm transition hover:bg-[#fff6ed]"
-      panelClassName="max-w-4xl"
-    >
-      <form action={saveTeachingJournalAction} className="grid gap-5">
-        <input type="hidden" name="sessionId" value={session.id} />
-        <input type="hidden" name="teacherName" value={teacherName} />
-        <input
-          type="hidden"
-          name="redirectTo"
-          value={`/teaching/sessions/${encodedSessionId}?name=${encodeURIComponent(teacherName)}#session-workspace`}
-        />
-
-        <section className="rounded-[24px] border border-[#ead8ca] bg-[#fffdf9] p-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-black text-[#5A3726]">課堂狀態</p>
-              <p className="mt-1 text-sm font-bold text-[#8a7c72]">
-                目前：<span className="text-[#1f1712]">{currentSessionStatusLabel}</span>
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {sessionStatusOptions.map((item) => (
-                <button
-        key={item.value}
-        type="submit"
-        name="sessionStatus"
-        value={item.value}
-        className={`rounded-full border px-4 py-2 text-sm font-black transition ${sessionStatusButtonClass(item.value, sessionStatus)}`}
-                >
-        {item.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section className="rounded-[24px] border border-[#ead8ca] bg-[#fffdf9] p-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-black text-[#5A3726]">點名流程</p>
-              <p className="mt-1 text-sm font-bold text-[#8a7c72]">
-                目前：<span className="text-[#1f1712]">{currentAttendanceStatusLabel}</span>
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {attendanceWorkflowOptions.map((item) => (
-                <button
-        key={item.value}
-        type="submit"
-        name="attendanceStatus"
-        value={item.value}
-        className={`rounded-full border px-4 py-2 text-sm font-black transition ${attendanceWorkflowButtonClass(item.value, attendanceStatus)}`}
-                >
-        {item.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section className="rounded-[24px] border border-[#ead8ca] bg-[#fffdf9] p-4">
-          <p className="text-sm font-black text-[#5A3726]">異常處理</p>
-          <div className={`mt-3 inline-flex items-center rounded-full border px-4 py-2 text-sm font-black ${abnormalStatusTone(abnormalResolvedStatus)}`}>
-            {abnormalLabel(abnormalResolvedStatus)}
-            <span className="ml-2 font-medium text-current opacity-70">
-              {hasFollowUp ? "已填後續" : hasAbnormal ? "處理中" : "自動判定"}
-            </span>
-          </div>
-          <p className="mt-3 text-sm leading-6 text-[#8a7c72]">
-            異常內容與後續追蹤請到「紀錄」補充。
-          </p>
-        </section>
-      </form>
-    </SessionInfoModalCard>
-  );
-
-  const teachingJournalModal = (
-    <SessionInfoModalCard
-      title="課堂日誌與 TTQS 紀錄"
-      eyebrow="授課紀錄"
-      triggerLabel="開啟紀錄"
-      closeLabel="關閉"
-      triggerClassName="inline-flex h-11 items-center justify-center rounded-2xl bg-[#E85F00] px-4 text-sm font-black text-white shadow-sm transition hover:-translate-y-0.5 hover:brightness-105 hover:shadow-md"
-      panelClassName="max-w-5xl"
-    >
-      <div className="grid gap-5">
-        <div className="grid gap-5 lg:grid-cols-2">
-          <section className="rounded-[22px] border border-[#ead8ca] bg-[#fffdf9] p-4">
-            <p className="text-sm font-bold text-[#B46F4A]">講師授課紀錄</p>
-            <div className="mt-4 grid gap-4">
-              <SessionJournalAutosave
-                sessionId={session.id}
-                field="teachingContent"
-                defaultValue={session.teachingContent ?? ""}
-                label="今日授課內容"
-                placeholder="例如：彩妝工具介紹、底妝練習、眉型修整"
-                rows={4}
-              />
-              <SessionJournalAutosave
-                sessionId={session.id}
-                field="teacherNote"
-                defaultValue={session.teacherNote ?? ""}
-                label="講師備註"
-                placeholder="講師可記錄學員學習狀況、下次提醒或課程調整建議"
-                rows={4}
-              />
-            </div>
-          </section>
-          <section className="rounded-[22px] border border-[#ead8ca] bg-[#fffdf9] p-4">
-            <p className="text-sm font-bold text-[#B46F4A]">
-              助教與行政紀錄
-            </p>
-            <div className="mt-4 grid gap-4">
-              <SessionJournalAutosave
-                sessionId={session.id}
-                field="assistantNote"
-                defaultValue={session.assistantNote ?? ""}
-                label="助教現場紀錄"
-                placeholder="例如：設備狀況、學員問題、現場突發事件"
-                rows={4}
-              />
-              <SessionJournalAutosave
-                sessionId={session.id}
-                field="adminNote"
-                defaultValue={session.adminNote ?? ""}
-                label="行政備註"
-                placeholder="行政可記錄補件、聯繫、後續通知或內部提醒"
-                rows={4}
-              />
-            </div>
-          </section>
-        </div>
-
-        <section className="rounded-[22px] border border-rose-100 bg-rose-50/40 p-4">
-          <p className="text-sm font-bold text-rose-700">TTQS 異常追蹤</p>
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <SessionJournalAutosave
-              sessionId={session.id}
-              field="abnormalStatus"
-              defaultValue={session.abnormalStatus ?? ""}
-              label="異常狀態"
-              placeholder="例如：講師遲到、設備故障、學員爭議、臨時調課；無異常可留空"
-              rows={3}
-              tone="rose"
-            />
-            <SessionJournalAutosave
-              sessionId={session.id}
-              field="followUpNote"
-              defaultValue={session.followUpNote ?? ""}
-              label="後續追蹤"
-              placeholder="例如：通知學員、補課安排、設備報修、主管確認"
-              rows={3}
-              tone="rose"
-            />
-          </div>
-        </section>
-      </div>
-    </SessionInfoModalCard>
-  );
 
 
   return (
@@ -944,85 +752,208 @@ export default async function TeachingSessionPage({
                 本堂學員：<strong className="text-[#5A3726]">{attendanceRows.length}</strong> 人
               </p>
             </div>
-            <div className="hidden flex-wrap gap-2 sm:flex">
+            <div className="flex flex-wrap gap-2">
+              <a
+                href="#session-workspace"
+                className="inline-flex h-11 items-center justify-center rounded-2xl border border-[#dbcabd] bg-white px-4 text-sm font-black text-[#5A3726] hover:bg-[#fff6ed]"
+              >
+                課堂設定
+              </a>
               <a
                 href="#attendance-list"
-                className="inline-flex h-11 items-center justify-center rounded-2xl bg-[#E85F00] px-4 text-sm font-black text-white shadow-sm transition hover:-translate-y-0.5 hover:brightness-105 hover:shadow-md"
+                className="inline-flex h-11 items-center justify-center rounded-2xl bg-[#E85F00] px-4 text-sm font-black text-white shadow-sm hover:brightness-105"
               >
-                {primaryAttendanceActionLabel}
+                前往點名
               </a>
             </div>
           </div>
         </header>
 
-        <section
-          id="session-workspace"
-          className="mt-4 scroll-mt-24 rounded-[28px] border border-[#ead8ca] bg-white px-5 py-4 shadow-sm"
+        <form action={saveTeachingJournalAction} className="mt-4">
+          <input type="hidden" name="sessionId" value={session.id} />
+          <input type="hidden" name="teacherName" value={teacherName} />
+          <input
+            type="hidden"
+            name="redirectTo"
+            value={`/teaching/sessions/${encodedSessionId}?name=${encodeURIComponent(teacherName)}#session-workspace`}
+          />
+
+          <section
+            id="session-workspace"
+            className="scroll-mt-24 rounded-[28px] border border-[#ead8ca] bg-white px-5 py-4 shadow-sm"
+          >
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <p className="text-xs font-black text-[#B46F4A]">課堂摘要</p>
+                <h2 className="mt-1 text-2xl font-black tracking-tight text-[#1f1712]">
+                  {formatDateText(session.date)}｜{session.startTime || "--:--"}-{session.endTime || "--:--"}
+                </h2>
+                <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm leading-6 text-[#66584f]">
+                  <span>單元：<strong className="text-[#1f1712]">{session.topic || "未填單元"}</strong></span>
+                  <span>地點：<strong className="text-[#1f1712]">{effectiveLocation}</strong></span>
+                  <span>講師：<strong className="text-[#1f1712]">{primaryInstructorName}</strong></span>
+                  <span>助教：<strong className="text-[#1f1712]">{assistantNames}</strong></span>
+                </div>
+              </div>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                <a
+                  href="#lesson-journal"
+                  className="inline-flex h-11 items-center justify-center rounded-2xl border border-[#dbcabd] bg-white px-4 text-sm font-black text-[#5A3726] hover:bg-[#fff6ed]"
+                >
+                  填寫課堂日誌
+                </a>
+                <a
+                  href="#attendance-list"
+                  className="inline-flex h-11 items-center justify-center rounded-2xl bg-[#E85F00] px-4 text-sm font-black text-white shadow-sm hover:brightness-105"
+                >
+                  前往點名
+                </a>
+              </div>
+            </div>
+
+            <div className="mt-4 border-t border-[#f5e8dc] pt-4">
+              <div className="grid gap-3 lg:grid-cols-[1fr_1fr_0.72fr]">
+                <div className="grid gap-2 text-xs font-black text-[#B46F4A]">
+                  課堂狀態
+                  <div className="flex flex-wrap gap-1.5 rounded-[18px] border border-[#ead8ca] bg-[#fffdf9] p-2">
+                    {[
+                      { value: "scheduled", label: "正常上課" },
+                      { value: "suspended", label: "停課" },
+                      { value: "makeup", label: "補課" },
+                      { value: "rescheduled", label: "調課" },
+                    ].map((item) => (
+                      <button
+                        key={item.value}
+                        type="submit"
+                        name="sessionStatus"
+                        value={item.value}
+                        className={`rounded-full border px-3 py-1.5 text-xs font-black transition ${sessionStatusButtonClass(item.value, sessionStatus)}`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid gap-2 text-xs font-black text-[#B46F4A]">
+                  點名狀態
+                  <div className="flex flex-wrap gap-1.5 rounded-[18px] border border-[#ead8ca] bg-[#fffdf9] p-2">
+                    {[
+                      { value: "not_started", label: "尚未開始" },
+                      { value: "in_progress", label: "點名中" },
+                      { value: "completed", label: "已完成" },
+                    ].map((item) => (
+                      <button
+                        key={item.value}
+                        type="submit"
+                        name="attendanceStatus"
+                        value={item.value}
+                        className={`rounded-full border px-3 py-1.5 text-xs font-black transition ${attendanceWorkflowButtonClass(item.value, attendanceStatus)}`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid gap-2 text-xs font-black text-[#B46F4A]">
+                  異常處理
+                  <div className={`flex min-h-10 items-center rounded-[18px] border px-3 py-2 text-xs font-black ${abnormalStatusTone(abnormalResolvedStatus)}`}>
+                    {abnormalLabel(abnormalResolvedStatus)}
+                    <span className="ml-2 font-medium text-current opacity-70">
+                      {hasFollowUp ? "已填後續" : hasAbnormal ? "處理中" : "自動判定"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </form>
+
+        <details
+          id="lesson-journal"
+          className="mt-4 scroll-mt-24 rounded-[28px] border border-[#ead8ca] bg-white shadow-sm"
         >
-          <div className="grid gap-4">
-            <div>
-              <p className="text-xs font-black text-[#B46F4A]">課堂摘要</p>
-              <h2 className="mt-1 text-2xl font-black tracking-tight text-[#1f1712]">
-                {formatDateText(session.date)}｜{session.startTime || "--:--"}-{session.endTime || "--:--"}
-              </h2>
-              <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm leading-6 text-[#66584f]">
-                <span>單元：<strong className="text-[#1f1712]">{session.topic || "未填單元"}</strong></span>
-                <span>地點：<strong className="text-[#1f1712]">{effectiveLocation}</strong></span>
-                <span>講師：<strong className="text-[#1f1712]">{primaryInstructorName}</strong></span>
-                <span>助教：<strong className="text-[#1f1712]">{assistantNames}</strong></span>
-              </div>
+          <summary className="cursor-pointer list-none px-5 py-4 text-sm font-black text-[#5A3726] marker:hidden">
+            課堂日誌與 TTQS 紀錄
+            <span className="ml-2 text-xs font-medium text-[#8a7c72]">
+              展開後輸入，系統會自動儲存
+            </span>
+          </summary>
+          <div className="border-t border-[#f1e2d6] px-5 py-5">
+            <div className="grid gap-5 lg:grid-cols-2">
+              <section className="rounded-[22px] border border-[#ead8ca] bg-[#fffdf9] p-4">
+                <p className="text-sm font-bold text-[#B46F4A]">講師授課紀錄</p>
+                <div className="mt-4 grid gap-4">
+                  <SessionJournalAutosave
+                    sessionId={session.id}
+                    field="teachingContent"
+                    defaultValue={session.teachingContent ?? ""}
+                    label="今日授課內容"
+                    placeholder="例如：彩妝工具介紹、底妝練習、眉型修整"
+                    rows={4}
+                  />
+                  <SessionJournalAutosave
+                    sessionId={session.id}
+                    field="teacherNote"
+                    defaultValue={session.teacherNote ?? ""}
+                    label="講師備註"
+                    placeholder="講師可記錄學員學習狀況、下次提醒或課程調整建議"
+                    rows={4}
+                  />
+                </div>
+              </section>
+              <section className="rounded-[22px] border border-[#ead8ca] bg-[#fffdf9] p-4">
+                <p className="text-sm font-bold text-[#B46F4A]">
+                  助教與行政紀錄
+                </p>
+                <div className="mt-4 grid gap-4">
+                  <SessionJournalAutosave
+                    sessionId={session.id}
+                    field="assistantNote"
+                    defaultValue={session.assistantNote ?? ""}
+                    label="助教現場紀錄"
+                    placeholder="例如：設備狀況、學員問題、現場突發事件"
+                    rows={4}
+                  />
+                  <SessionJournalAutosave
+                    sessionId={session.id}
+                    field="adminNote"
+                    defaultValue={session.adminNote ?? ""}
+                    label="行政備註"
+                    placeholder="行政可記錄補件、聯繫、後續通知或內部提醒"
+                    rows={4}
+                  />
+                </div>
+              </section>
             </div>
 
+            <section className="mt-5 rounded-[22px] border border-rose-100 bg-rose-50/40 p-4">
+              <p className="text-sm font-bold text-rose-700">TTQS 異常追蹤</p>
+              <p className="mt-1 text-xs leading-5 text-rose-700/80">
+                未填為無異常；填寫異常狀態後為處理中；填寫後續追蹤後為已處理。
+              </p>
+              <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                <SessionJournalAutosave
+                  sessionId={session.id}
+                  field="abnormalStatus"
+                  defaultValue={session.abnormalStatus ?? ""}
+                  label="異常狀態"
+                  placeholder="例如：講師遲到、設備故障、學員爭議、臨時調課；無異常可留空"
+                  rows={3}
+                  tone="rose"
+                />
+                <SessionJournalAutosave
+                  sessionId={session.id}
+                  field="followUpNote"
+                  defaultValue={session.followUpNote ?? ""}
+                  label="後續追蹤"
+                  placeholder="例如：通知學員、補課安排、設備報修、主管確認"
+                  rows={3}
+                  tone="rose"
+                />
+              </div>
+            </section>
           </div>
-
-          <div className="mt-4 border-t border-[#f5e8dc] pt-4">
-            <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-[18px] border border-[#ead8ca] bg-[#fffdf9] px-4 py-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-black text-[#B46F4A]">課堂狀態</p>
-                    <span className={`mt-2 inline-flex rounded-full border px-3 py-1.5 text-xs font-black ${sessionStatusButtonClass(sessionStatus, sessionStatus)}`}>
-                      {currentSessionStatusLabel}
-                    </span>
-                  </div>
-                  {sessionStatusModal}
-                </div>
-              </div>
-              <div className="rounded-[18px] border border-[#ead8ca] bg-[#fffdf9] px-4 py-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-black text-[#B46F4A]">點名進度</p>
-                    <span className={`mt-2 inline-flex rounded-full border px-3 py-1.5 text-xs font-black ${attendanceWorkflowButtonClass(attendanceStatus, attendanceStatus)}`}>
-                      {currentAttendanceStatusLabel}
-                    </span>
-                  </div>
-                  <a
-                    href="#attendance-list"
-                    className="inline-flex h-9 items-center justify-center rounded-full bg-[#E85F00] px-3 text-xs font-black text-white shadow-sm"
-                  >
-                    {primaryAttendanceActionLabel}
-                  </a>
-                </div>
-              </div>
-              <div className="rounded-[18px] border border-[#ead8ca] bg-[#fffdf9] px-4 py-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-black text-[#B46F4A]">異常紀錄</p>
-                    <div className={`mt-2 inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-black ${abnormalStatusTone(abnormalResolvedStatus)}`}>
-                      {abnormalLabel(abnormalResolvedStatus)}
-                    </div>
-                  </div>
-                  <a
-                    href="#lesson-journal"
-                    className="inline-flex h-9 items-center justify-center rounded-full border border-[#dbcabd] bg-white px-3 text-xs font-black text-[#5A3726] shadow-sm"
-                  >
-                    紀錄
-                  </a>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
+        </details>
 
         <section
           id="attendance-list"
@@ -1030,10 +961,13 @@ export default async function TeachingSessionPage({
         >
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <p className="text-xs font-black text-[#B46F4A]">點名</p>
+              <p className="text-xs font-black text-[#B46F4A]">點名管理</p>
               <h2 className="mt-1 text-2xl font-black text-[#1f1712]">
                 本堂學員出席狀態
               </h2>
+              <p className="mt-1 text-sm leading-6 text-[#8a7c72]">
+                快速完成出席狀態、出席補充、作業與備註。
+              </p>
             </div>
             <form className="grid gap-2 sm:grid-cols-[1fr_auto] lg:w-[440px]">
               <input type="hidden" name="name" value={teacherName} />
@@ -1093,32 +1027,6 @@ export default async function TeachingSessionPage({
                 </Link>
               );
             })}
-          </div>
-
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-            <form action={completeTeachingAttendanceAction}>
-              <input type="hidden" name="sessionId" value={session.id} />
-              <input type="hidden" name="teacherName" value={teacherName} />
-              <input type="hidden" name="redirectTo" value={currentUrl} />
-              <button
-                type="submit"
-                className="w-full rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700 hover:bg-emerald-100 sm:w-auto"
-              >
-                一鍵全到
-              </button>
-            </form>
-            <form action={saveTeachingJournalAction}>
-              <input type="hidden" name="sessionId" value={session.id} />
-              <input type="hidden" name="teacherName" value={teacherName} />
-              <input type="hidden" name="attendanceStatus" value="completed" />
-              <input type="hidden" name="redirectTo" value={currentUrl} />
-              <button
-                type="submit"
-                className="w-full rounded-2xl bg-[#5A3726] px-4 py-3 text-sm font-black text-white shadow-sm hover:brightness-105 sm:w-auto"
-              >
-                完成點名
-              </button>
-            </form>
           </div>
 
           {attendanceRows.length === 0 ? (
@@ -1288,24 +1196,36 @@ export default async function TeachingSessionPage({
           )}
         </section>
 
-        <section
-          id="lesson-journal"
-          className="mt-4 scroll-mt-24 rounded-[28px] border border-[#ead8ca] bg-white p-4 shadow-sm sm:p-5"
-        >
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-xs font-black text-[#B46F4A]">紀錄</p>
-              <h2 className="mt-1 text-2xl font-black text-[#1f1712]">
-                課堂日誌與 TTQS 紀錄
-              </h2>
-            </div>
-            {teachingJournalModal}
-          </div>
-        </section>
-
         <TeachingSectionTabs />
 
-
+        <details className="fixed bottom-4 right-4 z-40 xl:hidden">
+          <summary className="flex h-14 w-14 cursor-pointer list-none items-center justify-center rounded-full bg-[#E85F00] text-3xl font-black leading-none text-white shadow-xl shadow-orange-950/20 marker:hidden">
+            +
+          </summary>
+          <div className="absolute bottom-16 right-0 w-64 overflow-hidden rounded-[22px] border border-[#ead8ca] bg-white p-2 shadow-2xl shadow-orange-950/15">
+            <p className="px-3 py-2 text-xs font-black text-[#B46F4A]">快速操作</p>
+            <a href="#session-workspace" className="block rounded-2xl px-3 py-3 text-sm font-black text-[#1f1712] hover:bg-[#fff6ed]">回到課堂摘要</a>
+            <a href="#lesson-journal" className="block rounded-2xl px-3 py-3 text-sm font-black text-[#1f1712] hover:bg-[#fff6ed]">填寫課堂日誌</a>
+            <a href="#attendance-list" className="block rounded-2xl px-3 py-3 text-sm font-black text-[#1f1712] hover:bg-[#fff6ed]">回到點名區</a>
+            <form action={completeTeachingAttendanceAction}>
+              <input type="hidden" name="sessionId" value={session.id} />
+              <input type="hidden" name="teacherName" value={teacherName} />
+              <input type="hidden" name="redirectTo" value={currentUrl} />
+              <button type="submit" className="mt-1 w-full rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-left text-sm font-black text-emerald-700 hover:bg-emerald-100">
+                一鍵全到
+              </button>
+            </form>
+            <form action={saveTeachingJournalAction}>
+              <input type="hidden" name="sessionId" value={session.id} />
+              <input type="hidden" name="teacherName" value={teacherName} />
+              <input type="hidden" name="attendanceStatus" value="completed" />
+              <input type="hidden" name="redirectTo" value={currentUrl} />
+              <button type="submit" className="mt-1 w-full rounded-2xl border border-[#ead8ca] bg-[#fffaf5] px-3 py-3 text-left text-sm font-black text-[#5A3726] hover:bg-[#fff6ed]">
+                完成點名
+              </button>
+            </form>
+          </div>
+        </details>
       </div>
     </main>
   );

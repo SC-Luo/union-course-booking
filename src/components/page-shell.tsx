@@ -372,25 +372,19 @@ export function StudentShell({ children }: { children: ReactNode }) {
             </span>
             <span className="min-w-0">
               <span className="block text-base font-black leading-tight tracking-tight sm:text-lg">
-                台南市美髮及美容美體業產業工會
+                學員中心
               </span>
               <span className="mt-0.5 block text-sm font-bold leading-tight text-[#8B5035]">
-                課程預約系統
+                課程預約、查詢與取消
               </span>
             </span>
           </a>
-          <div className="grid w-full grid-cols-2 gap-2 text-sm sm:flex sm:w-auto sm:items-center sm:gap-3">
+          <div className="flex w-full sm:w-auto sm:items-center">
             <a
               href="/booking/search"
-              className="rounded-full border border-[#d8bda4] bg-white/85 px-4 py-3 text-center font-bold text-[#6f4325] shadow-sm transition hover:bg-[#fff4e8]"
+              className="w-full rounded-full border border-[#d8bda4] bg-white/85 px-5 py-3 text-center text-sm font-bold text-[#6f4325] shadow-sm transition hover:bg-[#fff4e8] sm:w-auto"
             >
-              查詢預約
-            </a>
-            <a
-              href="/admin/login"
-              className="rounded-full bg-[#5A3726] px-4 py-3 text-center font-bold text-white shadow-sm transition hover:bg-[#3a2a20]"
-            >
-              後台
+              我的預約
             </a>
           </div>
         </div>
@@ -409,26 +403,10 @@ export function AdminShell({
   const groups: NavGroup[] = [
     {
       key: "dashboard",
-      title: "工作台",
-      description: "秘書處與授課人員入口",
+      title: "秘書處工作台",
+      description: "行政總覽與待辦入口",
       href: "/admin",
       icon: "home",
-      items: [
-        {
-          href: "/admin",
-          label: "秘書處工作台",
-          key: "dashboard.admin",
-          description: "總控課程、報名、點名與待辦",
-          icon: "today",
-        },
-        {
-          href: "/teaching/login",
-          label: "授課工作台",
-          key: "dashboard.teaching",
-          description: "講師與助教登入授課頁",
-          icon: "training",
-        },
-      ],
     },
     {
       key: "course-settings",
@@ -524,7 +502,7 @@ export function AdminShell({
       icon: "roster",
       items: [
         {
-          href: "/admin/students?mode=students",
+          href: "/admin/students",
           label: "學員總表",
           key: "roster.students",
           description: "匯入與新增學員基本資料",
@@ -594,10 +572,10 @@ export function AdminShell({
             </span>
             <span className="min-w-0">
               <span className="block text-2xl font-black tracking-tight text-zinc-950">
-                工會課程後台
+                秘書處後台
               </span>
               <span className="mt-1 block text-sm leading-5 text-zinc-500">
-                課程、名冊與學習紀錄整合
+                課程建制、名冊與統計管理
               </span>
             </span>
           </a>
@@ -612,23 +590,45 @@ export function AdminShell({
             ))}
 
             <section className="border-t border-[#E7892B]/20 pt-5">
-              <a
-                href="/"
-                className="flex items-center gap-3 rounded-[22px] border border-[#B46F4A]/35 bg-gradient-to-br from-[#5A3726] via-[#8B5035] to-[#B46F4A] px-3 py-4 text-white shadow-sm transition-all duration-150 hover:brightness-105 hover:shadow-md"
-              >
-                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/95 text-[#8B5035]">
-                  <LineIcon name="external" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-lg font-black leading-6">
-                    前往學員前台
+              <p className="mb-3 px-2 text-xs font-black tracking-[0.18em] text-[#B46F4A]">
+                角色切換
+              </p>
+              <div className="grid gap-2">
+                <a
+                  href="/"
+                  className="flex items-center gap-3 rounded-[22px] border border-[#B46F4A]/35 bg-gradient-to-br from-[#5A3726] via-[#8B5035] to-[#B46F4A] px-3 py-4 text-white shadow-sm transition-all duration-150 hover:brightness-105 hover:shadow-md"
+                >
+                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/95 text-[#8B5035]">
+                    <LineIcon name="external" />
                   </span>
-                  <span className="mt-1 block text-sm leading-5 text-[#fff8f1]">
-                    清楚切換到學員預約與查詢端
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-lg font-black leading-6">
+                      學員中心
+                    </span>
+                    <span className="mt-1 block text-sm leading-5 text-[#fff8f1]">
+                      預約、查詢與取消
+                    </span>
                   </span>
-                </span>
-                <span className="text-xl font-black">→</span>
-              </a>
+                  <span className="text-xl font-black">→</span>
+                </a>
+                <a
+                  href="/teaching/login"
+                  className="flex items-center gap-3 rounded-[22px] border border-[#E7892B]/25 bg-white/85 px-3 py-4 text-[#5A3726] shadow-sm transition-all duration-150 hover:bg-[#fff4e8] hover:shadow-md"
+                >
+                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#fff3e6] text-[#8B5035]">
+                    <LineIcon name="training" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-lg font-black leading-6">
+                      授課工作台
+                    </span>
+                    <span className="mt-1 block text-sm leading-5 text-[#8a6a55]">
+                      講師與助教點名、紀錄
+                    </span>
+                  </span>
+                  <span className="text-xl font-black">→</span>
+                </a>
+              </div>
             </section>
           </nav>
         </aside>
@@ -642,7 +642,7 @@ export function AdminShell({
               <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-[#E85F00] via-[#E7892B] to-[#B46F4A] text-white">
                 <LineIcon name="course" className="h-4.5 w-4.5" />
               </span>
-              <span>工會課程後台</span>
+              <span>秘書處後台</span>
             </a>
           </header>
 

@@ -163,7 +163,6 @@ export function MobileCourseCalendar({ courses, categories }: MobileCourseCalend
   const [currentMonth, setCurrentMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const [selectedDate, setSelectedDate] = useState(todayKey);
   const [modalSession, setModalSession] = useState<CalendarSessionItem | null>(null);
-  const visibleCategories = useMemo(() => Array.from(new Map(sessions.map((session) => [session.categoryId, session])).values()), [sessions]);
   const calendarDays = useMemo(() => buildCalendarDays(currentMonth, sessions), [currentMonth, sessions]);
   const selectedSessions = sessions.filter((session) => session.date === selectedDate);
 
@@ -171,9 +170,7 @@ export function MobileCourseCalendar({ courses, categories }: MobileCourseCalend
     <section className="space-y-4">
       <div className="rounded-[1.5rem] border border-[#ead8c6] bg-white p-4 shadow-sm">
         <div className="mb-4">
-          <p className="text-sm font-black text-[#34231a]">日曆看課</p>
-          <p className="mt-1 text-xs leading-5 text-[#8a6a55]">點選日期看課程，再點課堂卡片打開預約視窗。</p>
-          {visibleCategories.length > 0 ? <div className="mt-3 flex flex-wrap gap-3">{visibleCategories.map((session) => <div key={session.categoryId} className="flex items-center gap-2 text-sm text-[#6f4b35]"><span className="h-3 w-3 rounded-full" style={{ backgroundColor: session.color }} /><span>{session.categoryName}</span></div>)}</div> : null}
+          <p className="text-sm font-black text-[#34231a]">近期課程</p>
         </div>
 
         <div className="mb-4 grid grid-cols-3 gap-2">
@@ -201,7 +198,7 @@ export function MobileCourseCalendar({ courses, categories }: MobileCourseCalend
 
       <section className="rounded-[1.5rem] border border-[#ead8c6] bg-white p-4 shadow-sm">
         <h2 className="text-base font-black text-[#34231a]">{getDisplayDate(selectedDate)} 的課程</h2>
-        {selectedSessions.length === 0 ? <div className="mt-3 rounded-2xl bg-[#fff7ef] p-4 text-sm leading-6 text-[#8a6a55]"><p>這一天目前沒有課程。</p><p className="mt-1">你可以點選月曆中有顏色圓點的日期查看其他課程。</p></div> : <div className="mt-4 space-y-3">{selectedSessions.map((session) => <button key={session.sessionId} type="button" onClick={() => setModalSession(session)} className="block w-full rounded-2xl border border-[#ead8c6] p-4 text-left transition hover:border-[#d8bda4] hover:bg-[#fffaf5]"><div className="flex items-start gap-3"><span className="mt-1 h-4 w-4 shrink-0 rounded-full" style={{ backgroundColor: session.color }} /><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-2"><p className="text-sm font-semibold text-[#8a6a55]">{session.categoryName}</p><span className={`shrink-0 rounded-full border px-2 py-0.5 text-xs font-black ${statusClass(session.tone)}`}>{session.label}</span></div><h3 className="mt-1 text-base font-black text-[#34231a]">{session.courseTitle}</h3><p className="mt-2 text-sm text-[#6f4b35]">時間：{session.startTime}{session.endTime ? ` - ${session.endTime}` : ""}</p><p className="mt-1 text-sm text-[#6f4b35]">地點：{session.location || "未提供"}</p><p className="mt-1 text-sm text-[#6f4b35]">剩餘名額：{session.remainingSeats}</p></div></div></button>)}</div>}
+        {selectedSessions.length === 0 ? <div className="mt-3 rounded-2xl bg-[#fff7ef] p-4 text-sm leading-6 text-[#8a6a55]">這一天目前沒有課程。</div> : <div className="mt-4 space-y-3">{selectedSessions.map((session) => <button key={session.sessionId} type="button" onClick={() => setModalSession(session)} className="block w-full rounded-2xl border border-[#ead8c6] p-4 text-left transition hover:border-[#d8bda4] hover:bg-[#fffaf5]"><div className="flex items-start gap-3"><span className="mt-1 h-4 w-4 shrink-0 rounded-full" style={{ backgroundColor: session.color }} /><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-2"><p className="text-sm font-semibold text-[#8a6a55]">{session.categoryName}</p><span className={`shrink-0 rounded-full border px-2 py-0.5 text-xs font-black ${statusClass(session.tone)}`}>{session.label}</span></div><h3 className="mt-1 text-base font-black text-[#34231a]">{session.courseTitle}</h3><p className="mt-2 text-sm text-[#6f4b35]">時間：{session.startTime}{session.endTime ? ` - ${session.endTime}` : ""}</p><p className="mt-1 text-sm text-[#6f4b35]">地點：{session.location || "未提供"}</p><p className="mt-1 text-sm text-[#6f4b35]">剩餘名額：{session.remainingSeats}</p></div></div></button>)}</div>}
       </section>
 
       <SessionModal item={modalSession} onClose={() => setModalSession(null)} />

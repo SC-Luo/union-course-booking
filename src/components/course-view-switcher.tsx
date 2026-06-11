@@ -17,7 +17,6 @@ export function CourseViewSwitcher({ courses, categories }: CourseViewSwitcherPr
     [courses, selectedCategory],
   );
 
-  const selectedCategoryName = categories.find((item) => item.id === selectedCategory)?.name;
 
   return (
     <section className="space-y-5">
@@ -25,11 +24,6 @@ export function CourseViewSwitcher({ courses, categories }: CourseViewSwitcherPr
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
             <p className="text-sm font-black text-[#3a2a20]">課程分類</p>
-            {selectedCategoryName ? (
-              <p className="mt-1 text-xs text-[#8a6a55]">目前顯示：{selectedCategoryName}</p>
-            ) : (
-              <p className="mt-1 text-xs text-[#8a6a55]">選擇分類後，日曆只會顯示該分類課程。</p>
-            )}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -65,11 +59,7 @@ export function CourseViewSwitcher({ courses, categories }: CourseViewSwitcherPr
       <section className="rounded-3xl border border-[#ead8c6] bg-white/80 p-4 shadow-sm sm:p-5">
         <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="text-sm font-black text-[#9b4f1f]">日曆看課</p>
-            <h2 className="mt-1 text-2xl font-black text-[#34231a]">依日期選擇上課時段</h2>
-            <p className="mt-2 text-sm leading-6 text-[#8a6a55]">
-              前台改以日曆為主要入口。預約制課程可從課堂日期進入預約；固定名冊課程只作為課表資訊顯示。
-            </p>
+            <h2 className="text-2xl font-black text-[#34231a]">近期課程</h2>
           </div>
           <p className="rounded-full border border-[#ead8c6] bg-[#fffaf5] px-4 py-2 text-xs font-bold text-[#6f4325]">
             共 {filteredCourses.length} 門課程

@@ -19,6 +19,7 @@ import type {
   Student,
   StudentCourseRecord,
 } from "@/lib/types";
+import { StudentDirectoryPage } from "./student-directory-page";
 
 export const dynamic = "force-dynamic";
 
@@ -452,6 +453,20 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
       return rosterStatus === status;
     })
     .sort(compareStudentsByMemberNo);
+
+  if (currentMode === "students") {
+    return (
+      <StudentDirectoryPage
+        students={studentListRows}
+        q={q}
+        status={status}
+        saved={saved}
+        error={error}
+        imported={imported}
+      />
+    );
+  }
+
   const records = studentCourseRecords.filter((record) =>
     recordMatches(record, selectedSeriesId, selectedYear),
   );
@@ -2221,6 +2236,3 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
     </AdminShell>
   );
 }
-
-
-

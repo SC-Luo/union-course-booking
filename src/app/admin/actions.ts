@@ -893,12 +893,25 @@ export async function saveCourseOfferingAction(formData: FormData) {
     existing?.capacity ?? series?.defaultCapacity,
   );
   const color = normalizeHexColor(formData.get("color"));
-  const isActive = formData.get("isActive") !== "false";
-  const bookingStatus = String(
+  const requestedLifecycle = String(formData.get("courseLifecycle") ?? "").trim();
+  const fallbackStatus = String(
     formData.get("bookingStatus") ??
       existing?.bookingStatus ??
-      (isActive ? "open" : "closed"),
+      existing?.status ??
+      "open",
   ).trim();
+  const requestedStatus = requestedLifecycle || fallbackStatus;
+  const bookingStatus =
+    requestedStatus === "archived"
+      ? "archived"
+      : requestedStatus === "closed"
+        ? "closed"
+        : requestedStatus === "draft"
+          ? "draft"
+          : "open";
+  const isActive = requestedLifecycle
+    ? bookingStatus !== "archived"
+    : formData.get("isActive") !== "false" && bookingStatus !== "archived";
   const courseMode =
     normalizeCourseMode(
       formData.get("courseMode"),
@@ -909,9 +922,16 @@ export async function saveCourseOfferingAction(formData: FormData) {
       ? "booking_flexible"
       : "fixed_roster");
   const rosterType = inferRosterTypeFromCourseMode(courseMode);
+  const normalizedOfferingStatus =
+    bookingStatus === "archived"
+      ? "archived"
+      : bookingStatus === "closed"
+        ? "closed"
+        : bookingStatus === "draft"
+          ? "draft"
+          : "open";
   const bookingOpen =
-    courseMode === "booking_flexible" &&
-    (bookingStatus === "open" || bookingStatus === "active");
+    normalizedOfferingStatus === "open" && courseMode === "booking_flexible";
 
   const offering: CourseOffering = {
     ...(existing ?? {}),
@@ -986,12 +1006,7 @@ export async function saveCourseOfferingAction(formData: FormData) {
     ),
     bookingStatus,
     bookingOpen,
-    status:
-      bookingStatus === "closed"
-        ? "closed"
-        : bookingStatus === "draft"
-          ? "draft"
-          : "open",
+    status: normalizedOfferingStatus,
     color: color ?? existing?.color ?? series?.color,
     startDate:
       String(formData.get("startDate") ?? existing?.startDate ?? "").trim() ||
@@ -1063,6 +1078,59 @@ export async function saveCourseOfferingAction(formData: FormData) {
   revalidatePath("/admin/course-categories");
   revalidatePath(`/admin/courses/${legacyCourseId}`);
   redirect("/admin/course-offerings?saved=1");
+}
+
+export async function archiveCourseOfferingAction(formData: FormData) {
+  const id = String(formData.get("id") ?? "").trim();
+  const legacyCourseId = String(formData.get("legacyCourseId") ?? "").trim();
+  const nextStatus = String(formData.get("status") ?? "archived").trim() === "closed" ? "closed" : "archived";
+
+  if (!id) {
+    redirect("/admin/course-offerings?error=invalid");
+  }
+
+  const data = await getBookingData();
+  const existingOffering = data.courseOfferings.find((offering) => offering.id === id);
+  const existingCourse = data.courses.find(
+    (course) => course.id === legacyCourseId || course.offeringId === id,
+  );
+
+  if (!existingOffering) {
+    redirect("/admin/course-offerings?error=invalid");
+  }
+
+  const now = new Date().toISOString();
+  const archived = nextStatus === "archived";
+
+  await upsertCourseOffering({
+    ...existingOffering,
+    bookingStatus: nextStatus,
+    bookingOpen: false,
+    status: nextStatus,
+    isActive: true,
+    updatedAt: now,
+  });
+
+  if (existingCourse) {
+    await upsertCourse({
+      ...existingCourse,
+      bookingOpen: false,
+      status: nextStatus,
+      isActive: archived ? false : true,
+      updatedAt: now,
+    });
+  }
+
+  revalidatePath("/");
+  revalidatePath("/admin");
+  revalidatePath("/admin/categories");
+  revalidatePath("/admin/courses");
+  revalidatePath("/admin/course-sessions");
+  revalidatePath("/admin/course-offerings");
+  revalidatePath("/admin/course-masters");
+  revalidatePath("/admin/course-categories");
+  if (existingCourse?.id) revalidatePath(`/admin/courses/${existingCourse.id}`);
+  redirect(archived ? "/admin/course-offerings?saved=1" : "/admin/course-offerings?saved=1&showArchived=1");
 }
 
 export async function disableCourseOfferingAction(formData: FormData) {
@@ -2092,16 +2160,30 @@ export async function bulkImportStudentEligibilitiesAction(formData: FormData) {
 }
 
 export async function saveStudentIdentityAction(formData: FormData) {
+  const redirectTo = normalizeAdminRedirect(
+    formData.get("redirectTo"),
+    "/admin/students",
+  );
   const rawId = String(formData.get("id") ?? "").trim();
   const name = String(formData.get("name") ?? "").trim();
-  const idNumberLast3 = normalizeIdLast3(formData.get("idNumberLast3"));
+  const nationalId = String(formData.get("nationalId") ?? "").trim();
+  const inferredLast3 = nationalId ? nationalId.replace(/\D/g, "").slice(-3) : "";
+  const idNumberLast3 =
+    normalizeIdLast3(formData.get("idNumberLast3")) || inferredLast3;
+  const rosterStatus = String(formData.get("rosterStatus") ?? "active").trim();
   const phone = String(formData.get("phone") ?? "").trim();
   const birthday = String(formData.get("birthday") ?? "").trim();
   const memberNo = String(formData.get("memberNo") ?? "").trim();
+  const businessCategories = String(
+    formData.get("businessCategoriesText") ?? "",
+  )
+    .split(/[、,，;\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
   const note = String(formData.get("note") ?? "").trim();
 
   if (!name || idNumberLast3.length !== 3) {
-    redirect("/admin/students?mode=students&error=invalid");
+    redirect(appendAdminQuery(redirectTo, "error=invalid"));
   }
 
   const data = await getBookingData();
@@ -2117,20 +2199,138 @@ export async function saveStudentIdentityAction(formData: FormData) {
     ...(existing ?? {}),
     id: existing?.id ?? `student-${crypto.randomUUID()}`,
     name,
+    englishName:
+      String(formData.get("englishName") ?? "").trim() || existing?.englishName,
+    gender: String(formData.get("gender") ?? "").trim() || existing?.gender,
     idNumberLast3,
+    nationalId: nationalId || existing?.nationalId,
     phone,
+    landline:
+      String(formData.get("landline") ?? "").trim() || existing?.landline,
+    email: String(formData.get("email") ?? "").trim() || existing?.email,
+    lineId: String(formData.get("lineId") ?? "").trim() || existing?.lineId,
     birthday: birthday || null,
+    birthPlace:
+      String(formData.get("birthPlace") ?? "").trim() || existing?.birthPlace,
+    address:
+      String(formData.get("mailingAddress") ?? "").trim() || existing?.address,
+    mailingAddress:
+      String(formData.get("mailingAddress") ?? "").trim() ||
+      existing?.mailingAddress,
+    householdAddress:
+      String(formData.get("householdAddress") ?? "").trim() ||
+      existing?.householdAddress,
+    emergencyContactName:
+      String(formData.get("emergencyContactName") ?? "").trim() ||
+      existing?.emergencyContactName,
+    emergencyContactPhone:
+      String(formData.get("emergencyContactPhone") ?? "").trim() ||
+      existing?.emergencyContactPhone,
     memberNo: memberNo || existing?.memberNo,
+    educationLevel:
+      String(formData.get("educationLevel") ?? "").trim() ||
+      existing?.educationLevel,
+    graduationSchool:
+      String(formData.get("graduationSchool") ?? "").trim() ||
+      existing?.graduationSchool,
+    major: String(formData.get("major") ?? "").trim() || existing?.major,
+    maritalStatus:
+      String(formData.get("maritalStatus") ?? "").trim() ||
+      existing?.maritalStatus,
+    childrenCount:
+      normalizeNumber(formData.get("childrenCount")) ?? existing?.childrenCount,
+    childrenAges:
+      String(formData.get("childrenAges") ?? "").trim() ||
+      existing?.childrenAges,
+    employmentStatus:
+      String(formData.get("employmentStatus") ?? "").trim() ||
+      existing?.employmentStatus,
+    companyName:
+      String(formData.get("companyName") ?? "").trim() ||
+      existing?.companyName,
+    jobTitle:
+      String(formData.get("jobTitle") ?? "").trim() || existing?.jobTitle,
+    workExperience:
+      String(formData.get("workExperience") ?? "").trim() ||
+      existing?.workExperience,
+    industryCategory:
+      String(formData.get("industryCategory") ?? "").trim() ||
+      existing?.industryCategory,
+    beautyRelated:
+      String(formData.get("beautyRelated") ?? "").trim() ||
+      existing?.beautyRelated,
+    startupStatus:
+      String(formData.get("startupStatus") ?? "").trim() ||
+      existing?.startupStatus,
+    startupExperience:
+      String(formData.get("startupExperience") ?? "").trim() ||
+      existing?.startupExperience,
+    startupType:
+      String(formData.get("startupType") ?? "").trim() ||
+      existing?.startupType,
+    brandName:
+      String(formData.get("brandName") ?? "").trim() || existing?.brandName,
+    hasBusinessRegistration:
+      String(formData.get("hasBusinessRegistration") ?? "").trim() ||
+      existing?.hasBusinessRegistration,
+    businessRegistrationStatus:
+      String(formData.get("businessRegistrationStatus") ?? "").trim() ||
+      existing?.businessRegistrationStatus,
+    taxId: String(formData.get("taxId") ?? "").trim() || existing?.taxId,
+    businessCategories:
+      businessCategories.length > 0
+        ? businessCategories
+        : existing?.businessCategories,
+    businessPlaceType:
+      String(formData.get("businessPlaceType") ?? "").trim() ||
+      existing?.businessPlaceType,
+    businessAddress:
+      String(formData.get("businessAddress") ?? "").trim() ||
+      existing?.businessAddress,
+    operationMode:
+      String(formData.get("operationMode") ?? "").trim() ||
+      existing?.operationMode,
+    customerType:
+      String(formData.get("customerType") ?? "").trim() ||
+      existing?.customerType,
+    employeeStatus:
+      String(formData.get("employeeStatus") ?? "").trim() ||
+      existing?.employeeStatus,
+    serviceDescription:
+      String(formData.get("serviceDescription") ?? "").trim() ||
+      existing?.serviceDescription,
+    employeeCountRange:
+      String(formData.get("employeeCountRange") ?? "").trim() ||
+      existing?.employeeCountRange,
+    fullTimeEmployees:
+      normalizeNumber(formData.get("fullTimeEmployees")) ??
+      existing?.fullTimeEmployees,
+    partTimeEmployees:
+      normalizeNumber(formData.get("partTimeEmployees")) ??
+      existing?.partTimeEmployees,
+    capitalRange:
+      String(formData.get("capitalRange") ?? "").trim() ||
+      existing?.capitalRange,
+    monthlyRevenueRange:
+      String(formData.get("monthlyRevenueRange") ?? "").trim() ||
+      existing?.monthlyRevenueRange,
+    annualRevenueRange:
+      String(formData.get("annualRevenueRange") ?? "").trim() ||
+      existing?.annualRevenueRange,
     note,
-    source: existing?.source ?? "學員總表手動建立",
-    isActive: formData.get("isActive") !== "false",
-    needsReview: false,
+    source:
+      String(formData.get("source") ?? "").trim() ||
+      existing?.source ||
+      "學員總表手動建立",
+    isActive: rosterStatus !== "inactive",
+    needsReview: rosterStatus === "review",
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   });
 
   revalidatePath("/admin/students");
-  redirect("/admin/students?mode=students&saved=1");
+  revalidatePath("/admin/student-imports");
+  redirect(appendAdminQuery(redirectTo, "saved=1"));
 }
 
 export async function updateStudentIdentityStatusAction(formData: FormData) {
@@ -2222,20 +2422,28 @@ export async function deleteSelectedStudentIdentitiesAction(
 }
 
 export async function bulkImportStudentIdentitiesAction(formData: FormData) {
+  const importMode = String(formData.get("importMode") ?? "studentsOnly").trim();
+  const redirectTo = normalizeAdminRedirect(
+    formData.get("redirectTo"),
+    "/admin/student-imports",
+  );
   const rosterText = normalizeRosterText(formData.get("rosterText"));
-  if (!rosterText) redirect("/admin/students?mode=students&error=invalid");
+  if (!rosterText) {
+    redirect(appendAdminQuery(redirectTo, "error=invalid"));
+  }
 
   const data = await getBookingData();
   const lines = rosterText
     .split(/\r?\n/g)
     .map((line) => line.trim())
     .filter(Boolean);
-  if (lines.length === 0)
-    redirect("/admin/students?mode=students&error=invalid");
+  if (lines.length === 0) {
+    redirect(appendAdminQuery(redirectTo, "error=invalid"));
+  }
 
   const firstCells = splitRosterLine(lines[0]);
   const hasHeader = firstCells.some((cell) =>
-    /姓名|學員|身分證|後三碼|末三碼|手機|電話|生日|會員|備註/i.test(cell),
+    /姓名|學員|name|末三碼|手機|電話|生日|會員|備註/i.test(cell),
   );
   const headers = hasHeader ? firstCells : [];
   const rows = hasHeader ? lines.slice(1) : lines;
@@ -2243,13 +2451,7 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
     ? getRosterColumnIndex(headers, ["姓名", "學員", "name"])
     : 0;
   const idIndex = hasHeader
-    ? getRosterColumnIndex(headers, [
-        "身分證後三碼",
-        "後三碼",
-        "末三碼",
-        "idNumberLast3",
-        "idLast3",
-      ])
+    ? getRosterColumnIndex(headers, ["末三碼", "證件", "idNumberLast3", "idLast3"])
     : 1;
   const phoneIndex = hasHeader
     ? getRosterColumnIndex(headers, ["手機", "電話", "phone"])
@@ -2264,7 +2466,30 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
     ? getRosterColumnIndex(headers, ["備註", "note"])
     : 5;
 
+  const seriesId = String(formData.get("seriesId") ?? "").trim();
+  const yearValue = String(formData.get("year") ?? "").trim();
+  const targetOfferingId = String(formData.get("targetOfferingId") ?? "").trim();
+  const importNote = String(formData.get("note") ?? "").trim();
+  const eligibilityStatus = normalizeEligibilityStatus(
+    formData.get("eligibilityStatus"),
+  );
+  const needsEligibility =
+    importMode === "withEligibility" || importMode === "withEnrollment";
+  const needsEnrollment = importMode === "withEnrollment";
+  const { series, targetOffering, year } = needsEligibility
+    ? await resolveEligibilityContext(seriesId, yearValue, targetOfferingId)
+    : { series: undefined, targetOffering: undefined, year: undefined };
+
+  if (needsEligibility && (!series || !year)) {
+    redirect(appendAdminQuery(redirectTo, "error=invalid"));
+  }
+  if (needsEnrollment && (!series || !year || !targetOffering)) {
+    redirect(appendAdminQuery(redirectTo, "error=invalid"));
+  }
+
   let importedCount = 0;
+  let linkedCount = 0;
+  let enrolledCount = 0;
   const now = new Date().toISOString();
 
   for (const row of rows) {
@@ -2277,27 +2502,105 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
       (student) =>
         student.name === name && student.idNumberLast3 === idNumberLast3,
     );
+    const studentId = existing?.id ?? `student-${crypto.randomUUID()}`;
+
     await upsertStudent({
       ...(existing ?? {}),
-      id: existing?.id ?? `student-${crypto.randomUUID()}`,
+      id: studentId,
       name,
       idNumberLast3,
       phone: getRosterCell(cells, phoneIndex) || existing?.phone || "",
       birthday:
         getRosterCell(cells, birthdayIndex) || existing?.birthday || null,
       memberNo: getRosterCell(cells, memberIndex) || existing?.memberNo,
-      note: getRosterCell(cells, noteIndex) || existing?.note,
+      note: getRosterCell(cells, noteIndex) || importNote || existing?.note,
       source: existing?.source ?? "Excel / CSV 學員總表匯入",
       isActive: true,
       needsReview: false,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     });
+
+    if (needsEligibility && series && year) {
+      const recordId = `elig-${studentId}-${series.id}-${year}`;
+      const existingRecord = data.studentCourseRecords?.find(
+        (record) =>
+          record.id === recordId ||
+          (record.studentId === studentId &&
+            (record.seriesId === series.id ||
+              record.courseMasterId === series.id) &&
+            String(record.year ?? record.sourceRocYear ?? "") === String(year)),
+      );
+
+      await upsertStudentCourseRecord({
+        ...(existingRecord ?? {}),
+        id: existingRecord?.id ?? recordId,
+        studentId,
+        seriesId: series.id,
+        courseMasterId: series.id,
+        offeringId: targetOffering?.id,
+        sourceColumn: "????",
+        rawValue: eligibilityStatus,
+        normalizedValue: eligibilityStatus,
+        recordType: "roster",
+        sourceRocYear: year,
+        year,
+        term: targetOffering?.term,
+        termLabel: targetOffering?.termLabel,
+        classDisplayName:
+          targetOffering?.displayTitle ??
+          targetOffering?.displayName ??
+          targetOffering?.title,
+        note: getRosterCell(cells, noteIndex) || importNote,
+        importedAt: existingRecord?.importedAt ?? now,
+        createdAt: existingRecord?.createdAt ?? now,
+        updatedAt: now,
+      });
+      linkedCount += 1;
+    }
+
+    if (needsEnrollment && series && targetOffering && year) {
+      const enrollmentId = `enroll-${studentId}-${targetOffering.id}`;
+      const existingEnrollment = data.enrollments?.find(
+        (item) => item.id === enrollmentId,
+      );
+      await upsertEnrollment({
+        ...(existingEnrollment ?? {}),
+        id: enrollmentId,
+        studentId,
+        offeringId: targetOffering.id,
+        courseOfferingId: targetOffering.id,
+        seriesId: series.id,
+        courseMasterId: series.id,
+        enrollmentType: "roster",
+        status: eligibilityStatus === "???" ? "completed" : "active",
+        joinedAt: existingEnrollment?.joinedAt ?? now,
+        year,
+        term: targetOffering.term,
+        termLabel: targetOffering.termLabel,
+        classDisplayName:
+          targetOffering.displayTitle ??
+          targetOffering.displayName ??
+          targetOffering.title,
+        note: getRosterCell(cells, noteIndex) || importNote,
+        createdAt: existingEnrollment?.createdAt ?? now,
+        updatedAt: now,
+      });
+      enrolledCount += 1;
+    }
+
     importedCount += 1;
   }
 
   revalidatePath("/admin/students");
-  redirect(`/admin/students?mode=students&saved=1&imported=${importedCount}`);
+  revalidatePath("/admin/student-imports");
+  revalidatePath("/");
+  redirect(
+    appendAdminQuery(
+      redirectTo,
+      `saved=1&imported=${importedCount}&linked=${linkedCount}&enrolled=${enrolledCount}`,
+    ),
+  );
 }
 
 export async function assignStudentsToCourseEligibilityAction(

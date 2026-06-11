@@ -9,9 +9,9 @@ tags:
   - project-memory
   - codex
 created: 2026-05-27
-updated: 2026-06-05
+updated: 2026-06-08
 status: active
-summary: 本 repo 的 AI 接手短摘要，記錄目前健康狀態、下一步與風險。
+summary: 本 repo 的 AI 接手短摘要，記錄目前健康狀態、最新 UI 整理進度、下一步與風險。
 related:
   - AI_START_HERE.md
   - GPT_CODEX_WORKFLOW.md
@@ -29,9 +29,18 @@ related:
 - 學生端已可瀏覽課程、預約、查詢與截止前取消。
 - 後台已可管理分類、課程主檔、年度課程、課堂日誌、名冊、預約名單、出席、取消與匯出。
 - 資料來源可使用 Firestore，並保留本機 JSON 作為開發與異常備援。
-- 2026-06-05 已補齊單堂課課堂狀態管理與前台學員狀態顯示，並再次確認可由下一位 AI 直接接手。
+- 2026-06-08 已完成一輪較大的 UI / UX 架構整理，開始把系統收斂成三角色入口：學員中心、授課工作台、秘書處後台。
+- 2026-06-08 已實際重跑 `npm.cmd run lint` 與 `npm.cmd run build`，目前通過。
 
 ## 最近處理
+
+- 2026-06-08 學員端入口整理已由使用者確認 OK：首頁改為「學員中心」，不再顯示授課工作台與秘書處後台入口，主視覺與近期課程區塊的多餘說明文字已清理。
+- 2026-06-08 年度課程頁 `/admin/course-offerings` 已改為 Modal 操作模式：移除大型新增班級區塊，新增年度班級改為右上角按鈕開 Modal，卡片編輯改收斂到「管理」Modal。
+- 2026-06-08 年度課程頁篩選改為兩階段：先依課程類別，再依課程狀態（全部 / 日常管理 / 開放報名 / 停止報名 / 草稿 / 已封存）。
+- 2026-06-08 年度課程管理流程新增「課程狀態控制台」概念，將草稿、開放報名、停止報名、已封存集中到同一個儲存流程處理。
+- 2026-06-08 課堂日誌總覽 `/admin/course-sessions` 已改為排除已封存年度課程：封存課程不應再出現在年度課程選擇器、課程卡片與排課流程。
+- 2026-06-08 共用 `SessionInfoModalCard` 已補齊 `triggerLabel`、`eyebrow`、`closeLabel`、`triggerClassName`、`panelClassName`，並修正 `panelClassName` 不應覆蓋白底、圓角、padding、shadow 等基礎樣式。
+- 2026-06-08 講師授課工作台 `/teaching` 與單堂頁 `/teaching/sessions/[sessionId]` 已開始收斂為講師 / 助教入口，單堂頁改為摘要 / 點名 / 紀錄三區與 Modal 操作，但仍待人工驗收。
 
 - 2026-06-05 已完成單堂課課堂狀態管理文件化與程式核對：後台單堂課可切換 `正常上課 / 停課 / 補課 / 調課 / 已取消`，前台月曆與課程詳情頁改用學員語言顯示 `可預約 / 報名截止 / 已額滿 / 已取消 / 本堂停課 / 補課 / 已調課 / 未開放或暫不開放`。
 - 2026-06-05 後台課堂狀態按鈕已採點選即儲存；「編輯課堂資料」視窗只保留日期、時間、單元、地點與講師欄位，不再重複放課堂狀態。
@@ -62,16 +71,19 @@ related:
 
 ## 下一步
 
-1. 規劃「批次課堂管理」：可依年度課程篩選課堂、勾選多堂後批次停課 / 已取消 / 改日期 / 重排課。
-2. 核對 9 筆 `needsReview` 名冊資料。
-3. 完成 Vercel GitHub integration 與部署驗收。
-4. 補正式驗收清單，涵蓋手機端學生預約、查詢、取消與後台名單操作。
-5. 視 Firestore 讀取用量決定是否加首頁快取、公開課程彙總資料或後台分頁查詢。
+1. 先驗收授課工作台 `/teaching` 與 `/teaching/sessions/[sessionId]`：確認桌機入口、手機版摘要 / 點名 / 紀錄分頁、課堂設定 Modal、課堂紀錄 Modal 與點名流程是否順。
+2. 驗收秘書處後台 `/admin`：確認首頁定位是否像行政中控台，並檢查左側導覽與角色切換是否還需要重新分組。
+3. 回頭驗收年度課程頁 `/admin/course-offerings`：確認課程類別 + 狀態兩階段篩選、管理 Modal、狀態切換、封存與恢復流程是否符合工作流程。
+4. 驗收課堂日誌總覽 `/admin/course-sessions`：確認已封存課程不再進入排課流程，日常管理課程仍可正常新增與排課。
+5. 核對 9 筆 `needsReview` 名冊資料。
+6. 完成 Vercel GitHub integration 與部署驗收。
 
 ## 風險與注意
 
 - 工作區仍有大量未提交變更與未追蹤檔案；接手前務必先看 `git status --short`。
-- 目前 `data/booking-data.json` 有在地資料變更，另有一個未追蹤暫存檔 `src/app/admin/course-sessions/src__app__admin__course-sessions__page.tsx`；若要整理提交，先判斷是否屬於正式程式碼。
+- 目前 `data/booking-data.json` 有在地資料變更；暫時不要假設這是可直接提交的測試資料。
+- 目前仍有未追蹤暫存檔：`src/app/src__app__page.current.tsx.tsx`、`src/app/teaching/sessions/[sessionId]/src__app__teaching__sessions__[sessionId]__page.current.tsx`。提交前先判斷是否刪除或移出。
+- 本次交接提到的 `src__app__admin__course-offerings__page.v7_1.fixed.tsx` 不在 repo 內；目前應以實際的 `src/app/admin/course-offerings/page.tsx` 為準，不要再回頭找缺失的暫存覆蓋檔。
 - `firebase-admin-key.json`、`.env.local`、真實名冊與預約資料屬於敏感資料，不可提交或寫入 Markdown。
 - 根目錄的 fix 腳本是救急產物，不應成為長期開發流程；後續應以任務包、patch、lint/build 驗證取代。
 - `@typescript-eslint/no-explicit-any` 目前是暫時放寬，後續要逐步補上資料層型別。
@@ -95,3 +107,6 @@ npm.cmd run build
 - `specs/user-flow.md`
 - `specs/tech-context.md`
 - `CHANGELOG_AI.md`
+## 2026-06-11
+
+- 已新增 `specs/system-architecture.md`，可優先用來理解系統組成、前端 / 後端分工、資料流、Firestore 串接、JSON fallback 與批次同步方式。

@@ -8,9 +8,9 @@ tags:
   - tasks
   - project-memory
 created: 2026-05-27
-updated: 2026-06-05
+updated: 2026-06-08
 status: active
-summary: 目前任務、已完成事項、待確認事項與不處理範圍。
+summary: 目前任務、已完成事項、待確認事項與不處理範圍，包含 2026-06-08 UI / UX 架構整理後的接續驗收項目。
 related:
   - AI_START_HERE.md
   - HANDOFF.md
@@ -22,6 +22,10 @@ related:
 
 ## 下一步
 
+- [ ] 驗收授課工作台 `/teaching` 與 `/teaching/sessions/[sessionId]`：桌機入口、手機版摘要 / 點名 / 紀錄分頁、課堂設定 Modal、課堂紀錄 Modal、點名流程。
+- [ ] 驗收秘書處後台 `/admin`：首頁定位、角色切換、左側導覽分組是否需要再收斂。
+- [ ] 驗收年度課程頁 `/admin/course-offerings`：課程類別 + 課程狀態兩階段篩選、狀態切換、封存與恢復流程、管理 Modal。
+- [ ] 驗收課堂日誌頁 `/admin/course-sessions`：已封存課程是否完全退出選擇器、課程卡片與排課流程。
 - [ ] 規劃批次課堂管理：依年度課程篩選課堂、勾選多堂、批次停課 / 已取消 / 改日期 / 重新排課。
 - [ ] 將目前大型工作區變更分成可審查任務包：文件、資料、後台頁面、學生資格/名冊、清理腳本。
 - [ ] 核對 9 筆 `needsReview` 名冊資料。
@@ -33,6 +37,12 @@ related:
 
 ## 已完成
 
+- [x] 2026-06-08 學員端入口整理：移除授課工作台與秘書處後台入口，簡化首頁說明與近期課程區塊，且已由使用者確認 OK。
+- [x] 2026-06-08 年度課程頁初步完成 Modal 化與卡片收斂。
+- [x] 2026-06-08 年度課程頁改為課程類別 + 課程狀態兩階段篩選。
+- [x] 2026-06-08 課堂日誌總覽改為排除已封存年度課程。
+- [x] 2026-06-08 共用 `SessionInfoModalCard` 支援自訂 trigger / panel 樣式，並修正 `panelClassName` 只作為補充樣式。
+- [x] 2026-06-08 實際重跑 `npm.cmd run lint` 與 `npm.cmd run build` 通過。
 - [x] 2026-05-28 本輪 Codex 驗證單堂點名工作台實作，並確認 `npm.cmd run lint`、`npm.cmd run build` 通過。
 - [x] 學生端課程列表與課程詳情。
 - [x] 學生免登入預約流程。
@@ -57,12 +67,17 @@ related:
 
 ## 待確認
 
+- [ ] 年度課程頁狀態切換、封存與恢復流程是否完全符合工作流程。
+- [ ] 年度課程頁課程類別數量與狀態數量是否正確。
+- [ ] 授課工作台手機版摘要 / 點名 / 紀錄分頁是否順手，是否仍有重複入口。
+- [ ] 秘書處後台首頁是否需要進一步強化「行政中控台」定位。
 - [ ] 9 筆 `needsReview` 名冊資料的正確處理方式。
 - [ ] 正式上線前是否需要首頁快取或公開課程彙總資料。
 - [ ] 後台資料量增加後是否需要分頁查詢。
 - [ ] Vercel 自動部署完成後的正式驗收流程。
 - [ ] 根目錄的 fix 腳本是否保留、移到 `tools/`、或完成後刪除。
 - [ ] `src/app/admin/sessions/[sessionId]/reservations/` 內仍有拼錯或匯出用暫存檔殘留，需在拆包時確認是否刪除。
+- [ ] `src/app/src__app__page.current.tsx.tsx` 與 `src/app/teaching/sessions/[sessionId]/src__app__teaching__sessions__[sessionId]__page.current.tsx` 是否屬於可刪除的暫存輸出檔。
 - [ ] 批次課堂管理是否需要避開已有預約或出席紀錄的課堂，或改為只能做狀態型操作。
 
 ## 阻塞事項

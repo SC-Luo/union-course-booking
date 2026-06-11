@@ -270,7 +270,7 @@ function CalendarSessionCard({ item, teacherName, bookedCount }: { item: Teachin
 export default async function TeachingDashboardPage({ searchParams }: PageProps) {
   const { name = "", view = "all", month: monthParam, date } = await searchParams;
   const teacherName = name.trim();
-  const activeView = view === "mine" ? "mine" : "all";
+  const activeView = view === "all" ? "all" : "mine";
   const monthDate = getMonthFromParam(monthParam);
   const monthKey = getMonthParam(monthDate);
   const selectedDate = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : getTodayKey();
@@ -280,9 +280,9 @@ export default async function TeachingDashboardPage({ searchParams }: PageProps)
     return (
       <main className="min-h-screen bg-[#f7efe7] px-4 py-8 text-[#1f1712]">
         <section className="mx-auto max-w-xl rounded-[32px] border border-[#ead8ca] bg-white p-6 shadow-sm">
-          <p className="text-xs font-black uppercase tracking-[0.24em] text-[#B46F4A]">Teaching Desk</p>
-          <h1 className="mt-2 text-2xl font-black">授課工作台</h1>
-          <p className="mt-3 text-sm leading-6 text-[#7a6b60]">請先輸入授課人員姓名，系統會顯示對應課堂。</p>
+          <p className="text-xs font-black uppercase tracking-[0.24em] text-[#B46F4A]">授課工作台</p>
+          <h1 className="mt-2 text-2xl font-black">講師與助教入口</h1>
+          <p className="mt-3 text-sm leading-6 text-[#7a6b60]">請先輸入授課人員姓名，系統會顯示你負責的今日課堂與近期課堂。</p>
           <Link href="/teaching/login" className="mt-5 inline-flex rounded-2xl bg-[#5A3726] px-5 py-3 text-sm font-black text-white">
             前往登入
           </Link>
@@ -307,8 +307,8 @@ export default async function TeachingDashboardPage({ searchParams }: PageProps)
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <p className="text-xs font-black uppercase tracking-[0.24em] text-[#B46F4A]">授課工作台</p>
-              <h1 className="mt-2 text-2xl font-black tracking-tight sm:text-3xl">{teacherName} 的課堂日曆</h1>
-              <p className="mt-2 text-sm leading-6 text-[#7a6b60]">全部課程可查看日期與地點；只有你負責的課堂可以進入點名與課堂日誌。</p>
+              <h1 className="mt-2 text-2xl font-black tracking-tight sm:text-3xl">{teacherName} 的授課任務</h1>
+              <p className="mt-2 text-sm leading-6 text-[#7a6b60]">這裡只聚焦講師與助教的課堂任務：看課、進入單堂、點名與填寫課堂紀錄。</p>
             </div>
 
           </div>
@@ -339,15 +339,15 @@ export default async function TeachingDashboardPage({ searchParams }: PageProps)
         <section className="rounded-[32px] border border-[#ead8ca] bg-white p-4 shadow-sm sm:p-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <p className="text-sm font-black text-[#1f1712]">課程日曆</p>
-              <p className="mt-1 text-xs leading-5 text-[#8a7c72]">亮色圓點代表可進入的課堂，淡色圓點代表其他課程。切換「我的課程」可只看可進入的課堂。</p>
+              <p className="text-sm font-black text-[#1f1712]">課堂日曆</p>
+              <p className="mt-1 text-xs leading-5 text-[#8a7c72]">預設只看你負責的課堂；需要協助其他課堂時，再切換到全部課堂。</p>
             </div>
             <div className="grid grid-cols-2 gap-2 rounded-[20px] bg-[#fff7ef] p-1 text-sm font-black">
               <Link href={dashboardHref({ name: teacherName, view: "all", month: monthKey, date: selectedDate })} className={`rounded-2xl px-4 py-2 text-center ${activeView === "all" ? "bg-[#E85F00] text-white shadow-sm" : "text-[#5A3726] hover:bg-white"}`}>
-                全部課程
+                全部課堂
               </Link>
               <Link href={dashboardHref({ name: teacherName, view: "mine", month: monthKey, date: selectedDate })} className={`rounded-2xl px-4 py-2 text-center ${activeView === "mine" ? "bg-[#E85F00] text-white shadow-sm" : "text-[#5A3726] hover:bg-white"}`}>
-                我的課程
+                我的課堂
               </Link>
             </div>
           </div>
@@ -407,7 +407,7 @@ export default async function TeachingDashboardPage({ searchParams }: PageProps)
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-sm font-black text-[#1f1712]">{formatDateText(selectedDate)}</p>
-                  <p className="mt-1 text-xs text-[#8a7c72]">{activeView === "mine" ? "我的課程" : "全部課程"}</p>
+                  <p className="mt-1 text-xs text-[#8a7c72]">{activeView === "mine" ? "我的課堂" : "全部課堂"}</p>
                 </div>
                 <span className="rounded-full bg-[#fff7ed] px-3 py-1 text-xs font-black text-[#9b4f1f]">{selectedSessions.length} 堂</span>
               </div>
@@ -415,8 +415,8 @@ export default async function TeachingDashboardPage({ searchParams }: PageProps)
               <div className="mt-4 grid gap-3">
                 {selectedSessions.length === 0 ? (
                   <div className="rounded-2xl bg-[#fff7ef] p-4 text-sm leading-6 text-[#8a6a55]">
-                    <p>這一天沒有{activeView === "mine" ? "你的" : ""}課程。</p>
-                    <p className="mt-1">你可以點選月曆中有顏色圓點的日期查看其他課堂。</p>
+                    <p>這一天沒有{activeView === "mine" ? "你的" : ""}課堂。</p>
+                    <p className="mt-1">你可以點選月曆中有顏色圓點的日期查看課堂。</p>
                   </div>
                 ) : null}
                 {selectedSessions.map((item) => (
@@ -430,8 +430,8 @@ export default async function TeachingDashboardPage({ searchParams }: PageProps)
         <section className="mt-5 rounded-[28px] border border-[#ead8ca] bg-white p-5 shadow-sm">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-sm font-black text-[#1f1712]">今日我的課</p>
-              <p className="mt-1 text-xs text-[#8a7c72]">日曆是主要入口；這裡只保留今日課堂快速進入。</p>
+              <p className="text-sm font-black text-[#1f1712]">今日授課入口</p>
+              <p className="mt-1 text-xs text-[#8a7c72]">這裡只保留你今天需要處理的課堂。</p>
             </div>
           </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">

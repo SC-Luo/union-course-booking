@@ -164,20 +164,21 @@ export default async function AdminHomePage() {
   ].slice(0, 4);
 
   return (
-    <AdminShell currentSection="dashboard.today">
+    <AdminShell currentSection="dashboard">
       <section className="mb-8 rounded-[34px] border border-[#ead8ca] bg-gradient-to-br from-[#fffaf4] via-[#fffdf9] to-[#f5e6d9] p-7 shadow-[0_20px_70px_rgba(90,55,38,0.08)]">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-sm font-semibold text-[#B46F4A]">工作台</p>
-            <h1 className="mt-2 text-3xl font-black tracking-tight text-[#1f1712] sm:text-4xl">今日工作總覽</h1>
+            <p className="text-sm font-semibold text-[#B46F4A]">秘書處後台</p>
+            <h1 className="mt-2 text-3xl font-black tracking-tight text-[#1f1712] sm:text-4xl">行政工作總覽</h1>
             <p className="mt-3 max-w-4xl text-sm leading-7 text-[#66584f]">
-              首頁只保留每日總覽、今日點名與重要提醒；詳細的本週報名、鎖定、額滿與待處理資料，請從左側工作台進入獨立頁面。
+              這裡是秘書處的中控入口，集中處理課程建制、年度班級、名冊、報名、點名出勤與統計匯出；講師點名與學員預約則切換到各自入口。
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Link href="/admin/weekly-bookings" className="rounded-2xl border border-[#B46F4A]/25 bg-white/70 px-4 py-3 text-sm font-semibold text-[#5A3726] hover:bg-[#fff6ed]">本週報名</Link>
-            <Link href="/admin/booking-locks" className="rounded-2xl bg-gradient-to-br from-[#E85F00] via-[#E7892B] to-[#B46F4A] px-4 py-3 text-sm font-semibold text-white shadow-sm hover:brightness-95">即將鎖定</Link>
-            <Link href="/" className="rounded-2xl bg-[#5A3726] px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-[#8B5035]">前往學員前台 ↗</Link>
+            <Link href="/admin/course-offerings" className="rounded-2xl border border-[#B46F4A]/25 bg-white/70 px-4 py-3 text-sm font-semibold text-[#5A3726] hover:bg-[#fff6ed]">年度課程</Link>
+            <Link href="/admin/students?mode=students" className="rounded-2xl border border-[#B46F4A]/25 bg-white/70 px-4 py-3 text-sm font-semibold text-[#5A3726] hover:bg-[#fff6ed]">學員總表</Link>
+            <Link href="/teaching/login" className="rounded-2xl bg-gradient-to-br from-[#E85F00] via-[#E7892B] to-[#B46F4A] px-4 py-3 text-sm font-semibold text-white shadow-sm hover:brightness-95">授課工作台 ↗</Link>
+            <Link href="/" className="rounded-2xl bg-[#5A3726] px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-[#8B5035]">學員中心 ↗</Link>
           </div>
         </div>
       </section>
@@ -201,9 +202,9 @@ export default async function AdminHomePage() {
         <div className="rounded-[30px] border border-[#ead8ca] bg-[#fffdf9] p-6 shadow-[0_16px_45px_rgba(90,55,38,0.07)] sm:p-7">
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div>
-              <p className="text-sm font-semibold text-[#B46F4A]">今日上課</p>
-              <h2 className="mt-1 text-2xl font-black text-[#1f1712]">今日點名入口</h2>
-              <p className="mt-1 text-sm text-[#8a7c72]">講師、助教或行政人員可直接進入今天場次處理點名。</p>
+              <p className="text-sm font-semibold text-[#B46F4A]">今日課堂</p>
+              <h2 className="mt-1 text-2xl font-black text-[#1f1712]">今日行政追蹤</h2>
+              <p className="mt-1 text-sm text-[#8a7c72]">秘書處可查看今日課堂狀態；講師與助教請由授課工作台進入點名。</p>
             </div>
             <span className="rounded-full bg-[#f5ece4] px-3 py-1 text-sm font-medium text-[#66584f]">{formatDate(today)}</span>
           </div>
@@ -227,7 +228,7 @@ export default async function AdminHomePage() {
                   <div className="rounded-xl bg-[#fff9f3] p-3"><p className="text-xs text-[#8a7c72]">已到</p><p className="mt-1 text-lg font-semibold text-[#1f1712]">{attendedCount}</p></div>
                   <div className="rounded-xl bg-[#fff9f3] p-3"><p className="text-xs text-[#8a7c72]">未到</p><p className="mt-1 text-lg font-semibold text-[#1f1712]">{absentCount}</p></div>
                 </div>
-                <span className="inline-flex items-center justify-center rounded-xl bg-[#5A3726] px-4 py-3 text-sm font-semibold text-white hover:bg-[#8B5035]">進入點名</span>
+                <span className="inline-flex items-center justify-center rounded-xl bg-[#5A3726] px-4 py-3 text-sm font-semibold text-white hover:bg-[#8B5035]">查看名單</span>
               </Link>
             ))}
           </div>
@@ -255,14 +256,14 @@ export default async function AdminHomePage() {
         <h2 className="mt-1 text-2xl font-black text-[#1f1712]">常用功能</h2>
         <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {[
-            ["本週報名狀況", "/admin/weekly-bookings"],
-            ["即將鎖定預約", "/admin/booking-locks"],
-            ["已額滿班級", "/admin/full-classes"],
-            ["待處理事項", "/admin/todos"],
-            ["課程主檔設定", "/admin/courses?section=master"],
-            ["上課場次管理", "/admin/courses?section=session"],
-            ["學員名冊", "/admin/students?view=students"],
-            ["學員前台", "/"],
+            ["課程類別", "/admin/course-categories"],
+            ["課程目錄", "/admin/course-masters"],
+            ["年度課程", "/admin/course-offerings"],
+            ["課堂詳情", "/admin/course-sessions"],
+            ["報名總覽", "/admin/weekly-bookings"],
+            ["鎖定管理", "/admin/booking-locks"],
+            ["學員總表", "/admin/students?mode=students"],
+            ["統計匯出", "/admin/stats"],
           ].map(([label, href]) => (
             <Link key={href} href={href} className="rounded-2xl border border-[#eaded3] bg-white px-4 py-4 text-sm font-bold text-[#5A3726] hover:border-[#B46F4A]/35 hover:bg-[#fff9f3]">{label} →</Link>
           ))}

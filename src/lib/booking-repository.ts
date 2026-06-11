@@ -101,7 +101,10 @@ export async function getCourseCatalog(): Promise<Pick<BookingData, "categories"
 
   if (!db) {
     const data = readBookingData();
-    return { categories: data.categories, courses: data.courses };
+    return {
+      categories: data.categories,
+      courses: data.courses.filter((course) => course.status !== "archived" && course.isActive !== false),
+    };
   }
 
   try {
@@ -123,11 +126,17 @@ export async function getCourseCatalog(): Promise<Pick<BookingData, "categories"
     });
 
     const normalized = normalizeBookingData({ categories, courses, reservations: [], students: [] });
-    return { categories: normalized.categories, courses: normalized.courses };
+    return {
+      categories: normalized.categories,
+      courses: normalized.courses.filter((course) => course.status !== "archived" && course.isActive !== false),
+    };
   } catch (error) {
     console.warn("Firestore catalog read failed, falling back to local booking data.", error);
     const data = readBookingData();
-    return { categories: data.categories, courses: data.courses };
+    return {
+      categories: data.categories,
+      courses: data.courses.filter((course) => course.status !== "archived" && course.isActive !== false),
+    };
   }
 }
 
