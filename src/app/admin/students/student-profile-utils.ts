@@ -15,7 +15,7 @@ export function getStudentStatus(student: Student) {
   if (student.isActive === false) {
     return {
       key: "inactive",
-      label: "停用 / 歷史",
+      label: "已停用",
       className: "border-zinc-200 bg-zinc-50 text-zinc-600",
     };
   }

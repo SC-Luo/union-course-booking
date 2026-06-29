@@ -1439,7 +1439,7 @@ export default async function AdminReservationsPage({
 
           {attendanceRows.length === 0 ? (
             <div className="mt-5 rounded-[22px] border border-dashed border-[#dbcabd] bg-[#fffaf5] p-5 text-sm leading-6 text-[#8a7c72]">
-              目前沒有有效名單。目前沒有可帶入的年度課程名單。請先回到年度課程「名冊」頁，把學員加入這個班級。
+              目前沒有可帶入的年度課程資格名單。請先回到年度課程名冊頁，把學員加入這個班級。
             </div>
           ) : (
             <div className="mt-5 rounded-[22px] border border-[#ead8ca] bg-[#fffaf5] md:overflow-x-auto md:bg-white">

@@ -396,8 +396,6 @@ export function StudentShell({ children }: { children: ReactNode }) {
 
 export function AdminShell({
   children,
-  resumeHref = "/admin/students?view=history",
-  resumeLabel = "學員履歷",
   currentSection = "dashboard",
 }: AdminShellProps) {
   const groups: NavGroup[] = [
@@ -498,22 +496,15 @@ export function AdminShell({
     {
       key: "roster",
       title: "名冊資料",
-      description: "學員、講師與履歷",
+      description: "學員與講師",
       icon: "roster",
       items: [
         {
           href: "/admin/students",
-          label: "學員總表",
+          label: "學員名冊",
           key: "roster.students",
           description: "匯入與新增學員基本資料",
           icon: "student",
-        },
-        {
-          href: "/admin/students?mode=eligibility",
-          label: "課程名單",
-          key: "roster.eligibility",
-          description: "設定學員課程狀態",
-          icon: "roster",
         },
         {
           href: "/admin/students?mode=instructors",
@@ -521,13 +512,6 @@ export function AdminShell({
           key: "roster.instructors",
           description: "預留講師資料庫入口",
           icon: "teacher",
-        },
-        {
-          href: resumeHref,
-          label: resumeLabel,
-          key: "roster.history",
-          description: "學員完整學習歷程",
-          icon: "history",
         },
       ],
     },

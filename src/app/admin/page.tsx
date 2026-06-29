@@ -176,7 +176,7 @@ export default async function AdminHomePage() {
           </div>
           <div className="flex flex-wrap gap-2">
             <Link href="/admin/course-offerings" className="rounded-2xl border border-[#B46F4A]/25 bg-white/70 px-4 py-3 text-sm font-semibold text-[#5A3726] hover:bg-[#fff6ed]">年度課程</Link>
-            <Link href="/admin/students?mode=students" className="rounded-2xl border border-[#B46F4A]/25 bg-white/70 px-4 py-3 text-sm font-semibold text-[#5A3726] hover:bg-[#fff6ed]">學員總表</Link>
+            <Link href="/admin/students?mode=students" className="rounded-2xl border border-[#B46F4A]/25 bg-white/70 px-4 py-3 text-sm font-semibold text-[#5A3726] hover:bg-[#fff6ed]">學員名冊</Link>
             <Link href="/teaching/login" className="rounded-2xl bg-gradient-to-br from-[#E85F00] via-[#E7892B] to-[#B46F4A] px-4 py-3 text-sm font-semibold text-white shadow-sm hover:brightness-95">授課工作台 ↗</Link>
             <Link href="/" className="rounded-2xl bg-[#5A3726] px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-[#8B5035]">學員中心 ↗</Link>
           </div>
@@ -262,7 +262,7 @@ export default async function AdminHomePage() {
             ["課堂詳情", "/admin/course-sessions"],
             ["報名總覽", "/admin/weekly-bookings"],
             ["鎖定管理", "/admin/booking-locks"],
-            ["學員總表", "/admin/students?mode=students"],
+            ["學員名冊", "/admin/students?mode=students"],
             ["統計匯出", "/admin/stats"],
           ].map(([label, href]) => (
             <Link key={href} href={href} className="rounded-2xl border border-[#eaded3] bg-white px-4 py-4 text-sm font-bold text-[#5A3726] hover:border-[#B46F4A]/35 hover:bg-[#fff9f3]">{label} →</Link>

@@ -1,11 +1,18 @@
+"use client";
+
 import Link from "next/link";
 import { AdminShell } from "@/components/page-shell";
+import { RosterFlowNav } from "@/components/roster-flow-nav";
 import type { Student } from "@/lib/types";
 import {
   formatDate,
   getStudentCompleteness,
   getStudentStatus,
 } from "./student-profile-utils";
+import {
+  updateStudentIdentityStatusAction,
+  hardDeleteStudentIdentityAction,
+} from "@/app/admin/actions";
 
 type StudentDirectoryPageProps = {
   students: Student[];
@@ -24,11 +31,6 @@ export function StudentDirectoryPage({
   error,
   imported,
 }: StudentDirectoryPageProps) {
-  const activeCount = students.filter((student) => student.isActive !== false).length;
-  const reviewCount = students.filter((student) => student.needsReview).length;
-  const incompleteCount = students.filter(
-    (student) => getStudentCompleteness(student).label !== "完整",
-  ).length;
   const statusFilters = [
     ["all", "全部"],
     ["active", "啟用中"],
@@ -46,13 +48,9 @@ export function StudentDirectoryPage({
   };
 
   return (
-    <AdminShell currentSection="roster.students" resumeHref="/admin/students?mode=history" resumeLabel="學員履歷">
+    <AdminShell currentSection="roster.students">
       <section className="rounded-[2rem] border border-[#ead7c6] bg-white/85 p-6 shadow-sm">
-        <p className="text-sm font-semibold text-[#a65f3b]">學員總表</p>
-        <h1 className="mt-2 text-3xl font-black tracking-tight text-zinc-950">先找人，再補資料</h1>
-        <p className="mt-3 max-w-4xl text-sm leading-7 text-zinc-600">
-          這裡只負責管理學員主檔。課程資格、講師名冊與歷程檢視保留在旁邊的專用工具，避免同一頁塞太多功能。
-        </p>
+        <h1 className="text-3xl font-black tracking-tight text-zinc-950">學員名冊</h1>
       </section>
 
       {saved ? (
@@ -62,54 +60,29 @@ export function StudentDirectoryPage({
       ) : null}
       {error ? (
         <p className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-3 text-sm font-bold text-rose-700">
-          送出失敗，請確認必填欄位與識別資料是否完整。
+          送出失敗，請確認姓名、證件末三碼與手機號碼是否完整。
         </p>
       ) : null}
 
-      <section className="mt-6 grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-        <div className="rounded-[1.75rem] border border-[#ead7c6] bg-white p-5 shadow-sm">
-          <p className="text-sm font-semibold text-[#a65f3b]">快速操作</p>
-          <div className="mt-4 flex flex-wrap gap-3">
-            <Link href="/admin/students/new" className="rounded-2xl bg-[#6b3b25] px-5 py-3 text-sm font-bold text-white">
-              新增學員
-            </Link>
-            <Link href="/admin/student-imports" className="rounded-2xl border border-[#ead7c6] bg-white px-5 py-3 text-sm font-bold text-[#6b3b25]">
-              批次匯入
-            </Link>
-            <Link href="/admin/students?mode=eligibility" className="rounded-2xl border border-[#ead7c6] bg-white px-5 py-3 text-sm font-bold text-[#6b3b25]">
-              課程資格
-            </Link>
-            <Link href="/admin/students?mode=instructors" className="rounded-2xl border border-[#ead7c6] bg-white px-5 py-3 text-sm font-bold text-[#6b3b25]">
-              講師名冊
-            </Link>
-            <Link href="/admin/students?mode=history" className="rounded-2xl border border-[#ead7c6] bg-white px-5 py-3 text-sm font-bold text-[#6b3b25]">
-              學員履歷
-            </Link>
-          </div>
-        </div>
+      <RosterFlowNav current="students" />
 
-        <div className="grid gap-4 sm:grid-cols-3">
-          {[
-            ["全部學員", String(students.length)],
-            ["啟用中", String(activeCount)],
-            ["待補資料", String(incompleteCount)],
-            ["待確認", String(reviewCount)],
-          ].map(([label, value]) => (
-            <div key={label} className="rounded-[1.75rem] border border-[#ead7c6] bg-white p-5 shadow-sm">
-              <p className="text-sm text-zinc-500">{label}</p>
-              <p className="mt-2 text-3xl font-black text-zinc-950">{value}</p>
-            </div>
-          ))}
+      {/* quick actions */}
+      <section className="mt-6 rounded-[1.75rem] border border-[#ead7c6] bg-white p-5 shadow-sm">
+        <p className="text-sm font-semibold text-[#a65f3b]">快速操作</p>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <Link href="/admin/students/new" className="rounded-2xl bg-[#6b3b25] px-5 py-3 text-sm font-bold text-white">
+            新增學員
+          </Link>
         </div>
       </section>
 
+      {/* student list */}
       <section className="mt-6 rounded-[1.75rem] border border-[#ead7c6] bg-white shadow-sm">
         <div className="border-b border-[#ead7c6] p-5">
           <div className="grid gap-4 xl:grid-cols-[1fr_auto] xl:items-end">
             <div>
               <p className="text-sm font-semibold text-[#a65f3b]">搜尋與篩選</p>
               <h2 className="mt-1 text-2xl font-black text-zinc-950">學員列表</h2>
-              <p className="mt-1 text-sm text-zinc-500">列表頁只看找人與判斷狀態需要的資訊，詳細欄位請進學員頁。</p>
             </div>
             <form className="grid gap-3 md:grid-cols-[1fr_auto]">
               <input
@@ -136,13 +109,13 @@ export function StudentDirectoryPage({
           </div>
         </div>
 
-        <div className="hidden grid-cols-[1.2fr_160px_140px_160px_130px_140px_120px] border-b border-[#ead7c6] bg-[#fff7ed] px-5 py-3 text-sm font-bold text-[#6b3b25] md:grid">
+        <div className="hidden grid-cols-[1.2fr_160px_140px_160px_110px_130px_170px] border-b border-[#ead7c6] bg-[#fff7ed] px-5 py-3 text-sm font-bold text-[#6b3b25] md:grid">
           <span>學員</span>
           <span>手機</span>
           <span>生日</span>
           <span>會員編號</span>
           <span>狀態</span>
-          <span>資料完整度</span>
+          <span>完整度</span>
           <span>操作</span>
         </div>
 
@@ -150,17 +123,18 @@ export function StudentDirectoryPage({
           {students.map((student) => {
             const studentStatus = getStudentStatus(student);
             const completeness = getStudentCompleteness(student);
+            const isInactive = student.isActive === false;
             return (
               <div
                 key={student.id}
-                className="grid gap-3 px-5 py-4 transition hover:bg-[#fffaf5] md:grid-cols-[1.2fr_160px_140px_160px_130px_140px_120px] md:items-center"
+                className="grid gap-3 px-5 py-4 transition hover:bg-[#fffaf5] md:grid-cols-[1.2fr_160px_140px_160px_110px_130px_170px] md:items-center"
               >
                 <div>
                   <Link href={`/admin/students/${student.id}`} className="font-black text-zinc-950 hover:text-[#6b3b25]">
                     {student.name}
                   </Link>
                   <p className="mt-1 text-xs text-zinc-500">
-                    證件末三碼：{student.idNumberLast3 || "未填"}｜來源：{student.source || "學員總表"}
+                    末三碼：{student.idNumberLast3 || "未填"}｜來源：{student.source || "學員總表"}
                   </p>
                 </div>
                 <div className="text-sm text-zinc-700">{student.phone || "未填"}</div>
@@ -176,7 +150,7 @@ export function StudentDirectoryPage({
                     {completeness.label}
                   </span>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-x-2 gap-y-1">
                   <Link
                     href={`/admin/students/${student.id}`}
                     className="rounded-full border border-[#ead7c6] bg-white px-3 py-1 text-xs font-bold text-[#6b3b25]"
@@ -189,6 +163,46 @@ export function StudentDirectoryPage({
                   >
                     編輯
                   </Link>
+                  <form
+                    action={updateStudentIdentityStatusAction}
+                    onSubmit={(e) => {
+                      const msg = isInactive
+                        ? "確認啟用這位學員？啟用後將出現在啟用名冊。"
+                        : "確認停用這位學員？停用後將不再出現在啟用名冊，但會保留歷史紀錄。";
+                      if (!window.confirm(msg)) e.preventDefault();
+                    }}
+                  >
+                    <input type="hidden" name="studentId" value={student.id} />
+                    <input type="hidden" name="status" value={isInactive ? "active" : "inactive"} />
+                    <input type="hidden" name="redirectTo" value={buildHref({ q, status })} />
+                    <button
+                      type="submit"
+                      className={`rounded-full border px-3 py-1 text-xs font-bold ${
+                        isInactive
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                          : "border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100"
+                      }`}
+                    >
+                      {isInactive ? "啟用" : "停用"}
+                    </button>
+                  </form>
+                  <form
+                    action={hardDeleteStudentIdentityAction}
+                    onSubmit={(e) => {
+                      if (!window.confirm("確認刪除這筆學員資料？此操作適合用於建錯資料，刪除後無法復原。")) {
+                        e.preventDefault();
+                      }
+                    }}
+                  >
+                    <input type="hidden" name="studentId" value={student.id} />
+                    <input type="hidden" name="redirectTo" value={buildHref({ q, status })} />
+                    <button
+                      type="submit"
+                      className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-bold text-red-600 hover:bg-red-100"
+                    >
+                      刪除
+                    </button>
+                  </form>
                 </div>
               </div>
             );

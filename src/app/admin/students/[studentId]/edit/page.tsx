@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { saveStudentIdentityAction } from "@/app/admin/actions";
 import { AdminShell } from "@/components/page-shell";
@@ -19,12 +20,13 @@ export default async function EditStudentPage({ params }: PageProps) {
 
   return (
     <AdminShell currentSection="roster.students" resumeHref={`/admin/students/${student.id}`} resumeLabel="學員詳細頁">
+      <div className="mb-4">
+        <Link href={`/admin/students/${student.id}`} className="inline-flex items-center gap-1 text-sm font-bold text-[#6b3b25] hover:text-[#ef6c00]">
+          ← 返回學員資料
+        </Link>
+      </div>
       <section className="rounded-[2rem] border border-[#ead7c6] bg-white/85 p-6 shadow-sm">
-        <p className="text-sm font-semibold text-[#a65f3b]">編輯學員</p>
-        <h1 className="mt-2 text-3xl font-black tracking-tight text-zinc-950">{student.name}</h1>
-        <p className="mt-3 max-w-4xl text-sm leading-7 text-zinc-600">
-          你可以只更新需要的區塊，不需要一次填完整份資料。
-        </p>
+        <h1 className="text-3xl font-black tracking-tight text-zinc-950">編輯學員資料</h1>
       </section>
 
       <div className="mt-6">

@@ -11,6 +11,7 @@ import {
   deleteInstructorIdentityAction,
 } from "@/app/admin/actions";
 import { AdminShell } from "@/components/page-shell";
+import { RosterFlowNav } from "@/components/roster-flow-nav";
 import { getBookingData } from "@/lib/booking-repository";
 import type {
   CourseOffering,
@@ -38,6 +39,7 @@ type PageProps = {
     skipped?: string;
     linked?: string;
     enrolled?: string;
+    filter?: string;
   }>;
 };
 
@@ -50,7 +52,6 @@ type CourseOption = {
 };
 
 const ELIGIBILITY_STATUSES = ["上課中", "已結訓"];
-const ELIGIBILITY_ROW_STATUSES = ["未加入", "上課中", "已結訓"];
 
 type ActiveClassChip = {
   offeringId: string;
@@ -61,9 +62,8 @@ type ActiveClassChip = {
 
 const IMPORT_ELIGIBILITY_STATUSES = ELIGIBILITY_STATUSES;
 const MODES = [
-  ["students", "學員總表", "匯入與新增學員基本資料"],
-  ["eligibility", "課程名單", "設定學員在指定期別的課程狀態"],
-  ["instructors", "講師名冊", "建立講師基本資料與授課專長"],
+  ["students", "學員名冊", "匯入與新增學員基本資料"],
+  ["eligibility", "課程資格", "選擇指定班級後，批量加入尚未加入的學員"],
   ["history", "學習履歷", "彙整學員資格、梯次、報名與出席紀錄"],
 ] as const;
 
@@ -388,6 +388,7 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
     skipped,
     linked,
     enrolled,
+    filter: queryFilter,
   } = await searchParams;
   const {
     students = [],
@@ -680,7 +681,7 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
     }),
     ...visibleHistoryEnrollments.map((enrollment) => ({
       id: `enrollment-${enrollment.id}`,
-      type: "課程名單",
+      type: "課程資格",
       title:
         enrollment.classDisplayName ||
         offeringById.get(enrollment.offeringId)?.displayTitle ||
@@ -712,16 +713,16 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
     { eyebrow: string; title: string; description: string }
   > = {
     students: {
-      eyebrow: "學員總表",
+      eyebrow: "學員名冊",
       title: "學員查找與基本資料管理",
       description:
         "日常以搜尋學員、確認會員編號、手機與身分證末三碼為主；新增與批次匯入只在需要時展開。",
     },
     eligibility: {
-      eyebrow: "課程狀態",
-      title: "學員課程狀態管理",
+      eyebrow: "課程資格",
+      title: "班級加入管理",
       description:
-        "查看學員是否具備特定課程主檔的上課資格，例如上課中、已結訓、未加入或未加入。",
+        "選擇指定班級後，可將尚未加入的學員批量加入該班級。",
     },
     offering: {
       eyebrow: "梯次分配",
@@ -736,19 +737,51 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
         "管理講師基本資料、專長與可授課資訊；目前先作為行政端名冊，不建立講師登入帳號。",
     },
     history: {
-      eyebrow: "學習履歷",
-      title: "學員學習履歷彙整",
+      eyebrow: "學員履歷",
+      title: "學員履歷",
       description:
-        "以學員為中心彙整報名、課程狀態、梯次分配與出席紀錄，方便行政人員快速查詢。",
+        "以學員為中心彙整報名、課程狀態、梯次分配與出席紀錄。",
     },
   };
   const pageMeta = pageMetaMap[currentMode] ?? pageMetaMap.students;
 
+  // Eligibility-specific: derive seriesId/year from a single selected offering
+  const eligibilityOfferingId = currentMode === "eligibility" ? (queryOfferingId || "") : "";
+  const eligibilityOffering = eligibilityOfferingId
+    ? courseOfferings.find((o) => o.id === eligibilityOfferingId) ?? null
+    : null;
+  const eligibilitySeriesId = eligibilityOffering
+    ? (eligibilityOffering.seriesId || eligibilityOffering.courseSeriesId || eligibilityOffering.courseMasterId || "")
+    : "";
+  const eligibilityYear = eligibilityOffering ? String(eligibilityOffering.year || "") : "";
+  const eligibilityEnrollments = eligibilityOfferingId
+    ? enrollments.filter(
+        (e) =>
+          e.offeringId === eligibilityOfferingId &&
+          !["withdrawn", "cancelled", "inactive"].includes(text(e.status)),
+      )
+    : [];
+  const eligibilityEnrollmentStatusByStudentId = new Map(
+    eligibilityEnrollments.map((e) => [e.studentId, text(e.status || "active")]),
+  );
+
+  const currentFilter = currentMode === "eligibility" ? (queryFilter || "available") : "all";
+  const enrolledStudentIds = new Set(eligibilityEnrollments.map((e) => e.studentId));
+  const availableStudents = filteredStudents.filter((s) => !enrolledStudentIds.has(s.id));
+  const enrolledStudentRows = students
+    .filter((s) => enrolledStudentIds.has(s.id))
+    .filter((s) => studentMatches(s, q))
+    .sort(compareStudentsByMemberNo)
+    .map((s) => ({
+      student: s,
+      enrollmentStatus: text(eligibilityEnrollmentStatusByStudentId.get(s.id) || "active"),
+      enrollmentLabel:
+        eligibilityEnrollmentStatusByStudentId.get(s.id) === "completed" ? "已結訓" : "上課中",
+    }));
+
   return (
     <AdminShell
       currentSection={adminSection}
-      resumeHref="/admin/students?mode=history"
-      resumeLabel="學習履歷"
     >
       <section className="rounded-[2rem] border border-[#ead7c6] bg-white/85 p-6 shadow-sm">
         <p className="text-sm font-semibold text-[#a65f3b]">
@@ -831,55 +864,27 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
       ) : null}
 
       {currentMode !== "students" ? (
-        <section className="mt-6 rounded-[1.75rem] border border-[#ead7c6] bg-white p-5 shadow-sm">
-          <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
-            <div>
-              <p className="text-sm font-semibold text-[#a65f3b]">管理流程</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {MODES.map(([key, label, description]) => (
-                  <Link
-                    key={key}
-                    href={buildHref({
-                      mode: key,
-                      seriesId:
-                        key === "students" ? undefined : selectedSeriesId,
-                      year: key === "students" ? undefined : selectedYear,
-                      status,
-                      q,
-                    })}
-                    className={`rounded-full border px-4 py-2 text-sm font-bold ${currentMode === key ? "border-[#ef6c00] bg-[#ef6c00] text-white" : "border-[#e8d4c2] bg-white text-[#6b3b25]"}`}
-                    title={description}
-                  >
-                    {label}
-                  </Link>
-                ))}
-              </div>
-            </div>
+        <>
+          <RosterFlowNav current={currentMode as "eligibility" | "history"} />
 
-            <form className="grid gap-3 md:grid-cols-[1fr_auto] lg:w-[420px]">
-              <input
-                type="hidden"
-                name="mode"
-                value={currentMode || "students"}
-              />
-              <input
-                type="hidden"
-                name="seriesId"
-                value={selectedSeriesId || ""}
-              />
-              <input type="hidden" name="year" value={selectedYear || ""} />
-              <input
-                name="q"
-                defaultValue={q}
-                placeholder="搜尋姓名、末三碼、手機、備註"
-                className="h-12 rounded-2xl border border-[#ead7c6] bg-white px-4 text-sm text-[#4a2a1a] shadow-sm outline-none transition placeholder:text-zinc-400 focus:border-[#ef6c00] focus:ring-2 focus:ring-[#f7c58d]/40"
-              />
-              <button className="rounded-2xl bg-[#6b3b25] px-5 py-3 text-sm font-bold text-white">
-                搜尋
-              </button>
-            </form>
-          </div>
-        </section>
+          {currentMode === "history" ? (
+            <section className="mt-6 rounded-[1.75rem] border border-[#ead7c6] bg-white p-5 shadow-sm">
+              <p className="text-sm font-semibold text-[#a65f3b]">搜尋學員</p>
+              <form className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
+                <input type="hidden" name="mode" value="history" />
+                <input
+                  name="q"
+                  defaultValue={q}
+                  placeholder="搜尋姓名、會員編號、手機"
+                  className="h-12 flex-1 rounded-2xl border border-[#ead7c6] bg-white px-4 text-sm text-[#4a2a1a] shadow-sm outline-none transition placeholder:text-zinc-400 focus:border-[#ef6c00] focus:ring-2 focus:ring-[#f7c58d]/40"
+                />
+                <button className="rounded-2xl bg-[#ef6c00] px-6 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-[#d65f00]">
+                  搜尋
+                </button>
+              </form>
+            </section>
+          ) : null}
+        </>
       ) : null}
 
       {currentMode === "students" ? (
@@ -938,7 +943,7 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
                       value="studentsOnly"
                     />
                     <label className="grid gap-2 text-sm font-bold text-zinc-700">
-                      步驟 2｜貼上學員名冊
+                      步驟 2｜貼上學員資料
                       <textarea
                         name="rosterText"
                         rows={8}
@@ -1027,7 +1032,7 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
                       />
                     </label>
                     <label className="grid gap-2 text-sm font-bold text-zinc-700">
-                      步驟 3｜貼上學員名冊
+                      步驟 3｜貼上學員資料
                       <textarea
                         name="rosterText"
                         rows={8}
@@ -1104,7 +1109,7 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
                       />
                     </label>
                     <label className="grid gap-2 text-sm font-bold text-zinc-700">
-                      步驟 3｜貼上學員名冊
+                      步驟 3｜貼上學員資料
                       <textarea
                         name="rosterText"
                         rows={8}
@@ -1192,7 +1197,7 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
             className="mt-6 rounded-[1.75rem] border border-[#ead7c6] bg-white shadow-sm"
           >
             <div className="border-b border-[#ead7c6] p-5">
-              <p className="text-sm font-semibold text-[#a65f3b]">學員總表</p>
+              <p className="text-sm font-semibold text-[#a65f3b]">學員名冊</p>
               <h2 className="mt-1 text-2xl font-black text-zinc-950">
                 所有學員基本資料
               </h2>
@@ -1204,7 +1209,7 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
               <div>
                 <p className="text-sm font-bold text-[#6b3b25]">狀態篩選</p>
                 <p className="mt-1 text-xs text-zinc-500">
-                  學員總表只保留查找與狀態管理；課程狀態、梯次分配與履歷請到對應頁籤處理。
+                  學員名冊只保留查找與狀態管理；課程狀態、梯次分配與履歷請到對應頁籤處理。
                 </p>
               </div>
               <div className="flex flex-wrap gap-2 xl:justify-end">
@@ -1344,239 +1349,418 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
           className="mt-6 rounded-[1.75rem] border border-[#ead7c6] bg-white shadow-sm"
         >
           <div className="border-b border-[#ead7c6] p-5">
-            <p className="text-sm font-semibold text-[#a65f3b]">課程名單</p>
+            <p className="text-sm font-semibold text-[#a65f3b]">課程資格</p>
             <h2 className="mt-1 text-2xl font-black text-zinc-950">
-              {selectedCourse?.title ?? "課程名單"}
+              班級加入管理
             </h2>
             <p className="mt-1 text-sm text-zinc-500">
-              先選課程、年度與期別，再點學員「上課中」即可加入該期名單。
+              選擇指定班級後，可將尚未加入的學員批量加入該班級。
             </p>
           </div>
 
           <div className="border-b border-[#ead7c6] bg-[#fffaf5] p-5">
-            <div className="space-y-5">
+            <form className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
               <div>
-                <p className="mb-2 text-xs font-bold text-[#a65f3b]">1. 課程主檔</p>
-                <div className="flex flex-wrap gap-2">
-                  {courseOptions.map((option) => {
-                    const active = option.id === selectedSeriesId;
-                    return (
-                      <Link
-                        key={option.id}
-                        href={buildHref({
-                          mode: "eligibility",
-                          seriesId: option.id,
-                          year: selectedYear,
-                          q,
-                        })}
-                        scroll={false}
-                        className={`rounded-full border px-4 py-2 text-sm font-bold transition ${
-                          active
-                            ? "border-[#ef6c00] bg-[#ef6c00] text-white shadow-sm"
-                            : "border-[#ead7c6] bg-white text-[#6b3b25] hover:bg-[#fff7ed]"
-                        }`}
-                      >
-                        {option.title}
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="grid gap-5 lg:grid-cols-2">
-                <div>
-                  <p className="mb-2 text-xs font-bold text-[#a65f3b]">2. 年度</p>
-                  <div className="flex flex-wrap gap-2">
-                    {years.map((year) => {
-                      const active = String(year) === String(selectedYear);
-                      return (
-                        <Link
-                          key={year}
-                          href={buildHref({
-                            mode: "eligibility",
-                            seriesId: selectedSeriesId,
-                            year,
-                            q,
-                          })}
-                          scroll={false}
-                          className={`rounded-full border px-4 py-2 text-sm font-bold transition ${
-                            active
-                              ? "border-[#ef6c00] bg-[#ef6c00] text-white shadow-sm"
-                              : "border-[#ead7c6] bg-white text-[#6b3b25] hover:bg-[#fff7ed]"
-                          }`}
-                        >
-                          {year} 年
-                        </Link>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div>
-                  <p className="mb-2 text-xs font-bold text-[#a65f3b]">3. 期別</p>
-                  <div className="flex flex-wrap gap-2">
-                    {selectedOfferings.length > 0 ? (
-                      selectedOfferings.map((offering) => {
-                        const active = offering.id === selectedOfferingId;
-                        return (
-                          <Link
-                            key={offering.id}
-                            href={buildHref({
-                              mode: "eligibility",
-                              seriesId: selectedSeriesId,
-                              year: selectedYear,
-                              offeringId: offering.id,
-                              q,
-                            })}
-                            scroll={false}
-                            className={`rounded-full border px-4 py-2 text-sm font-bold transition ${
-                              active
-                                ? "border-[#ef6c00] bg-[#ef6c00] text-white shadow-sm"
-                                : "border-[#ead7c6] bg-white text-[#6b3b25] hover:bg-[#fff7ed]"
-                            }`}
-                          >
-                            {offering.termLabel || `${offering.term ?? ""}期` || offering.shortName || offering.displayName}
-                          </Link>
+                <p className="mb-2 text-xs font-bold text-[#a65f3b]">指定班級</p>
+                <div className="flex gap-2">
+                  <input type="hidden" name="mode" value="eligibility" />
+                  <select
+                    name="offeringId"
+                    defaultValue={eligibilityOfferingId || ""}
+                    className="min-w-[320px] rounded-2xl border border-[#e8d4c2] bg-white px-4 py-3 text-sm outline-none focus:border-[#ef6c00]"
+                  >
+                    <option value="">請選擇指定班級</option>
+                    {courseOfferings
+                      .filter((o) => o.isActive !== false)
+                      .sort((a, b) => {
+                        const yearDiff = Number(b.year ?? 0) - Number(a.year ?? 0);
+                        if (yearDiff !== 0) return yearDiff;
+                        return (a.displayName || a.displayTitle || a.title || "").localeCompare(
+                          b.displayName || b.displayTitle || b.title || "",
+                          "zh-Hant",
                         );
                       })
-                    ) : (
-                      <span className="rounded-full border border-[#ead7c6] bg-white px-4 py-2 text-sm font-bold text-zinc-400">
-                        尚無期別
-                      </span>
-                    )}
-                  </div>
+                      .map((offering) => (
+                        <option key={offering.id} value={offering.id}>
+                          {[
+                            offering.displayName || offering.displayTitle || offering.title,
+                            offering.year ? `${offering.year}年` : "",
+                            offering.termLabel || (offering.term ? `第${offering.term}期` : ""),
+                          ]
+                            .filter(Boolean)
+                            .join("｜")}
+                        </option>
+                      ))}
+                  </select>
+                  <button className="rounded-2xl bg-[#ef6c00] px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-[#d65f00]">
+                    查詢
+                  </button>
                 </div>
               </div>
-            </div>
-
-            <form className="mt-4 flex flex-col gap-3 sm:flex-row">
-              <input type="hidden" name="mode" value="eligibility" />
-              <input type="hidden" name="seriesId" value={selectedSeriesId || ""} />
-              <input type="hidden" name="year" value={selectedYear || ""} />
-              <input type="hidden" name="offeringId" value={selectedOfferingId || ""} />
-              <input
-                name="q"
-                defaultValue={q}
-                placeholder="搜尋姓名、會員編號、目前班級"
-                className="h-12 flex-1 rounded-2xl border border-[#ead7c6] bg-white px-4 text-sm text-[#4a2a1a] shadow-sm outline-none transition placeholder:text-zinc-400 focus:border-[#ef6c00] focus:ring-2 focus:ring-[#f7c58d]/40"
-              />
-              <button className="rounded-2xl bg-[#ef6c00] px-6 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-[#d65f00]">
-                搜尋
-              </button>
             </form>
-          </div>
 
-          <div className="border-b border-[#ead7c6] bg-[#fffaf5] px-5 py-4">
-            <p className="text-sm font-bold text-[#6b3b25]">
-              在列表中直接切換目前期別狀態
-            </p>
-            <p className="mt-1 text-xs leading-5 text-zinc-500">
-              右側狀態只針對目前選定的課程、年度與期別；左側班級膠囊可快速切換目標班級，不會一次移出全部班級。
-            </p>
-          </div>
-
-          <div className="hidden grid-cols-[1fr_minmax(560px,1.5fr)_280px] border-b border-[#ead7c6] bg-[#fff7ed] px-5 py-3 text-sm font-bold text-[#6b3b25] md:grid">
-            <span>學員</span>
-            <span>目前班級</span>
-            <span className="text-right">目前期別狀態</span>
-          </div>
-          <div className="divide-y divide-[#f0dfcf]">
-            {qualificationRows.map(({ currentClasses, student, record, status: rowStatus }) => (
-              <div
-                key={record?.id ?? `new-${student.id}`}
-                id={`eligibility-${student.id}`}
-                className="scroll-mt-28 grid gap-4 px-5 py-4 md:grid-cols-[1fr_minmax(560px,1.5fr)_280px] md:items-center"
-              >
-                <div>
-                  <p className="font-black text-zinc-950">{student.name}</p>
-                  <p className="mt-1 text-xs text-zinc-500">
-                    會員：{student.memberNo || "未填"}
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2 text-xs font-bold">
-                  {currentClasses.length > 0 ? (
-                    currentClasses.map((classItem) => {
-                      const activeClass = classItem.offeringId === selectedOfferingId;
-                      return (
-                        <Link
-                          key={classItem.offeringId}
-                          href={buildHref({
-                            mode: "eligibility",
-                            seriesId: classItem.seriesId || selectedSeriesId,
-                            year: classItem.year || selectedYear,
-                            offeringId: classItem.offeringId,
-                            q,
-                          })}
-                          scroll={false}
-                          className={`rounded-full border px-3 py-1.5 transition ${
-                            activeClass
-                              ? "border-[#ef6c00] bg-[#ef6c00] text-white shadow-sm"
-                              : "border-[#ead7c6] bg-[#fff7ed] text-[#6b3b25] hover:border-[#ef6c00] hover:bg-white"
-                          }`}
-                          title="先點選這個班級，再點右側未加入，只會移出這一個班級"
-                        >
-                          {classItem.label}
-                        </Link>
-                      );
-                    })
-                  ) : (
-                    <span className="rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-zinc-500">
-                      尚未分配
-                    </span>
-                  )}
-                </div>
-                <div className="ml-auto flex w-full max-w-[280px] flex-nowrap overflow-hidden rounded-full border border-[#ead7c6] bg-white p-1 shadow-sm">
-                  {ELIGIBILITY_ROW_STATUSES.map((item) => {
-                    const isCurrent = item === rowStatus;
-                    return (
-                      <form
-                        key={item}
-                        action={assignStudentsToCourseEligibilityAction}
-                        className="flex-1"
-                      >
-                        <input type="hidden" name="studentIds" value={student.id} />
-                        <input
-                          type="hidden"
-                          name="seriesId"
-                          value={selectedSeriesId}
-                        />
-                        <input type="hidden" name="year" value={selectedYear || ""} />
-                        <input type="hidden" name="targetOfferingId" value={selectedOfferingId} />
-                        <input type="hidden" name="eligibilityStatus" value={item} />
-                        <input type="hidden" name="note" value={record?.note || ""} />
-                        <input
-                          type="hidden"
-                          name="redirectTo"
-                          value={buildHref({
-                            mode: "eligibility",
-                            seriesId: selectedSeriesId,
-                            year: selectedYear,
-                            offeringId: selectedOfferingId,
-                            q,
-                          })}
-                        />
-                        <button
-                          className={`h-9 w-full rounded-full px-3 text-xs font-bold whitespace-nowrap transition ${
-                            isCurrent
-                              ? statusTone(item)
-                              : "text-zinc-500 hover:bg-[#fff7ed] hover:text-[#6b3b25]"
-                          }`}
-                          aria-pressed={isCurrent}
-                        >
-                          {item}
-                        </button>
-                      </form>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-            {qualificationRows.length === 0 ? (
-              <p className="p-6 text-sm text-zinc-500">
-                目前沒有符合條件的學員。請調整搜尋條件或先到學員總表新增學員。
-              </p>
+            {eligibilityOffering ? (
+              <form className="mt-4 flex flex-col gap-3 sm:flex-row">
+                <input type="hidden" name="mode" value="eligibility" />
+                <input type="hidden" name="offeringId" value={eligibilityOfferingId} />
+                <input type="hidden" name="filter" value={currentFilter} />
+                <input
+                  name="q"
+                  defaultValue={q}
+                  placeholder="搜尋姓名、會員編號、手機"
+                  className="h-12 flex-1 rounded-2xl border border-[#ead7c6] bg-white px-4 text-sm text-[#4a2a1a] shadow-sm outline-none transition placeholder:text-zinc-400 focus:border-[#ef6c00] focus:ring-2 focus:ring-[#f7c58d]/40"
+                />
+                <button className="rounded-2xl bg-[#ef6c00] px-6 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-[#d65f00]">
+                  搜尋
+                </button>
+              </form>
             ) : null}
           </div>
+
+          {eligibilityOffering ? (
+            <>
+              <div className="flex gap-2 border-b border-[#ead7c6] bg-[#fffaf5] px-5 py-3">
+                {[
+                  ["available", "可加入"],
+                  ["enrolled", "已在班級"],
+                  ["all", "全部"],
+                ].map(([key, label]) => (
+                  <Link
+                    key={key}
+                    href={buildHref({ mode: "eligibility", offeringId: eligibilityOfferingId, filter: key, q })}
+                    className={`rounded-full px-4 py-2 text-sm font-bold transition ${
+                      currentFilter === key
+                        ? "bg-[#ef6c00] text-white shadow-sm"
+                        : "border border-[#ead7c6] bg-white text-zinc-600 hover:border-[#ef6c00]"
+                    }`}
+                  >
+                    {label}
+                  </Link>
+                ))}
+              </div>
+
+              {(currentFilter === "available" || currentFilter === "all") && (
+                <div className="border-b border-[#ead7c6] bg-white px-5 py-3">
+                  <button
+                    type="submit"
+                    form="batch-enroll-form"
+                    className="rounded-2xl bg-[#ef6c00] px-5 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-[#d65f00] disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={!eligibilityOfferingId}
+                  >
+                    加入指定班級
+                  </button>
+                </div>
+              )}
+
+              <form
+                id="batch-enroll-form"
+                action={assignStudentsToCourseEligibilityAction}
+              >
+                <input type="hidden" name="seriesId" value={eligibilitySeriesId} />
+                <input type="hidden" name="year" value={eligibilityYear} />
+                <input type="hidden" name="targetOfferingId" value={eligibilityOfferingId} />
+                <input type="hidden" name="eligibilityStatus" value="上課中" />
+                <input type="hidden" name="note" value="" />
+                <input
+                  type="hidden"
+                  name="redirectTo"
+                  value={buildHref({ mode: "eligibility", offeringId: eligibilityOfferingId, filter: currentFilter, q })}
+                />
+              </form>
+
+              <div className="hidden grid-cols-[40px_1fr_150px_150px_120px_1fr_100px] border-b border-[#ead7c6] bg-[#fff7ed] px-5 py-3 text-sm font-bold text-[#6b3b25] md:grid">
+                {(currentFilter === "available" || currentFilter === "all") && (
+                  <span className="text-center text-xs text-zinc-400">選</span>
+                )}
+                <span>學員</span>
+                <span>手機</span>
+                <span>會員編號</span>
+                <span>目前狀態</span>
+                <span>目前班級</span>
+                <span className="text-right">操作</span>
+              </div>
+
+              <div className="divide-y divide-[#f0dfcf]">
+                {currentFilter === "available" ? (
+                  availableStudents.length === 0 ? (
+                    <p className="p-6 text-sm text-zinc-500">
+                      {norm(q)
+                        ? "沒有符合搜尋條件的學員。"
+                        : "目前沒有可加入此班級的學員。"}
+                    </p>
+                  ) : (
+                    availableStudents.map((student) => {
+                      const currentClasses = activeClassChipsByStudentId.get(student.id) ?? [];
+                      return (
+                        <div
+                          key={student.id}
+                          className="grid items-center gap-3 px-5 py-4 md:grid-cols-[40px_1fr_150px_150px_120px_1fr_100px]"
+                        >
+                          <input
+                            type="checkbox"
+                            form="batch-enroll-form"
+                            name="studentIds"
+                            value={student.id}
+                            className="h-4 w-4 accent-[#ef6c00]"
+                          />
+                          <div>
+                            <p className="font-black text-zinc-950">{student.name}</p>
+                            <p className="mt-0.5 text-xs text-zinc-500">
+                              {student.idNumberLast3 ? `末三碼 ${student.idNumberLast3}` : "末三碼 未填"}
+                            </p>
+                          </div>
+                          <div className="text-sm text-zinc-700">{student.phone || "未填"}</div>
+                          <div className="text-sm text-zinc-700">{student.memberNo || "未填"}</div>
+                          <div>
+                            <span className="inline-block rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
+                              可加入
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {currentClasses.length > 0 ? (
+                              currentClasses.slice(0, 2).map((chip) => (
+                                <span
+                                  key={chip.offeringId}
+                                  className="inline-block max-w-[160px] truncate rounded-full border border-[#ead7c6] bg-[#fffaf5] px-2 py-0.5 text-xs text-zinc-600"
+                                  title={chip.label}
+                                >
+                                  {chip.label}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-xs text-zinc-400">—</span>
+                            )}
+                            {currentClasses.length > 2 ? (
+                              <span className="text-xs text-zinc-400">
+                                +{currentClasses.length - 2}
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="text-right">
+                            <form action={assignStudentsToCourseEligibilityAction}>
+                              <input type="hidden" name="studentIds" value={student.id} />
+                              <input type="hidden" name="seriesId" value={eligibilitySeriesId} />
+                              <input type="hidden" name="year" value={eligibilityYear} />
+                              <input type="hidden" name="targetOfferingId" value={eligibilityOfferingId} />
+                              <input type="hidden" name="eligibilityStatus" value="上課中" />
+                              <input
+                                type="hidden"
+                                name="redirectTo"
+                                value={buildHref({ mode: "eligibility", offeringId: eligibilityOfferingId, filter: currentFilter, q })}
+                              />
+                              <button className="rounded-full border border-[#ef6c00] bg-white px-3 py-1 text-xs font-bold text-[#ef6c00] transition hover:bg-[#fff7ed]">
+                                加入
+                              </button>
+                            </form>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )
+                ) : currentFilter === "enrolled" ? (
+                  enrolledStudentRows.length === 0 ? (
+                    <p className="p-6 text-sm text-zinc-500">
+                      {norm(q) ? "沒有符合搜尋條件的學員。" : "目前沒有學員加入此班級。"}
+                    </p>
+                  ) : (
+                    enrolledStudentRows.map(({ student, enrollmentLabel }) => {
+                      const currentClasses = activeClassChipsByStudentId.get(student.id) ?? [];
+                      return (
+                        <div
+                          key={student.id}
+                          className="grid items-center gap-3 px-5 py-4 md:grid-cols-[40px_1fr_150px_150px_120px_1fr_100px]"
+                        >
+                          <div />
+                          <div>
+                            <p className="font-black text-zinc-950">{student.name}</p>
+                            <p className="mt-0.5 text-xs text-zinc-500">
+                              {student.idNumberLast3 ? `末三碼 ${student.idNumberLast3}` : "末三碼 未填"}
+                            </p>
+                          </div>
+                          <div className="text-sm text-zinc-700">{student.phone || "未填"}</div>
+                          <div className="text-sm text-zinc-700">{student.memberNo || "未填"}</div>
+                          <div>
+                            <span
+                              className={`inline-block rounded-full border px-3 py-1 text-xs font-bold ${
+                                enrollmentLabel === "已結訓"
+                                  ? "border-sky-200 bg-sky-50 text-sky-700"
+                                  : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                              }`}
+                            >
+                              {enrollmentLabel}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {currentClasses.length > 0 ? (
+                              currentClasses.slice(0, 2).map((chip) => (
+                                <span
+                                  key={chip.offeringId}
+                                  className="inline-block max-w-[160px] truncate rounded-full border border-[#ead7c6] bg-[#fffaf5] px-2 py-0.5 text-xs text-zinc-600"
+                                  title={chip.label}
+                                >
+                                  {chip.label}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-xs text-zinc-400">—</span>
+                            )}
+                            {currentClasses.length > 2 ? (
+                              <span className="text-xs text-zinc-400">
+                                +{currentClasses.length - 2}
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="text-right">
+                            <span className="inline-block rounded-full bg-[#fff7ed] px-3 py-1 text-xs font-bold text-[#a65f3b]">
+                              已加入
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )
+                ) : (
+                  /* all mode: show available then enrolled with clear labels */
+                  <>
+                    {availableStudents.length === 0 && enrolledStudentRows.length === 0 ? (
+                      <p className="p-6 text-sm text-zinc-500">
+                        {norm(q) ? "沒有符合搜尋條件的學員。" : "目前沒有可加入此班級的學員。"}
+                      </p>
+                    ) : (
+                      <>
+                        {availableStudents.map((student) => {
+                          const currentClasses = activeClassChipsByStudentId.get(student.id) ?? [];
+                          return (
+                            <div
+                              key={student.id}
+                              className="grid items-center gap-3 px-5 py-4 md:grid-cols-[40px_1fr_150px_150px_120px_1fr_100px]"
+                            >
+                              <input
+                                type="checkbox"
+                                form="batch-enroll-form"
+                                name="studentIds"
+                                value={student.id}
+                                className="h-4 w-4 accent-[#ef6c00]"
+                              />
+                              <div>
+                                <p className="font-black text-zinc-950">{student.name}</p>
+                                <p className="mt-0.5 text-xs text-zinc-500">
+                                  {student.idNumberLast3 ? `末三碼 ${student.idNumberLast3}` : "末三碼 未填"}
+                                </p>
+                              </div>
+                              <div className="text-sm text-zinc-700">{student.phone || "未填"}</div>
+                              <div className="text-sm text-zinc-700">{student.memberNo || "未填"}</div>
+                              <div>
+                                <span className="inline-block rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
+                                  可加入
+                                </span>
+                              </div>
+                              <div className="flex flex-wrap gap-1">
+                                {currentClasses.length > 0 ? (
+                                  currentClasses.slice(0, 2).map((chip) => (
+                                    <span
+                                      key={chip.offeringId}
+                                      className="inline-block max-w-[160px] truncate rounded-full border border-[#ead7c6] bg-[#fffaf5] px-2 py-0.5 text-xs text-zinc-600"
+                                      title={chip.label}
+                                    >
+                                      {chip.label}
+                                    </span>
+                                  ))
+                                ) : (
+                                  <span className="text-xs text-zinc-400">—</span>
+                                )}
+                                {currentClasses.length > 2 ? (
+                                  <span className="text-xs text-zinc-400">
+                                    +{currentClasses.length - 2}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="text-right">
+                                <form action={assignStudentsToCourseEligibilityAction}>
+                                  <input type="hidden" name="studentIds" value={student.id} />
+                                  <input type="hidden" name="seriesId" value={eligibilitySeriesId} />
+                                  <input type="hidden" name="year" value={eligibilityYear} />
+                                  <input type="hidden" name="targetOfferingId" value={eligibilityOfferingId} />
+                                  <input type="hidden" name="eligibilityStatus" value="上課中" />
+                                  <input
+                                    type="hidden"
+                                    name="redirectTo"
+                                    value={buildHref({ mode: "eligibility", offeringId: eligibilityOfferingId, filter: currentFilter, q })}
+                                  />
+                                  <button className="rounded-full border border-[#ef6c00] bg-white px-3 py-1 text-xs font-bold text-[#ef6c00] transition hover:bg-[#fff7ed]">
+                                    加入
+                                  </button>
+                                </form>
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {enrolledStudentRows.map(({ student, enrollmentLabel }) => {
+                          const currentClasses = activeClassChipsByStudentId.get(student.id) ?? [];
+                          return (
+                            <div
+                              key={`enrolled-${student.id}`}
+                              className="grid items-center gap-3 border-t border-[#f0dfcf] bg-[#fffaf5]/50 px-5 py-4 md:grid-cols-[40px_1fr_150px_150px_120px_1fr_100px]"
+                            >
+                              <div />
+                              <div>
+                                <p className="font-black text-zinc-950">{student.name}</p>
+                                <p className="mt-0.5 text-xs text-zinc-500">
+                                  {student.idNumberLast3 ? `末三碼 ${student.idNumberLast3}` : "末三碼 未填"}
+                                </p>
+                              </div>
+                              <div className="text-sm text-zinc-700">{student.phone || "未填"}</div>
+                              <div className="text-sm text-zinc-700">{student.memberNo || "未填"}</div>
+                              <div>
+                                <span
+                                  className={`inline-block rounded-full border px-3 py-1 text-xs font-bold ${
+                                    enrollmentLabel === "已結訓"
+                                      ? "border-sky-200 bg-sky-50 text-sky-700"
+                                      : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                  }`}
+                                >
+                                  {enrollmentLabel}
+                                </span>
+                              </div>
+                              <div className="flex flex-wrap gap-1">
+                                {currentClasses.length > 0 ? (
+                                  currentClasses.slice(0, 2).map((chip) => (
+                                    <span
+                                      key={chip.offeringId}
+                                      className="inline-block max-w-[160px] truncate rounded-full border border-[#ead7c6] bg-[#fffaf5] px-2 py-0.5 text-xs text-zinc-600"
+                                      title={chip.label}
+                                    >
+                                      {chip.label}
+                                    </span>
+                                  ))
+                                ) : (
+                                  <span className="text-xs text-zinc-400">—</span>
+                                )}
+                                {currentClasses.length > 2 ? (
+                                  <span className="text-xs text-zinc-400">
+                                    +{currentClasses.length - 2}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="text-right">
+                                <span className="inline-block rounded-full bg-[#fff7ed] px-3 py-1 text-xs font-bold text-[#a65f3b]">
+                                  已加入
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="p-6 text-center">
+              <p className="text-sm text-zinc-500">請先選擇一個指定班級。</p>
+            </div>
+          )}
         </section>
       ) : null}
 
@@ -1920,7 +2104,7 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
                   ))}
                   {historyCourseCards.length === 0 ? (
                     <p className="rounded-3xl border border-dashed border-[#ead7c6] bg-[#fffaf5] p-5 text-sm text-zinc-500 lg:col-span-2">
-                      這位學員目前沒有課程名單或課程狀態紀錄。
+                      這位學員目前沒有課程資格紀錄。
                     </p>
                   ) : null}
                 </div>

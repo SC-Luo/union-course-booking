@@ -5,6 +5,7 @@ import { AdminShell } from "@/components/page-shell";
 import { getBookingData } from "@/lib/booking-repository";
 import type { Student } from "@/lib/types";
 import { formatDate, getStudentCompleteness, getStudentStatus, text } from "../student-profile-utils";
+import { deleteStudentIdentityAction } from "@/app/admin/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -94,15 +95,17 @@ export default async function AdminStudentProfilePage({ params }: PageProps) {
     .slice(0, 3);
 
   return (
-    <AdminShell currentSection="roster.students" resumeHref="/admin/students" resumeLabel="學員總表">
+    <AdminShell currentSection="roster.students" resumeHref="/admin/students" resumeLabel="學員名冊">
+      <div className="mb-4">
+        <Link href="/admin/students" className="inline-flex items-center gap-1 text-sm font-bold text-[#6b3b25] hover:text-[#ef6c00]">
+          ← 返回學員名冊
+        </Link>
+      </div>
       <section className="rounded-[2rem] border border-[#ead7c6] bg-white/85 p-6 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <p className="text-sm font-semibold text-[#a65f3b]">學員詳細頁</p>
-            <h1 className="mt-2 text-3xl font-black tracking-tight text-zinc-950">{student.name}</h1>
-            <p className="mt-2 text-sm leading-7 text-zinc-600">
-              這裡只整理這位學員本人的主檔與補充資料。課程資格與講師管理請回專用工作區。
-            </p>
+            <h1 className="text-3xl font-black tracking-tight text-zinc-950">{student.name}</h1>
+            <p className="mt-1 text-sm text-zinc-500">查看完整資料</p>
           </div>
           <div className="flex flex-wrap gap-3">
             <Link
@@ -110,12 +113,6 @@ export default async function AdminStudentProfilePage({ params }: PageProps) {
               className="rounded-2xl bg-[#6b3b25] px-5 py-3 text-sm font-bold text-white"
             >
               編輯學員
-            </Link>
-            <Link
-              href="/admin/student-imports"
-              className="rounded-2xl border border-[#ead7c6] bg-white px-5 py-3 text-sm font-bold text-[#6b3b25]"
-            >
-              批次匯入
             </Link>
           </div>
         </div>
@@ -285,6 +282,21 @@ export default async function AdminStudentProfilePage({ params }: PageProps) {
           </>,
         )}
       </div>
+
+      <section className="mt-8 rounded-[1.75rem] border border-rose-200 bg-rose-50/50 p-5 shadow-sm">
+        <h2 className="text-lg font-black text-zinc-950">危險區</h2>
+        <p className="mt-1 text-sm text-zinc-500">停用學員後將不再顯示於啟用名冊，但會保留所有歷史資料。</p>
+        <form action={deleteStudentIdentityAction} className="mt-4">
+          <input type="hidden" name="studentId" value={student.id} />
+          <input type="hidden" name="redirectTo" value="/admin/students" />
+          <button
+            type="submit"
+            className="rounded-2xl border border-rose-300 bg-white px-5 py-3 text-sm font-bold text-rose-700 hover:bg-rose-100"
+          >
+            停用學員
+          </button>
+        </form>
+      </section>
     </AdminShell>
   );
 }

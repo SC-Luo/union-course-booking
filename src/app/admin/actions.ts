@@ -1949,7 +1949,7 @@ function getOrCreateStudentIdentity(
     phone: input.phone ?? existing?.phone ?? "",
     birthday: input.birthday || existing?.birthday || null,
     note: input.note ?? existing?.note,
-    source: existing?.source ?? "學員總表",
+    source: existing?.source ?? "學員名冊",
     isActive: existing?.isActive ?? true,
     needsReview: existing?.needsReview ?? false,
     createdAt: existing?.createdAt ?? now,
@@ -2182,7 +2182,7 @@ export async function saveStudentIdentityAction(formData: FormData) {
     .filter(Boolean);
   const note = String(formData.get("note") ?? "").trim();
 
-  if (!name || idNumberLast3.length !== 3) {
+  if (!name || idNumberLast3.length !== 3 || !phone) {
     redirect(appendAdminQuery(redirectTo, "error=invalid"));
   }
 
@@ -2321,7 +2321,7 @@ export async function saveStudentIdentityAction(formData: FormData) {
     source:
       String(formData.get("source") ?? "").trim() ||
       existing?.source ||
-      "學員總表手動建立",
+      "學員名冊手動建立",
     isActive: rosterStatus !== "inactive",
     needsReview: rosterStatus === "review",
     createdAt: existing?.createdAt ?? now,
@@ -2447,27 +2447,28 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
   );
   const headers = hasHeader ? firstCells : [];
   const rows = hasHeader ? lines.slice(1) : lines;
-  const nameIndex = hasHeader
-    ? getRosterColumnIndex(headers, ["姓名", "學員", "name"])
-    : 0;
-  const idIndex = hasHeader
-    ? getRosterColumnIndex(headers, ["末三碼", "證件", "idNumberLast3", "idLast3"])
-    : 1;
-  const phoneIndex = hasHeader
-    ? getRosterColumnIndex(headers, ["手機", "電話", "phone"])
-    : 2;
-  const birthdayIndex = hasHeader
-    ? getRosterColumnIndex(headers, ["生日", "birthday"])
-    : 3;
-  const memberIndex = hasHeader
-    ? getRosterColumnIndex(headers, ["會員編號", "會員", "memberNo", "member"])
-    : 4;
-  const noteIndex = hasHeader
-    ? getRosterColumnIndex(headers, ["備註", "note"])
-    : 5;
+  const headerMap: Map<string, number> | null = hasHeader
+    ? new Map(headers.map((h, i) => [h.toLowerCase().trim(), i]))
+    : null;
 
-  const seriesId = String(formData.get("seriesId") ?? "").trim();
-  const yearValue = String(formData.get("year") ?? "").trim();
+  function cellByAliases(aliases: string[], defaultIndex: number): number {
+    if (!headerMap) return defaultIndex;
+    for (const alias of aliases) {
+      const idx = headerMap.get(alias.toLowerCase().trim());
+      if (idx !== undefined && idx >= 0) return idx;
+    }
+    return defaultIndex;
+  }
+
+  const nameIndex = cellByAliases(["姓名", "學員", "name"], 0);
+  const idIndex = cellByAliases(["末三碼", "證件", "idNumberLast3", "idLast3"], 1);
+  const phoneIndex = cellByAliases(["手機", "電話", "phone"], 2);
+  const birthdayIndex = cellByAliases(["生日", "birthday"], 3);
+  const memberIndex = cellByAliases(["會員編號", "會員", "memberNo", "member"], 4);
+  const noteIndex = cellByAliases(["備註", "note"], 5);
+
+  let seriesId = String(formData.get("seriesId") ?? "").trim();
+  let yearValue = String(formData.get("year") ?? "").trim();
   const targetOfferingId = String(formData.get("targetOfferingId") ?? "").trim();
   const importNote = String(formData.get("note") ?? "").trim();
   const eligibilityStatus = normalizeEligibilityStatus(
@@ -2476,6 +2477,17 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
   const needsEligibility =
     importMode === "withEligibility" || importMode === "withEnrollment";
   const needsEnrollment = importMode === "withEnrollment";
+
+  if (!seriesId && targetOfferingId) {
+    const offering = data.courseOfferings.find(
+      (o) => o.id === targetOfferingId || o.legacyCourseId === targetOfferingId,
+    );
+    if (offering) {
+      seriesId = offering.courseSeriesId ?? offering.courseMasterId ?? offering.seriesId ?? "";
+      if (!yearValue && offering.year) yearValue = String(offering.year);
+    }
+  }
+
   const { series, targetOffering, year } = needsEligibility
     ? await resolveEligibilityContext(seriesId, yearValue, targetOfferingId)
     : { series: undefined, targetOffering: undefined, year: undefined };
@@ -2491,6 +2503,11 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
   let linkedCount = 0;
   let enrolledCount = 0;
   const now = new Date().toISOString();
+
+  function cellVal(cells: string[], aliases: string[], defaultIndex: number): string {
+    const idx = cellByAliases(aliases, defaultIndex);
+    return idx >= 0 ? String(cells[idx] ?? "").trim() : "";
+  }
 
   for (const row of rows) {
     const cells = splitRosterLine(row);
@@ -2509,12 +2526,61 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
       id: studentId,
       name,
       idNumberLast3,
+      // Required-contact fields
       phone: getRosterCell(cells, phoneIndex) || existing?.phone || "",
-      birthday:
-        getRosterCell(cells, birthdayIndex) || existing?.birthday || null,
+      birthday: getRosterCell(cells, birthdayIndex) || existing?.birthday || null,
+      // Basic info
+      englishName: cellVal(cells, ["英文姓名", "英文名", "englishName"], 3) || existing?.englishName,
+      nationalId: cellVal(cells, ["身分證字號", "身分證", "nationalId"], 4) || existing?.nationalId,
+      gender: cellVal(cells, ["性別", "gender"], 5) || existing?.gender,
+      birthPlace: cellVal(cells, ["出生地", "birthPlace"], 6) || existing?.birthPlace,
       memberNo: getRosterCell(cells, memberIndex) || existing?.memberNo,
+      // Contact
+      landline: cellVal(cells, ["市話", "landline"], 7) || existing?.landline,
+      email: cellVal(cells, ["Email", "email", "信箱"], 8) || existing?.email,
+      lineId: cellVal(cells, ["Line ID", "lineId", "line"], 9) || existing?.lineId,
+      mailingAddress: cellVal(cells, ["通訊地址", "mailingAddress"], 10) || existing?.mailingAddress,
+      householdAddress: cellVal(cells, ["戶籍地址", "householdAddress"], 11) || existing?.householdAddress,
+      emergencyContactName: cellVal(cells, ["緊急聯絡人", "emergencyContactName"], 12) || existing?.emergencyContactName,
+      emergencyContactPhone: cellVal(cells, ["緊急聯絡人電話", "emergencyContactPhone"], 13) || existing?.emergencyContactPhone,
+      // Background
+      educationLevel: cellVal(cells, ["最高學歷", "教育程度", "educationLevel"], 14) || existing?.educationLevel,
+      graduationSchool: cellVal(cells, ["畢業學校", "graduationSchool"], 15) || existing?.graduationSchool,
+      major: cellVal(cells, ["科系", "major"], 16) || existing?.major,
+      maritalStatus: cellVal(cells, ["婚姻狀態", "婚姻狀況", "maritalStatus"], 17) || existing?.maritalStatus,
+      childrenCount: (() => { const v = cellVal(cells, ["子女數", "childrenCount"], 18); return v ? Number(v) || undefined : existing?.childrenCount; })(),
+      childrenAges: cellVal(cells, ["子女年齡", "childrenAges"], 19) || existing?.childrenAges,
+      employmentStatus: cellVal(cells, ["目前職業狀態", "就業狀態", "employmentStatus"], 20) || existing?.employmentStatus,
+      companyName: cellVal(cells, ["公司名稱", "companyName"], 21) || existing?.companyName,
+      jobTitle: cellVal(cells, ["職稱", "jobTitle"], 22) || existing?.jobTitle,
+      workExperience: cellVal(cells, ["工作年資", "workExperience"], 23) || existing?.workExperience,
+      industryCategory: cellVal(cells, ["產業類別", "行業類別", "industryCategory"], 24) || existing?.industryCategory,
+      beautyRelated: cellVal(cells, ["美容相關行業", "美容相關", "beautyRelated"], 25) || existing?.beautyRelated,
+      // Startup / business
+      startupStatus: cellVal(cells, ["創業狀態", "startupStatus"], 26) || existing?.startupStatus,
+      startupExperience: cellVal(cells, ["創業年資", "創業經驗", "startupExperience"], 27) || existing?.startupExperience,
+      startupType: cellVal(cells, ["創業類型", "startupType"], 28) || existing?.startupType,
+      brandName: cellVal(cells, ["品牌名稱", "brandName"], 29) || existing?.brandName,
+      hasBusinessRegistration: cellVal(cells, ["營業登記", "hasBusinessRegistration"], 30) || existing?.hasBusinessRegistration,
+      businessRegistrationStatus: cellVal(cells, ["營業登記狀況", "businessRegistrationStatus"], 31) || existing?.businessRegistrationStatus,
+      taxId: cellVal(cells, ["統一編號", "taxId"], 32) || existing?.taxId,
+      businessCategories: (() => { const v = cellVal(cells, ["主要營業項目", "businessCategories"], -1); return v ? v.split(/[,，、]/).map((s) => s.trim()).filter(Boolean) : existing?.businessCategories; })(),
+      businessPlaceType: cellVal(cells, ["營業場所類型", "businessPlaceType"], -1) || existing?.businessPlaceType,
+      businessAddress: cellVal(cells, ["營業地址", "businessAddress"], -1) || existing?.businessAddress,
+      operationMode: cellVal(cells, ["經營型態", "operationMode"], -1) || existing?.operationMode,
+      customerType: cellVal(cells, ["主要客群", "客戶類型", "customerType"], -1) || existing?.customerType,
+      serviceDescription: cellVal(cells, ["服務項目說明", "serviceDescription"], -1) || existing?.serviceDescription,
+      // Scale
+      employeeStatus: cellVal(cells, ["固定員工", "僱用狀況", "employeeStatus"], -1) || existing?.employeeStatus,
+      employeeCountRange: cellVal(cells, ["員工人數級距", "employeeCountRange"], -1) || existing?.employeeCountRange,
+      fullTimeEmployees: (() => { const v = cellVal(cells, ["正職人數", "fullTimeEmployees"], -1); return v ? Number(v) || undefined : existing?.fullTimeEmployees; })(),
+      partTimeEmployees: (() => { const v = cellVal(cells, ["兼職人數", "partTimeEmployees"], -1); return v ? Number(v) || undefined : existing?.partTimeEmployees; })(),
+      capitalRange: cellVal(cells, ["資本額級距", "capitalRange"], -1) || existing?.capitalRange,
+      monthlyRevenueRange: cellVal(cells, ["月營業額級距", "monthlyRevenueRange"], -1) || existing?.monthlyRevenueRange,
+      annualRevenueRange: cellVal(cells, ["年營業額級距", "annualRevenueRange"], -1) || existing?.annualRevenueRange,
+      // Misc
+      source: (cellVal(cells, ["資料來源", "source"], -1) || existing?.source) ?? "Excel / CSV 學員名冊匯入",
       note: getRosterCell(cells, noteIndex) || importNote || existing?.note,
-      source: existing?.source ?? "Excel / CSV 學員總表匯入",
       isActive: true,
       needsReview: false,
       createdAt: existing?.createdAt ?? now,
