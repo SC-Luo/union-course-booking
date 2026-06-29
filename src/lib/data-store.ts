@@ -17,6 +17,24 @@ import type {
 
 const dataFilePath = path.join(process.cwd(), "data", "booking-data.json");
 
+function isProduction() {
+  return process.env.NODE_ENV === "production";
+}
+
+function shouldUseFirestore() {
+  return process.env.BOOKING_DATA_SOURCE === "firestore";
+}
+
+function allowJsonFallback() {
+  return !isProduction();
+}
+
+function checkFirestoreFallback() {
+  if (shouldUseFirestore() && !allowJsonFallback()) {
+    throw new Error("Firestore is required in production but is not available (JSON fallback disabled).");
+  }
+}
+
 const emptyBookingData: BookingData = {
   categories: [],
   courses: [],
@@ -33,6 +51,7 @@ const emptyBookingData: BookingData = {
 };
 
 export function readBookingData(): BookingData {
+  checkFirestoreFallback();
   try {
     const raw = fs.readFileSync(dataFilePath, "utf8");
     return normalizeBookingData(JSON.parse(raw) as Partial<BookingData>);
@@ -43,6 +62,7 @@ export function readBookingData(): BookingData {
 }
 
 export function writeBookingData(data: BookingData) {
+  checkFirestoreFallback();
   fs.mkdirSync(path.dirname(dataFilePath), { recursive: true });
   fs.writeFileSync(dataFilePath, `${JSON.stringify(normalizeBookingData(data), null, 2)}\n`, "utf8");
 }

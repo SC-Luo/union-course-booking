@@ -5,11 +5,12 @@ import { redirect } from "next/navigation";
 
 export async function adminLoginAction(formData: FormData) {
   const password = String(formData.get("password") ?? "");
+  const next = String(formData.get("next") ?? "").trim();
   const expectedPassword = process.env.ADMIN_PASSWORD;
   const sessionSecret = process.env.ADMIN_SESSION_SECRET;
 
   if (!expectedPassword || !sessionSecret || password !== expectedPassword) {
-    redirect("/admin/login?error=invalid");
+    redirect(`/admin/login?error=invalid${next ? `&next=${encodeURIComponent(next)}` : ""}`);
   }
 
   const cookieStore = await cookies();
@@ -21,5 +22,9 @@ export async function adminLoginAction(formData: FormData) {
     maxAge: 60 * 60 * 8,
   });
 
-  redirect("/admin");
+  if (next && next.startsWith("/admin")) {
+    redirect(next);
+  } else {
+    redirect("/admin");
+  }
 }

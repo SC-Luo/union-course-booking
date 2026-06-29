@@ -69,7 +69,9 @@ npm.cmd run build
 - `src/lib/data-store.ts`：本機 JSON 正規化與讀寫。
 - `src/lib/booking-repository.ts`：Firestore / JSON 資料存取。
 - `src/lib/firebase-admin.ts`：Firebase Admin 初始化。
+- `src/middleware.ts`：後台登入權限保護 Middleware。
 - `tools/sync-firestore-from-booking-data.mjs`：以本機 `data/booking-data.json` 備份、清理並回灌 Firestore 指定 collections。
+- `tools/check-production-readiness.mjs`：正式上線環境變數排查工具。
 - `data/booking-data.json`：本機 JSON 備援資料。
 
 更多檔案位置請讀 `filemap.md`。
@@ -81,7 +83,7 @@ npm.cmd run build
 - Firestore 已有正式集合：`categories`、`courses`、`sessions`、`students`、`reservations`。
 - 專案也有延伸集合：`courseSeries`、`courseOfferings`、`courseSessions`、`enrollments`、`attendanceRecords`、`entitlements`、`studentCourseRecords`、`instructors`、`importBatches`。
 - 資料來源由 `BOOKING_DATA_SOURCE=firestore` 控制。
-- Firestore 初始化或讀寫失敗時，資料層會回落使用本機 JSON。
+- 開發環境中，若 Firestore 連線失敗，資料層會回落使用本機 JSON。在正式環境 (Production) 中，若設定為使用 firestore 卻連線或讀寫失敗，將直接拋出錯誤 (Error)，不再默默 Fallback 到 JSON。
 
 ## 部署狀態
 

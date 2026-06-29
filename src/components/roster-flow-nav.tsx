@@ -3,13 +3,14 @@
 import Link from "next/link";
 
 type RosterFlowNavProps = {
-  current: "students" | "imports" | "eligibility" | "history";
+  current: "students" | "imports" | "eligibility" | "instructors" | "history";
 };
 
 const links = [
   { key: "students", label: "學員名冊", href: "/admin/students" },
   { key: "imports", label: "匯入資料", href: "/admin/student-imports" },
   { key: "eligibility", label: "課程資格", href: "/admin/students?mode=eligibility" },
+  { key: "instructors", label: "講師名冊", href: "/admin/students?mode=instructors" },
   { key: "history", label: "學員履歷", href: "/admin/students?mode=history" },
 ] as const;
 

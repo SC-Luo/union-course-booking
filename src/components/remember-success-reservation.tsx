@@ -26,6 +26,15 @@ export function RememberSuccessReservation() {
         }),
       );
 
+      window.localStorage.setItem(
+        "union_booking_student_profile",
+        JSON.stringify({
+          name: pending.studentName,
+          idNumberLast3: pending.idNumberLast3,
+          updatedAt: new Date().toISOString(),
+        })
+      );
+
       window.localStorage.removeItem(PENDING_KEY);
     } catch {
       window.localStorage.removeItem(PENDING_KEY);

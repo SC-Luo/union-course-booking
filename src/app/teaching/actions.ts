@@ -68,9 +68,10 @@ function encodeRouteSegment(value: string) {
     .replace(/%5C/gi, "~5C");
 }
 
-function buildTeachingSessionPath(sessionId: string, teacherName: string) {
+function buildTeachingSessionPath(sessionId: string, teacherName: string, code?: string) {
   const params = new URLSearchParams();
   if (teacherName) params.set("name", teacherName);
+  if (code) params.set("code", code);
   const query = params.toString();
   return `/teaching/sessions/${encodeRouteSegment(sessionId)}${query ? `?${query}` : ""}`;
 }
@@ -126,6 +127,7 @@ export async function updateTeachingAttendanceAction(formData: FormData) {
   const courseId = String(formData.get("courseId") ?? "").trim();
   const studentId = String(formData.get("studentId") ?? "").trim();
   const teacherName = String(formData.get("teacherName") ?? "").trim();
+  const code = String(formData.get("code") ?? "").trim();
   const attendanceStatus = String(formData.get("attendanceStatus") ?? "") as AttendanceStatus;
   const leaveHoursRaw = Number(formData.get("leaveHours") ?? 0);
   const leaveHours = Number.isFinite(leaveHoursRaw) && leaveHoursRaw > 0 ? leaveHoursRaw : undefined;
@@ -133,7 +135,7 @@ export async function updateTeachingAttendanceAction(formData: FormData) {
   const leaveEndTime = String(formData.get("leaveEndTime") ?? "").trim() || undefined;
   const lateTime = String(formData.get("lateTime") ?? "").trim() || undefined;
   const effectiveLeaveHours = attendanceStatus === "leave" ? computeLeaveHoursFromTimeRange(leaveStartTime, leaveEndTime) ?? leaveHours : leaveHours;
-  const fallback = sessionId ? `${buildTeachingSessionPath(sessionId, teacherName)}#attendance-list` : "/teaching/login";
+  const fallback = sessionId ? `${buildTeachingSessionPath(sessionId, teacherName, code)}#attendance-list` : "/teaching/login";
   const redirectTo = safeTeachingRedirectPath(String(formData.get("redirectTo") ?? ""), fallback);
 
   if (!sessionId || !studentId || !["pending", "unchecked", "attended", "late", "absent", "leave"].includes(attendanceStatus)) {
@@ -181,7 +183,8 @@ export async function updateTeachingAttendanceAction(formData: FormData) {
 export async function completeTeachingAttendanceAction(formData: FormData) {
   const sessionId = String(formData.get("sessionId") ?? "").trim();
   const teacherName = String(formData.get("teacherName") ?? "").trim();
-  const fallback = sessionId ? `${buildTeachingSessionPath(sessionId, teacherName)}#attendance-list` : "/teaching/login";
+  const code = String(formData.get("code") ?? "").trim();
+  const fallback = sessionId ? `${buildTeachingSessionPath(sessionId, teacherName, code)}#attendance-list` : "/teaching/login";
   const redirectTo = safeTeachingRedirectPath(String(formData.get("redirectTo") ?? ""), fallback);
 
   const resolved = await resolveAuthorizedTeachingSession(sessionId, teacherName);
@@ -207,11 +210,12 @@ const TEACHING_JOURNAL_FIELDS = new Set([
 export async function saveTeachingJournalAction(formData: FormData) {
   const sessionId = String(formData.get("sessionId") ?? "").trim();
   const teacherName = String(formData.get("teacherName") ?? "").trim();
+  const code = String(formData.get("code") ?? "").trim();
   const field = String(formData.get("field") ?? "").trim();
   const value = String(formData.get("value") ?? "").trim();
   const sessionStatus = String(formData.get("sessionStatus") ?? "").trim();
   const attendanceStatus = String(formData.get("attendanceStatus") ?? "").trim();
-  const fallback = sessionId ? `${buildTeachingSessionPath(sessionId, teacherName)}#lesson-journal` : "/teaching/login";
+  const fallback = sessionId ? `${buildTeachingSessionPath(sessionId, teacherName, code)}#lesson-journal` : "/teaching/login";
   const redirectTo = safeTeachingRedirectPath(String(formData.get("redirectTo") ?? ""), fallback);
 
   const hasJournalField = Boolean(field);

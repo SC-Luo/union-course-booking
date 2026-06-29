@@ -254,18 +254,24 @@ export default async function AdminHomePage() {
       <section className="rounded-[30px] border border-[#ead8ca] bg-[#fffdf9] p-6 shadow-[0_16px_45px_rgba(90,55,38,0.07)] sm:p-7">
         <p className="text-sm font-semibold text-[#B46F4A]">快速入口</p>
         <h2 className="mt-1 text-2xl font-black text-[#1f1712]">常用功能</h2>
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {[
-            ["課程類別", "/admin/course-categories"],
-            ["課程目錄", "/admin/course-masters"],
-            ["年度課程", "/admin/course-offerings"],
-            ["課堂詳情", "/admin/course-sessions"],
-            ["報名總覽", "/admin/weekly-bookings"],
-            ["鎖定管理", "/admin/booking-locks"],
-            ["學員名冊", "/admin/students?mode=students"],
-            ["統計匯出", "/admin/stats"],
-          ].map(([label, href]) => (
-            <Link key={href} href={href} className="rounded-2xl border border-[#eaded3] bg-white px-4 py-4 text-sm font-bold text-[#5A3726] hover:border-[#B46F4A]/35 hover:bg-[#fff9f3]">{label} →</Link>
+            ["課程類別", "/admin/course-categories", "定義課程分類與顯示顏色"],
+            ["課程目錄", "/admin/course-masters", "建立課程大綱與預設值"],
+            ["年度課程", "/admin/course-offerings", "管理各年度班級與名額"],
+            ["課堂詳情", "/admin/course-sessions", "編輯單堂課排程與狀態"],
+            ["報名總覽", "/admin/weekly-bookings", "查看每週預約情形"],
+            ["鎖定管理", "/admin/booking-locks", "鎖定時段或開放規則"],
+            ["學員名冊", "/admin/students?mode=students", "管理正式學員名冊與資料"],
+            ["待確認新生", "/admin/students?status=review", "查看新生自填資料，確認資料完整性"],
+            ["統計匯出", "/admin/stats", "匯出資料與出席率統計"],
+          ].map(([label, href, desc]) => (
+            <Link key={href} href={href} className="flex flex-col justify-between rounded-2xl border border-[#eaded3] bg-white p-5 text-[#5A3726] hover:border-[#B46F4A]/35 hover:bg-[#fff9f3] transition-all">
+              <div>
+                <p className="text-base font-bold">{label} →</p>
+                <p className="mt-1 text-xs text-[#8a7c72] leading-relaxed">{desc}</p>
+              </div>
+            </Link>
           ))}
         </div>
       </section>

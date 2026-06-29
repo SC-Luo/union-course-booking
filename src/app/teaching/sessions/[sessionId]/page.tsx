@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { AttendanceStatusControls } from "@/app/admin/sessions/[sessionId]/reservations/attendance-status-controls";
 import { ReservationNoteAutosave } from "@/app/admin/sessions/[sessionId]/reservations/reservation-note-autosave";
 import { SessionJournalAutosave } from "@/app/admin/sessions/[sessionId]/reservations/session-journal-autosave";
@@ -19,7 +20,7 @@ export const dynamic = "force-dynamic";
 
 type PageProps = {
   params: Promise<{ sessionId: string }>;
-  searchParams: Promise<{ name?: string; attendance?: string; q?: string }>;
+  searchParams: Promise<{ name?: string; attendance?: string; q?: string; code?: string }>;
 };
 
 type AttendanceRow = Reservation & { isRosterOnly?: boolean };
@@ -576,8 +577,14 @@ export default async function TeachingSessionPage({
   searchParams,
 }: PageProps) {
   const { sessionId } = await params;
-  const { name = "", attendance = "all", q = "" } = await searchParams;
+  const { name = "", attendance = "all", q = "", code = "" } = await searchParams;
   const teacherName = name.trim();
+
+  // 驗證 TEACHING_ACCESS_CODE
+  const accessCode = process.env.TEACHING_ACCESS_CODE;
+  if (teacherName && accessCode && code !== accessCode) {
+    redirect(`/teaching/login?error=invalid&name=${encodeURIComponent(teacherName)}`);
+  }
   const {
     courses,
     reservations,
@@ -596,7 +603,7 @@ export default async function TeachingSessionPage({
             這堂課不存在或已無法讀取，請回授課工作台重新選擇課堂。
           </p>
           <Link
-            href={`/teaching?name=${encodeURIComponent(teacherName)}`}
+            href={`/teaching?name=${encodeURIComponent(teacherName)}${code ? `&code=${encodeURIComponent(code)}` : ""}`}
             className="mt-5 inline-flex rounded-2xl bg-[#5A3726] px-5 py-3 text-sm font-black text-white"
           >
             回授課工作台
@@ -631,7 +638,7 @@ export default async function TeachingSessionPage({
   }
 
   const encodedSessionId = encodeRouteSegment(session.id);
-  const currentUrl = `/teaching/sessions/${encodedSessionId}?name=${encodeURIComponent(teacherName)}&attendance=${encodeURIComponent(attendance)}&q=${encodeURIComponent(q)}#attendance-list`;
+  const currentUrl = `/teaching/sessions/${encodedSessionId}?name=${encodeURIComponent(teacherName)}&attendance=${encodeURIComponent(attendance)}&q=${encodeURIComponent(q)}${code ? `&code=${encodeURIComponent(code)}` : ""}#attendance-list`;
   const attendanceRows = buildAttendanceRows({
     course,
     session,
@@ -762,10 +769,11 @@ export default async function TeachingSessionPage({
       <form action={saveTeachingJournalAction} className="grid gap-5">
         <input type="hidden" name="sessionId" value={session.id} />
         <input type="hidden" name="teacherName" value={teacherName} />
+        <input type="hidden" name="code" value={code} />
         <input
           type="hidden"
           name="redirectTo"
-          value={`/teaching/sessions/${encodedSessionId}?name=${encodeURIComponent(teacherName)}#session-workspace`}
+          value={`/teaching/sessions/${encodedSessionId}?name=${encodeURIComponent(teacherName)}${code ? `&code=${encodeURIComponent(code)}` : ""}#session-workspace`}
         />
 
         <section className="rounded-[24px] border border-[#ead8ca] bg-[#fffdf9] p-4">
@@ -927,7 +935,7 @@ export default async function TeachingSessionPage({
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <Link
-                href={`/teaching?name=${encodeURIComponent(teacherName)}`}
+                href={`/teaching?name=${encodeURIComponent(teacherName)}${code ? `&code=${encodeURIComponent(code)}` : ""}`}
                 className="text-xs font-black text-[#E85F00] hover:underline"
               >
                 回授課工作台
@@ -1038,6 +1046,7 @@ export default async function TeachingSessionPage({
             <form className="grid gap-2 sm:grid-cols-[1fr_auto] lg:w-[440px]">
               <input type="hidden" name="name" value={teacherName} />
               <input type="hidden" name="attendance" value={attendanceFilter} />
+              <input type="hidden" name="code" value={code} />
               <input
                 name="q"
                 defaultValue={q}
@@ -1085,7 +1094,7 @@ export default async function TeachingSessionPage({
               return (
                 <Link
                   key={item.value}
-                  href={`/teaching/sessions/${encodedSessionId}?name=${encodeURIComponent(teacherName)}&attendance=${item.value}&q=${encodeURIComponent(q)}#attendance-list`}
+                  href={`/teaching/sessions/${encodedSessionId}?name=${encodeURIComponent(teacherName)}&attendance=${item.value}&q=${encodeURIComponent(q)}${code ? `&code=${encodeURIComponent(code)}` : ""}#attendance-list`}
                   className={`rounded-2xl border px-3 py-2 text-center text-sm font-black transition lg:min-w-[88px] ${toneClass}`}
                 >
                   <span className="block leading-5">{item.label}</span>
@@ -1099,6 +1108,7 @@ export default async function TeachingSessionPage({
             <form action={completeTeachingAttendanceAction}>
               <input type="hidden" name="sessionId" value={session.id} />
               <input type="hidden" name="teacherName" value={teacherName} />
+              <input type="hidden" name="code" value={code} />
               <input type="hidden" name="redirectTo" value={currentUrl} />
               <button
                 type="submit"
@@ -1110,6 +1120,7 @@ export default async function TeachingSessionPage({
             <form action={saveTeachingJournalAction}>
               <input type="hidden" name="sessionId" value={session.id} />
               <input type="hidden" name="teacherName" value={teacherName} />
+              <input type="hidden" name="code" value={code} />
               <input type="hidden" name="attendanceStatus" value="completed" />
               <input type="hidden" name="redirectTo" value={currentUrl} />
               <button

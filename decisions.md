@@ -83,13 +83,28 @@ related:
 
 ## 技術決策
 
-### 資料來源採 Firestore + JSON 備援
+### 資料來源採 Firestore + JSON 備援 (開發環境專屬)
 
-正式資料來源可由 `BOOKING_DATA_SOURCE=firestore` 控制。Firebase Admin 憑證缺失或 Firestore 讀寫失敗時，資料層回落使用本機 JSON，避免本機開發完全中斷。
+正式資料來源可由 `BOOKING_DATA_SOURCE=firestore` 控制。在開發與測試環境下，若 Firebase Admin 憑證缺失或 Firestore 讀寫失敗時，資料層回落使用本機 JSON。在正式上線生產環境 (Production) 中，若設定為使用 firestore 但其連線初始化或讀寫出錯，將直接拋出錯誤 (Error) 予以中斷阻斷，禁止默默 Fallback 回落到本機 JSON。
 
 ### 公開學生端使用窄讀取
 
 公開首頁與課程頁應優先使用 `getCourseCatalog()`，避免下載或查詢完整預約與名冊資料。
+
+### 後台登入權限保護 (Middleware)
+
+正式上線前引入 `src/middleware.ts` 機制，保護所有以 `/admin` 開頭的後台頁面（排除登入頁 `/admin/login`）。若偵測不到正確的 `admin_session` 密鑰 cookie，將強制跳轉並保留 `next` 原網址參數，待登入成功後跳轉回原頁面。
+
+### 講師入口授課通行碼機制
+
+為防止姓名登入被濫用，在不大改權限架構的前提下，新增 `TEACHING_ACCESS_CODE` 環境變數。當此變數有值時，講師登入頁會額外要求通行碼，並將通行碼透過 URL query 往下傳遞以維持授課點名會話。
+
+### 學員前台記憶機制與個資隔離
+
+為提升學員預約查詢體驗，在新生資料自填成功、以及課程預約成功時，系統將學員姓名寫入本機 `localStorage` 的 `union_booking_student_profile` 中。
+- 當學員存取預約查詢時，若 URL 無 query name，自動依此記憶進行 URL 重導向與查詢。
+- 為確保隱私與個資安全，此機制只存姓名，絕不在 `localStorage` 與 URL 傳遞任何身分證字號、生日、地址或電話等敏感個資。
+- 提供「改用其他姓名查詢」按鈕以讓多人共用裝置的環境能主動清除記憶。
 
 ### 暫時關閉 no-explicit-any
 

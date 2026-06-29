@@ -12,7 +12,7 @@ export default function BookingSuccessPage() {
         <h1 className="text-2xl font-semibold text-zinc-950">已完成預約</h1>
 
         <p className="mt-4 leading-7 text-zinc-600">
-          請用姓名查詢自己的預約紀錄。這台裝置也會記住本次預約資訊，方便下次查看。
+          請用姓名與身分證後三碼查詢自己的預約紀錄。這台裝置也會記住本次預約資訊，方便下次查看。
         </p>
 
         <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">

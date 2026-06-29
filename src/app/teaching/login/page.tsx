@@ -23,7 +23,7 @@ export default async function TeachingLoginPage({ searchParams }: PageProps) {
 
           {error ? (
             <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700">
-              找不到符合的授課人員或課堂，請確認姓名是否與講師名冊一致。
+              找不到符合的授課人員，或通行碼不正確。請確認輸入資訊是否一致。
             </div>
           ) : null}
 
@@ -39,6 +39,18 @@ export default async function TeachingLoginPage({ searchParams }: PageProps) {
                 required
               />
             </label>
+            {process.env.TEACHING_ACCESS_CODE ? (
+              <label className="grid gap-2 text-sm font-black text-[#5A3726]">
+                授課通行碼
+                <input
+                  name="code"
+                  type="password"
+                  required
+                  className="h-12 rounded-2xl border border-[#dbcabd] bg-[#fffdf9] px-4 text-base font-bold outline-none transition focus:border-[#E85F00] focus:ring-4 focus:ring-orange-100"
+                  placeholder="請輸入通行碼"
+                />
+              </label>
+            ) : null}
             <button className="h-12 rounded-2xl bg-[#5A3726] px-5 text-sm font-black text-white shadow-sm transition hover:brightness-105">
               進入授課工作台
             </button>

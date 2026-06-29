@@ -64,6 +64,7 @@ const IMPORT_ELIGIBILITY_STATUSES = ELIGIBILITY_STATUSES;
 const MODES = [
   ["students", "學員名冊", "匯入與新增學員基本資料"],
   ["eligibility", "課程資格", "選擇指定班級後，批量加入尚未加入的學員"],
+  ["instructors", "講師名冊", "管理講師基本資料、授課專長與狀態"],
   ["history", "學習履歷", "彙整學員資格、梯次、報名與出席紀錄"],
 ] as const;
 
@@ -865,7 +866,7 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
 
       {currentMode !== "students" ? (
         <>
-          <RosterFlowNav current={currentMode as "eligibility" | "history"} />
+          <RosterFlowNav current={currentMode as "eligibility" | "instructors" | "history"} />
 
           {currentMode === "history" ? (
             <section className="mt-6 rounded-[1.75rem] border border-[#ead7c6] bg-white p-5 shadow-sm">

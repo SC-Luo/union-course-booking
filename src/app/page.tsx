@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { CourseViewSwitcher } from "@/components/course-view-switcher";
 import { LastReservationCard } from "@/components/last-reservation-card";
 import { StudentShell } from "@/components/page-shell";
@@ -13,24 +14,68 @@ export default async function Home() {
     <StudentShell>
       <LastReservationCard />
 
-      <section className="mb-8 overflow-hidden rounded-[2rem] border border-[#ead8c6] bg-gradient-to-br from-[#fffaf5] via-[#f8eadc] to-[#eed2b8] p-6 shadow-sm sm:p-8">
-        <div className="grid gap-6 lg:grid-cols-[1fr_320px] lg:items-center">
-          <div>
-            <p className="mb-3 inline-flex rounded-full bg-white/85 px-4 py-2 text-sm font-bold text-[#9b4f1f] shadow-sm">
-              學員中心
-            </p>
-            <h1 className="text-3xl font-black tracking-tight text-[#34231a] sm:text-5xl">
-              查看課程、預約與查詢
-            </h1>
-          </div>
-          <div className="rounded-3xl border border-white/75 bg-white/80 p-5 text-sm leading-6 text-[#6f4b35] shadow-sm">
-            <p className="font-black text-[#3a2a20]">預約提醒</p>
-            <p className="mt-2">
-              自費預約制課程會在開課前 7 天鎖定預約與取消，請提前完成預約。
-            </p>
-          </div>
-        </div>
+      {/* 學員入口分流 */}
+      <section className="mb-8 grid gap-4 sm:grid-cols-3">
+        {[
+          {
+            title: "我要預約課程",
+            desc: "查看目前可預約的課程與時段",
+            btnText: "查看課程",
+            href: "#course-list",
+            bg: "from-[#fffaf5] to-[#fcf4ec]",
+          },
+          {
+            title: "我的預約",
+            desc: "查詢或取消已預約的課程",
+            btnText: "查詢預約",
+            href: "/booking/search",
+            bg: "from-[#fffaf5] to-[#f9ece0]",
+          },
+          {
+            title: "第一次使用",
+            desc: "尚未建立學員資料的新生請先填寫",
+            btnText: "填寫新生資料",
+            href: "/new-student",
+            bg: "from-[#fffaf5] to-[#f4e1d0]",
+          },
+        ].map((item) => (
+          <article
+            key={item.href}
+            className={`flex flex-col justify-between rounded-[2rem] border border-[#ead8c6] bg-gradient-to-br ${item.bg} p-6 shadow-sm transition hover:shadow-md`}
+          >
+            <div>
+              <h2 className="text-xl font-black text-[#6b3b25]">{item.title}</h2>
+              <p className="mt-2 text-sm leading-relaxed text-[#8a6855]">{item.desc}</p>
+            </div>
+            <div className="mt-6">
+              {item.href.startsWith("#") ? (
+                <a
+                  href={item.href}
+                  className="inline-flex w-full items-center justify-center rounded-2xl bg-[#6b3b25] px-5 py-3.5 text-sm font-bold text-white shadow-sm transition hover:bg-[#522d1b]"
+                >
+                  {item.btnText}
+                </a>
+              ) : (
+                <Link
+                  href={item.href}
+                  className="inline-flex w-full items-center justify-center rounded-2xl bg-[#6b3b25] px-5 py-3.5 text-sm font-bold text-white shadow-sm transition hover:bg-[#522d1b]"
+                >
+                  {item.btnText}
+                </Link>
+              )}
+            </div>
+          </article>
+        ))}
       </section>
+
+      {/* 預約提醒小條 */}
+      <div className="mb-8 flex items-start gap-2.5 rounded-2xl border border-[#ead8c6] bg-[#fffaf5] p-4 text-sm text-[#8a6855] shadow-sm">
+        <span className="mt-1.5 inline-flex h-2 w-2 shrink-0 rounded-full bg-[#ef6c00]" />
+        <p className="leading-6">
+          <strong className="font-black text-[#6b3b25]">預約提醒：</strong>
+          自費預約制課程會在開課前 7 天鎖定預約與取消，請提前完成預約。
+        </p>
+      </div>
 
       <section id="course-list">
         <CourseViewSwitcher courses={activeCourses} categories={activeCategories} />

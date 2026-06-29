@@ -8,14 +8,29 @@ function shouldUseFirestore() {
   return process.env.BOOKING_DATA_SOURCE === "firestore";
 }
 
+function isProduction() {
+  return process.env.NODE_ENV === "production";
+}
+
+function allowJsonFallback() {
+  return !isProduction();
+}
+
 function getFirestoreDb() {
   if (!shouldUseFirestore()) {
     return null;
   }
 
   try {
-    return getAdminDb();
+    const db = getAdminDb();
+    if (!db && !allowJsonFallback()) {
+      throw new Error("Firestore is required in production but is not available.");
+    }
+    return db;
   } catch (error) {
+    if (!allowJsonFallback()) {
+      throw new Error(`Firestore is required in production but is not available. Error: ${error instanceof Error ? error.message : String(error)}`);
+    }
     console.warn("Firestore initialization failed, falling back to local booking data.", error);
     return null;
   }
@@ -140,14 +155,14 @@ export async function getCourseCatalog(): Promise<Pick<BookingData, "categories"
   }
 }
 
-export async function findReservationsByStudent(studentName: string, phoneLastThree = ""): Promise<Reservation[]> {
+export async function findReservationsByStudent(studentName: string, phoneLastThree: string): Promise<Reservation[]> {
   const idNumberLast3 = cleanIdentityLast3(phoneLastThree);
-  if (!studentName) {
+  if (!studentName || !idNumberLast3) {
     return [];
   }
   const matchesStudent = (reservation: Reservation) =>
     normalizeName(reservation.studentName) === normalizeName(studentName) &&
-    (!idNumberLast3 || cleanIdentityLast3(reservation.idNumberLast3 ?? reservation.phoneLastThree) === idNumberLast3);
+    cleanIdentityLast3(reservation.idNumberLast3 ?? reservation.phoneLastThree) === idNumberLast3;
 
   const db = getFirestoreDb();
 
@@ -157,13 +172,12 @@ export async function findReservationsByStudent(studentName: string, phoneLastTh
   }
 
   try {
-    let query = db.collection("reservations").where("studentName", "==", studentName);
-    if (idNumberLast3) {
-      query = query.where("phoneLastThree", "==", idNumberLast3);
-    }
+    const query = db.collection("reservations").where("studentName", "==", studentName);
     const snapshot = await query.get();
 
-    return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Reservation);
+    return snapshot.docs
+      .map((doc) => ({ id: doc.id, ...doc.data() }) as Reservation)
+      .filter(matchesStudent);
   } catch (error) {
     console.warn("Firestore reservation search failed, falling back to local booking data.", error);
     const data = readBookingData();
@@ -233,18 +247,7 @@ function isEffectiveEnrollment(enrollment: Enrollment, course: Course, session: 
   return offeringMatches || seriesMatches;
 }
 
-function findEligibleStudentInData(data: BookingData, course: Course, session: CourseSession, studentName: string) {
-  const normalizedName = normalizeName(studentName);
-  if (!normalizedName) return null;
 
-  const matchedStudents = (data.students ?? []).filter(
-    (student) => normalizeName(student.name) === normalizedName && student.isActive !== false,
-  );
-
-  return matchedStudents.find((student) =>
-    (data.enrollments ?? []).some((enrollment) => enrollment.studentId === student.id && isEffectiveEnrollment(enrollment, course, session)),
-  ) ?? null;
-}
 
 function isSessionBookable(session: CourseSession) {
   const status = session.status ?? "scheduled";
@@ -282,9 +285,19 @@ export async function createReservation(input: CreateReservationInput) {
       const studentSnapshot = await transaction.get(
         db.collection("students").where("name", "==", input.studentName).limit(20),
       );
-      const candidateStudents = studentSnapshot.docs
+      const nameMatchedStudents = studentSnapshot.docs
         .map((doc) => ({ id: doc.id, ...doc.data() }) as Student)
         .filter((student) => student.isActive !== false);
+
+      if (nameMatchedStudents.length === 0) {
+        return { ok: false as const, reason: "not_roster" };
+      }
+
+      const cleanInputLast3 = cleanIdentityLast3(input.idNumberLast3 || input.phoneLastThree);
+      const candidateStudents = nameMatchedStudents.filter((student) => {
+        const studentLast3 = cleanIdentityLast3(student.idNumberLast3) || cleanIdentityLast3(student.phone).slice(-3);
+        return studentLast3 === cleanInputLast3;
+      });
 
       let eligibleStudent: Student | undefined;
       for (const student of candidateStudents) {
@@ -301,7 +314,11 @@ export async function createReservation(input: CreateReservationInput) {
       }
 
       if (!eligibleStudent) {
-        return { ok: false as const, reason: "not_roster" };
+        const isIdentityMismatch = nameMatchedStudents.some((student) => {
+          const studentLast3 = cleanIdentityLast3(student.idNumberLast3) || cleanIdentityLast3(student.phone).slice(-3);
+          return studentLast3 !== cleanInputLast3;
+        });
+        return { ok: false as const, reason: isIdentityMismatch ? "identity_mismatch" : "not_roster" };
       }
 
       // 預約制課程允許同一位學員預約同一期課程底下的不同上課日期；
@@ -830,7 +847,8 @@ export async function cancelReservation(reservationId: string, studentName: stri
 
     if (
       normalizeName(reservation.studentName) !== normalizeName(studentName) ||
-      (phoneLastThree && cleanIdentityLast3(reservation.idNumberLast3 ?? reservation.phoneLastThree) !== cleanIdentityLast3(phoneLastThree)) ||
+      !phoneLastThree ||
+      cleanIdentityLast3(reservation.idNumberLast3 ?? reservation.phoneLastThree) !== cleanIdentityLast3(phoneLastThree) ||
       reservation.status !== "booked"
     ) {
       return { ok: false as const, reason: "invalid" };
@@ -937,10 +955,30 @@ function createReservationInJson(input: CreateReservationInput) {
     return { ok: false as const, reason: "not_booking" };
   }
 
-  const eligibleStudent = findEligibleStudentInData(data, course, session, input.studentName);
+  const nameMatchedStudents = (data.students ?? []).filter(
+    (student) => normalizeName(student.name) === normalizeName(input.studentName) && student.isActive !== false
+  );
+
+  if (nameMatchedStudents.length === 0) {
+    return { ok: false as const, reason: "not_roster" };
+  }
+
+  const cleanInputLast3 = cleanIdentityLast3(input.idNumberLast3 || input.phoneLastThree);
+  const eligibleStudent = nameMatchedStudents
+    .filter((student) => {
+      const studentLast3 = cleanIdentityLast3(student.idNumberLast3) || cleanIdentityLast3(student.phone).slice(-3);
+      return studentLast3 === cleanInputLast3;
+    })
+    .find((student) =>
+      (data.enrollments ?? []).some((enrollment) => enrollment.studentId === student.id && isEffectiveEnrollment(enrollment, course, session)),
+    );
 
   if (!eligibleStudent) {
-    return { ok: false as const, reason: "not_roster" };
+    const isIdentityMismatch = nameMatchedStudents.some((student) => {
+      const studentLast3 = cleanIdentityLast3(student.idNumberLast3) || cleanIdentityLast3(student.phone).slice(-3);
+      return studentLast3 !== cleanInputLast3;
+    });
+    return { ok: false as const, reason: isIdentityMismatch ? "identity_mismatch" : "not_roster" };
   }
 
   // 預約制課程允許同一位學員預約同一期課程底下的不同上課日期；
@@ -976,7 +1014,8 @@ function cancelReservationInJson(reservationId: string, studentName: string, pho
     (item) =>
       item.id === reservationId &&
       normalizeName(item.studentName) === normalizeName(studentName) &&
-      (!phoneLastThree || cleanIdentityLast3(item.idNumberLast3 ?? item.phoneLastThree) === cleanIdentityLast3(phoneLastThree)) &&
+      phoneLastThree &&
+      cleanIdentityLast3(item.idNumberLast3 ?? item.phoneLastThree) === cleanIdentityLast3(phoneLastThree) &&
       item.status === "booked",
   );
   const session = data.courses.flatMap((course) => course.sessions).find((item) => item.id === reservation?.sessionId);

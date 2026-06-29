@@ -21,6 +21,22 @@ related:
 
 本文件只記錄會影響後續 AI 接手、產品方向、技術架構、資料結構或開發流程的重要變更。不要貼完整聊天紀錄，也不要記錄每一行小改動。
 
+## 2026-06-29
+
+### 本次變更
+
+- **前台學員預約改回「姓名＋身分證後三碼」**：修改預約表單 [`src/components/booking-form.tsx`](file:///C:/Users/User/codex-projects/union-course-booking/src/components/booking-form.tsx) 與查詢頁 [`src/app/booking/search/page.tsx`](file:///C:/Users/User/codex-projects/union-course-booking/src/app/booking/search/page.tsx)，強制限制預約與查詢均需輸入「姓名 + 身分證後三碼」作為比對憑證。同步調整 `localStorage` 前台使用者記憶、自填成功跳轉與預約成功記憶元件，僅儲存並帶入姓名與身分證後三碼，嚴防敏感個資在 URL 及本機儲存殘留。
+- **自動帶入「我的預約」查詢資料**：新增學員前台記憶機制，在新生資料填寫成功、以及預約成功時，在 client-side 將姓名存入 `localStorage`。當學員進入預約查詢頁 `/booking/search` 時自動帶入並轉跳執行查詢，同時於查詢頁上方顯示提示與「改用其他姓名查詢」按鈕以支持清除記憶，兼顧體驗與多人裝置的隱私。
+- **引入後台登入權限保護 (Middleware)**：新增 `src/middleware.ts`，保護所有 `/admin` 後台路由（排除 `/admin/login`），若 `admin_session` cookie 不存在或不符，將強行跳轉至登入頁並攜帶 `next` 跳轉參數。更新 `/admin/login` 表單及 Actions 以支援成功登入後回跳原路徑。
+- **正式環境中禁止 Fallback 到 JSON**：修改 `src/lib/data-store.ts` 與 `src/lib/booking-repository.ts`，在 Production 環境且啟用 Firestore 時，若 Firestore 發生任何初始化或讀寫連線失敗，均直接丟出 Error，禁止默默 fallback 回落讀寫本機 JSON。
+- **新生公開表單安全與防垃圾送出**：修改 `/new-student` 頁面與 Actions，加載簡短個資告知文字、個資同意 checkbox 必填校驗，並新增隱藏的 `website` honeypot 欄位，在後端默默重導向機器人提交以過濾垃圾。
+- **講師入口授課通行碼機制**：為避免姓名登入的安全風險，支援 `TEACHING_ACCESS_CODE` 共用授課通行碼。若該環境變數有值，講師登入頁將顯示並驗證通行碼，並在所有列表、單堂點名與 Server Actions 重導向路徑中藉由 URL query 傳遞會話 `code`，防範未經授權存取點名頁面與會話中途被登出。
+- **環境變數排查工具**：新增 `tools/check-production-readiness.mjs`，並於 `package.json` 加入 `check:prod` script，可用於一鍵排查 Vercel 部署前是否缺少必要環境變數且不印出變數真實內容。
+- **入口分流整理**：新增身分入口總頁 `/portal`。學生端首頁最上方調整為三大分流卡片，後台首頁快速入口常用功能中新增「待確認新生」快捷卡片與說明。
+- **修復講師名冊導覽錯誤**：修復了後台「名冊資料 > 講師名冊」導向失效問題，正式將 `instructors` 加入 `MODES` 合法清單，並修正 `RosterFlowNav` 元件型別。
+- **同步備份公司試算表**：完成了 Google Sheet 同步目標切換至公司帳號的 GAS Web App Webhook URL 與 Spreadsheet ID。
+- **建立 LAUNCH_CHECKLIST**：新增 `docs/LAUNCH_CHECKLIST.md`，詳列 12 大上線前安全與穩定度排查驗收項目。
+
 ## 2026-06-08
 
 ### 本次變更

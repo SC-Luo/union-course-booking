@@ -2,25 +2,28 @@
 import { cancelReservationAction } from "@/app/actions";
 import { StudentShell } from "@/components/page-shell";
 import { ReservationStatusBadge } from "@/components/status-badge";
+import { BookingSearchAutofill, BookingSearchResetBanner } from "@/components/booking-search-autofill";
 import { findReservationsByStudent, getCourseCatalog } from "@/lib/booking-repository";
 import { canChangeReservation, formatReservationCutoff, getCategoryName, getCourse, getSession, resolveCourseColor } from "@/lib/course-utils";
 
 type PageProps = {
-  searchParams: Promise<{ name?: string; error?: string }>;
+  searchParams: Promise<{ name?: string; idNumberLast3?: string; error?: string }>;
 };
 
 export default async function BookingSearchPage({ searchParams }: PageProps) {
-  const { name = "", error } = await searchParams;
+  const { name = "", idNumberLast3 = "", error } = await searchParams;
   const normalizedName = name.trim();
-  const hasQuery = normalizedName.length > 0;
+  const normalizedLast3 = idNumberLast3.trim();
+  const hasQuery = normalizedName.length > 0 && normalizedLast3.length === 3;
   const [{ categories, courses }, filteredReservations] = await Promise.all([
     getCourseCatalog(),
-    hasQuery ? findReservationsByStudent(normalizedName) : Promise.resolve([]),
+    hasQuery ? findReservationsByStudent(normalizedName, normalizedLast3) : Promise.resolve([]),
   ]);
   const activeReservations = filteredReservations.filter((reservation) => reservation.status === "booked");
 
   return (
     <StudentShell>
+      {!hasQuery ? <BookingSearchAutofill /> : null}
       <section className="mb-8 rounded-[2rem] border border-[#ead8c6] bg-white/80 p-6 shadow-sm">
         <a href="/" className="mb-4 inline-flex rounded-full border border-[#d8bda4] bg-white px-4 py-2 text-sm font-semibold text-[#6f4325] hover:bg-[#fff4e8]">
           返回課程列表
@@ -30,24 +33,50 @@ export default async function BookingSearchPage({ searchParams }: PageProps) {
         <p className="mt-3 max-w-2xl text-sm leading-6 text-[#7b6252]">請輸入預約姓名，查詢目前有效的預約。可預約與取消的最後時間為該課堂開課前 7 天 18:00。</p>
       </section>
 
+      <BookingSearchResetBanner currentName={normalizedName} />
+
       <form action="/booking/search" className="mb-6 rounded-[1.75rem] border border-[#ead8c6] bg-white p-5 shadow-sm">
-        <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+        <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-[1fr_1fr_auto] md:items-end">
           <label className="block">
             <span className="mb-2 block text-sm font-bold text-[#34231a]">姓名</span>
             <input
               name="name"
               defaultValue={name}
+              required
               className="w-full rounded-2xl border border-[#d8bda4] bg-[#fffaf5] px-4 py-3 outline-none focus:border-[#9b4f1f] focus:bg-white focus:ring-4 focus:ring-[#f3e1d0]"
               placeholder="請輸入名冊中的姓名"
             />
           </label>
-          <button className="rounded-full bg-[#9b4f1f] px-6 py-3 text-sm font-bold text-white shadow-sm hover:bg-[#7d3e18]">查詢</button>
+          <label className="block">
+            <span className="mb-2 block text-sm font-bold text-[#34231a]">身分證後三碼</span>
+            <input
+              name="idNumberLast3"
+              defaultValue={idNumberLast3}
+              required
+              maxLength={3}
+              pattern="\d{3}"
+              className="w-full rounded-2xl border border-[#d8bda4] bg-[#fffaf5] px-4 py-3 outline-none focus:border-[#9b4f1f] focus:bg-white focus:ring-4 focus:ring-[#f3e1d0]"
+              placeholder="請輸入身分證後 3 碼"
+            />
+          </label>
+          <button className="h-12 w-full rounded-full bg-[#9b4f1f] px-6 text-sm font-bold text-white shadow-sm hover:bg-[#7d3e18] sm:col-span-2 md:col-span-1 md:w-auto">
+            查詢
+          </button>
         </div>
       </form>
 
       <section className="grid gap-4">
         {error === "closed" ? <article className="rounded-[1.5rem] border border-rose-200 bg-rose-50 p-5 text-rose-800">這堂課已進入鎖定時間，無法取消預約。</article> : null}
-        {!hasQuery ? <article className="rounded-[1.5rem] border border-[#ead8c6] bg-white p-5 text-[#7b6252]">請輸入預約姓名後查詢預約。</article> : null}
+        {!hasQuery && normalizedName.length > 0 && normalizedLast3.length !== 3 ? (
+          <article className="rounded-[1.5rem] border border-amber-200 bg-amber-50 p-5 text-amber-800 font-medium">
+            請補填正確的身分證後三碼以進行查詢。
+          </article>
+        ) : null}
+        {!hasQuery && (normalizedName.length === 0 || normalizedLast3.length === 0) ? (
+          <article className="rounded-[1.5rem] border border-[#ead8c6] bg-white p-5 text-[#7b6252]">
+            請輸入預約姓名與身分證後三碼後查詢預約。
+          </article>
+        ) : null}
         {hasQuery && activeReservations.length === 0 ? <article className="rounded-[1.5rem] border border-[#ead8c6] bg-white p-5 text-[#7b6252]">目前查不到有效預約。</article> : null}
         {activeReservations.map((reservation) => {
           const course = getCourse(reservation.courseId, courses);
@@ -80,6 +109,7 @@ export default async function BookingSearchPage({ searchParams }: PageProps) {
                   <form action={cancelReservationAction} className="mt-5">
                     <input type="hidden" name="reservationId" value={reservation.id} />
                     <input type="hidden" name="studentName" value={normalizedName} />
+                    <input type="hidden" name="idNumberLast3" value={normalizedLast3} />
                     <button className="w-full rounded-full border border-rose-300 px-4 py-3 text-sm font-bold text-rose-700 hover:bg-rose-50 sm:w-auto">取消這筆預約</button>
                   </form>
                 ) : null}

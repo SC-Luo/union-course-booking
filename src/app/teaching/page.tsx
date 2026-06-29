@@ -1,11 +1,12 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { getBookingData } from "@/lib/booking-repository";
 import type { Course, CourseCategory, CourseSession, Instructor } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 type PageProps = {
-  searchParams: Promise<{ name?: string; view?: string; month?: string; date?: string }>;
+  searchParams: Promise<{ name?: string; view?: string; month?: string; date?: string; code?: string }>;
 };
 
 type TeachingSessionItem = {
@@ -201,24 +202,28 @@ function buildCalendarDays(monthDate: Date, sessions: TeachingSessionItem[]): Ca
   });
 }
 
-function dashboardHref({ name, view, month, date }: { name: string; view: string; month: string; date?: string }) {
+function dashboardHref({ name, view, month, date, code }: { name: string; view: string; month: string; date?: string; code?: string }) {
   const params = new URLSearchParams();
   params.set("name", name);
   params.set("view", view);
   params.set("month", month);
   if (date) params.set("date", date);
+  if (code) params.set("code", code);
   return `/teaching?${params.toString()}`;
 }
 
-function teachingSessionHref(sessionId: string, teacherName: string) {
-  return `/teaching/sessions/${encodeRouteSegment(sessionId)}?name=${encodeURIComponent(teacherName)}`;
+function teachingSessionHref(sessionId: string, teacherName: string, code?: string) {
+  const params = new URLSearchParams();
+  params.set("name", teacherName);
+  if (code) params.set("code", code);
+  return `/teaching/sessions/${encodeRouteSegment(sessionId)}?${params.toString()}`;
 }
 
 function countBookedReservations(reservations: Array<{ sessionId: string; status?: string }>, sessionId: string) {
   return reservations.filter((item) => item.sessionId === sessionId && item.status === "booked").length;
 }
 
-function CalendarSessionCard({ item, teacherName, bookedCount }: { item: TeachingSessionItem; teacherName: string; bookedCount: number }) {
+function CalendarSessionCard({ item, teacherName, bookedCount, code }: { item: TeachingSessionItem; teacherName: string; bookedCount: number; code?: string }) {
   const content = (
     <div className="flex items-start gap-3">
       <span className="mt-1 h-3.5 w-3.5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
@@ -254,7 +259,7 @@ function CalendarSessionCard({ item, teacherName, bookedCount }: { item: Teachin
 
   return (
     <Link
-      href={teachingSessionHref(item.session.id, teacherName)}
+      href={teachingSessionHref(item.session.id, teacherName, code)}
       className="group block rounded-[22px] border border-[#ead8ca] bg-white p-4 transition hover:border-[#E85F00] hover:bg-[#fff7ed]"
       aria-label={`進入 ${displayCourseTitle(item.course)} 的授課頁`}
     >
@@ -268,8 +273,15 @@ function CalendarSessionCard({ item, teacherName, bookedCount }: { item: Teachin
 }
 
 export default async function TeachingDashboardPage({ searchParams }: PageProps) {
-  const { name = "", view = "all", month: monthParam, date } = await searchParams;
+  const { name = "", view = "all", month: monthParam, date, code = "" } = await searchParams;
   const teacherName = name.trim();
+
+  // 驗證 TEACHING_ACCESS_CODE
+  const accessCode = process.env.TEACHING_ACCESS_CODE;
+  if (teacherName && accessCode && code !== accessCode) {
+    redirect(`/teaching/login?error=invalid&name=${encodeURIComponent(teacherName)}`);
+  }
+
   const activeView = view === "all" ? "all" : "mine";
   const monthDate = getMonthFromParam(monthParam);
   const monthKey = getMonthParam(monthDate);
@@ -343,10 +355,10 @@ export default async function TeachingDashboardPage({ searchParams }: PageProps)
               <p className="mt-1 text-xs leading-5 text-[#8a7c72]">預設只看你負責的課堂；需要協助其他課堂時，再切換到全部課堂。</p>
             </div>
             <div className="grid grid-cols-2 gap-2 rounded-[20px] bg-[#fff7ef] p-1 text-sm font-black">
-              <Link href={dashboardHref({ name: teacherName, view: "all", month: monthKey, date: selectedDate })} className={`rounded-2xl px-4 py-2 text-center ${activeView === "all" ? "bg-[#E85F00] text-white shadow-sm" : "text-[#5A3726] hover:bg-white"}`}>
+              <Link href={dashboardHref({ name: teacherName, view: "all", month: monthKey, date: selectedDate, code })} className={`rounded-2xl px-4 py-2 text-center ${activeView === "all" ? "bg-[#E85F00] text-white shadow-sm" : "text-[#5A3726] hover:bg-white"}`}>
                 全部課堂
               </Link>
-              <Link href={dashboardHref({ name: teacherName, view: "mine", month: monthKey, date: selectedDate })} className={`rounded-2xl px-4 py-2 text-center ${activeView === "mine" ? "bg-[#E85F00] text-white shadow-sm" : "text-[#5A3726] hover:bg-white"}`}>
+              <Link href={dashboardHref({ name: teacherName, view: "mine", month: monthKey, date: selectedDate, code })} className={`rounded-2xl px-4 py-2 text-center ${activeView === "mine" ? "bg-[#E85F00] text-white shadow-sm" : "text-[#5A3726] hover:bg-white"}`}>
                 我的課堂
               </Link>
             </div>
@@ -355,13 +367,13 @@ export default async function TeachingDashboardPage({ searchParams }: PageProps)
           <div className="mt-5 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
             <div className="rounded-[28px] border border-[#ead8ca] bg-[#fffdf9] p-3 sm:p-4">
               <div className="mb-4 grid grid-cols-3 gap-2">
-                <Link href={dashboardHref({ name: teacherName, view: activeView, month: getMonthParam(shiftMonth(monthDate, -1)), date: selectedDate })} className="rounded-full bg-[#3a2a20] px-3 py-2 text-center text-sm font-bold text-white">
+                <Link href={dashboardHref({ name: teacherName, view: activeView, month: getMonthParam(shiftMonth(monthDate, -1)), date: selectedDate, code })} className="rounded-full bg-[#3a2a20] px-3 py-2 text-center text-sm font-bold text-white">
                   上月
                 </Link>
-                <Link href={dashboardHref({ name: teacherName, view: activeView, month: getMonthParam(new Date()), date: todayKey })} className="rounded-full border border-[#d8bda4] bg-white px-3 py-2 text-center text-sm font-bold text-[#6f4325]">
+                <Link href={dashboardHref({ name: teacherName, view: activeView, month: getMonthParam(new Date()), date: todayKey, code })} className="rounded-full border border-[#d8bda4] bg-white px-3 py-2 text-center text-sm font-bold text-[#6f4325]">
                   今天
                 </Link>
-                <Link href={dashboardHref({ name: teacherName, view: activeView, month: getMonthParam(shiftMonth(monthDate, 1)), date: selectedDate })} className="rounded-full bg-[#3a2a20] px-3 py-2 text-center text-sm font-bold text-white">
+                <Link href={dashboardHref({ name: teacherName, view: activeView, month: getMonthParam(shiftMonth(monthDate, 1)), date: selectedDate, code })} className="rounded-full bg-[#3a2a20] px-3 py-2 text-center text-sm font-bold text-white">
                   下月
                 </Link>
               </div>
@@ -380,7 +392,7 @@ export default async function TeachingDashboardPage({ searchParams }: PageProps)
                   return (
                     <Link
                       key={`${day.date}-${index}`}
-                      href={dashboardHref({ name: teacherName, view: activeView, month: monthKey, date: day.date })}
+                      href={dashboardHref({ name: teacherName, view: activeView, month: monthKey, date: day.date, code })}
                       className={`min-h-16 border-r border-t border-[#ead8c6] p-1 text-left align-top ${isSelected ? "bg-[#fff4e8] ring-2 ring-inset ring-[#d9823b]" : "bg-white"} ${day.isCurrentMonth ? "text-[#34231a]" : "text-[#c7ac94]"}`}
                     >
                       <div className="flex items-center justify-between gap-1">
@@ -420,7 +432,7 @@ export default async function TeachingDashboardPage({ searchParams }: PageProps)
                   </div>
                 ) : null}
                 {selectedSessions.map((item) => (
-                  <CalendarSessionCard key={item.session.id} item={item} teacherName={teacherName} bookedCount={countBookedReservations(reservations, item.session.id)} />
+                  <CalendarSessionCard key={item.session.id} item={item} teacherName={teacherName} bookedCount={countBookedReservations(reservations, item.session.id)} code={code} />
                 ))}
               </div>
             </aside>
@@ -441,7 +453,7 @@ export default async function TeachingDashboardPage({ searchParams }: PageProps)
             {mySessions.filter((item) => item.session.date === todayKey).map((item) => (
               <Link
                 key={item.session.id}
-                href={teachingSessionHref(item.session.id, teacherName)}
+                href={teachingSessionHref(item.session.id, teacherName, code)}
                 className="group rounded-[22px] border border-[#ead8ca] bg-[#fffdf9] p-4 transition hover:border-[#E85F00] hover:bg-[#fff7ed]"
                 aria-label={`進入 ${displayCourseTitle(item.course)} 的授課頁`}
               >
