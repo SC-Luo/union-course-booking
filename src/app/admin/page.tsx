@@ -1,6 +1,7 @@
+
 import Link from "next/link";
 import { AdminShell } from "@/components/page-shell";
-import { getBookingData } from "@/lib/booking-repository";
+import { getBookingData, getDataSourceStatus } from "@/lib/booking-repository";
 import {
   getEnrollmentOfferingId,
   getOfferingForCourse,
@@ -46,6 +47,7 @@ function getCourseGroupLabel(courseType?: string) {
 }
 
 export default async function AdminHomePage() {
+  const status = await getDataSourceStatus();
   const {
     categories = [],
     courses,
@@ -165,6 +167,44 @@ export default async function AdminHomePage() {
 
   return (
     <AdminShell currentSection="dashboard">
+      {/* 資料來源診斷 Banner */}
+      <div className="mb-6 rounded-2xl border p-4 text-sm shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white"
+        style={{
+          borderColor: !status.usingFirestore && status.runtime === "production" ? "#ef4444" : "#ead8ca",
+          backgroundColor: !status.usingFirestore && status.runtime === "production" ? "#fef2f2" : "#fffdf9",
+        }}
+      >
+        <div className="flex items-center gap-3">
+          <span className={`inline-flex items-center justify-center h-2.5 w-2.5 rounded-full ${
+            status.usingFirestore ? "bg-emerald-500" : "bg-amber-500"
+          }`} />
+          <div className="text-[#34231a]">
+            <span className="font-bold">資料來源診斷：</span>
+            <span>本地設定為 `{status.bookingDataSource}`</span>
+            <span className="mx-2 text-[#ead8ca]">|</span>
+            <span>當前系統使用：</span>
+            <span className="font-semibold">{status.usingFirestore ? "Firestore 資料庫" : "本機 JSON 備援"}</span>
+            <span className="mx-2 text-[#ead8ca]">|</span>
+            <span>執行環境：</span>
+            <span className="font-semibold">{status.runtime}</span>
+          </div>
+        </div>
+        
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[#6f4b35]">
+          <span>課程數：<strong className="text-[#1f1712]">{status.counts.courses}</strong></span>
+          <span>學員數：<strong className="text-[#1f1712]">{status.counts.students}</strong></span>
+          <span>預約數：<strong className="text-[#1f1712]">{status.counts.reservations}</strong></span>
+          <span className="text-[#8a7c72]">{status.updatedAt.slice(11, 19)}</span>
+        </div>
+      </div>
+      
+      {/* 警告通知 */}
+      {!status.usingFirestore && status.runtime === "production" ? (
+        <div className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800 font-bold leading-6">
+          ⚠️ 警告：正式環境目前沒有成功連線並使用 Firestore！系統目前被迫回落使用本機 JSON 備援資料來源。請立即檢查部署平台（Vercel）的環境變數設定。
+        </div>
+      ) : null}
+
       <section className="mb-8 rounded-[34px] border border-[#ead8ca] bg-gradient-to-br from-[#fffaf4] via-[#fffdf9] to-[#f5e6d9] p-7 shadow-[0_20px_70px_rgba(90,55,38,0.08)]">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
           <div>

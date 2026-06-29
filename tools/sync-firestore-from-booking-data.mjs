@@ -155,6 +155,28 @@ async function main() {
     return;
   }
 
+  console.log(`即將將本地 JSON 資料匯入至 Firestore 專案 [${projectId}]。`);
+  console.log("預計匯入數量：", JSON.stringify(localCounts, null, 2));
+  console.log("注意：此操作將會清空並覆寫 Firestore 線上現有的資料！已有的線上資料會先備份至 firestore-backups 資料夾。");
+  
+  const readline = await import("node:readline");
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  const confirmInput = await new Promise((resolve) => {
+    rl.question("\n請輸入 'IMPORT_TO_FIRESTORE' 確認執行匯入：\n", (answer) => {
+      resolve(answer.trim());
+    });
+  });
+  rl.close();
+
+  if (confirmInput !== "IMPORT_TO_FIRESTORE") {
+    console.log("確認輸入不符，已取消匯入操作。");
+    process.exit(0);
+  }
+
   const backup = await backupCollections(db, backupCollectionIds);
   const deleted = {};
   const written = {};

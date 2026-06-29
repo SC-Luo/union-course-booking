@@ -1920,3 +1920,37 @@ export async function deleteInstructorIdentityDocument(instructorId: string) {
     applyLocal();
   }
 }
+
+export async function getDataSourceStatus() {
+  const db = getFirestoreDb();
+  const runtime = process.env.NODE_ENV || "development";
+  const bookingDataSource = process.env.BOOKING_DATA_SOURCE || "local-json";
+  const usingFirestore = db !== null;
+
+  let counts = {
+    courses: 0,
+    students: 0,
+    reservations: 0,
+    enrollments: 0,
+  };
+
+  try {
+    const data = await getBookingData();
+    counts = {
+      courses: data.courses?.length || 0,
+      students: data.students?.length || 0,
+      reservations: data.reservations?.length || 0,
+      enrollments: data.enrollments?.length || 0,
+    };
+  } catch (err) {
+    console.error("Failed to load booking data counts for status banner", err);
+  }
+
+  return {
+    runtime,
+    bookingDataSource,
+    usingFirestore,
+    counts,
+    updatedAt: new Date().toISOString(),
+  };
+}
