@@ -121,88 +121,138 @@ async function deleteCollection(db, collectionId) {
 
 async function seedCollection(db, collectionId, records) {
   let written = 0;
+  const BATCH_SIZE = 100;
 
-  for (let index = 0; index < records.length; index += 450) {
+  for (let index = 0; index < records.length; index += BATCH_SIZE) {
     const batch = db.batch();
-    for (const record of records.slice(index, index + 450)) {
+    const batchRecords = records.slice(index, index + BATCH_SIZE);
+    
+    for (const record of batchRecords) {
       if (!record?.id) {
         throw new Error(`Record in ${collectionId} is missing id.`);
       }
       batch.set(db.collection(collectionId).doc(String(record.id)), record);
       written += 1;
     }
+    
     await batch.commit();
+    console.log(`  [寫入進度] ${collectionId}: 已寫入 ${written}/${records.length} 筆`);
+    
+    if (index + BATCH_SIZE < records.length) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
   }
 
   return written;
 }
 
 async function main() {
-  const dryRun = process.argv.includes("--dry-run");
-  const apply = process.argv.includes("--apply");
-  if (!dryRun && !apply) {
-    throw new Error("Use --dry-run to inspect or --apply to backup, clear, and seed Firestore.");
+  const compareMode = process.argv.includes("--compare") || process.argv.includes("--dry-run");
+  const overwriteMode = process.argv.includes("--overwrite-from-local-json");
+  const targetProd = process.argv.includes("--target") && process.argv[process.argv.indexOf("--target") + 1] === "production";
+
+  if (!compareMode && !overwriteMode) {
+    throw new Error("必須指定操作模式：使用 --compare 進行對比，或使用 --overwrite-from-local-json 進行覆寫。");
   }
 
   const data = readJson(DATA_PATH);
   const { db, projectId } = initDb();
   const onlineCollections = await listTopCollections(db);
-  const backupCollectionIds = Array.from(new Set([...onlineCollections, ...TARGET_COLLECTIONS])).sort();
   const localCounts = Object.fromEntries(TARGET_COLLECTIONS.map((collectionId) => [collectionId, getLocalRecords(data, collectionId).length]));
 
-  if (dryRun) {
-    console.log(JSON.stringify({ ok: true, mode: "dry-run", projectId, onlineCollections, localCounts }, null, 2));
+  if (compareMode) {
+    console.log("=== 資料來源統計對比 ===");
+    console.log(`Firestore 專案：[${projectId}]`);
+    console.log("\n集合名稱 | 本地 JSON 筆數 | Firestore 線上筆數");
+    console.log("------------------------------------------------");
+    
+    for (const col of TARGET_COLLECTIONS) {
+      let onlineCount = 0;
+      try {
+        const snap = await db.collection(col).get();
+        onlineCount = snap.docs.length;
+      } catch (err) {
+        onlineCount = "錯誤";
+      }
+      console.log(`${col.padEnd(20)} | ${(String(localCounts[col])).padStart(14)} | ${(String(onlineCount)).padStart(16)}`);
+    }
     return;
   }
 
-  console.log(`即將將本地 JSON 資料匯入至 Firestore 專案 [${projectId}]。`);
-  console.log("預計匯入數量：", JSON.stringify(localCounts, null, 2));
-  console.log("注意：此操作將會清空並覆寫 Firestore 線上現有的資料！已有的線上資料會先備份至 firestore-backups 資料夾。");
-  
+  // 寫入覆寫模式
+  if (!targetProd) {
+    throw new Error("執行覆寫初始化必須指定 '--target production'，否則拒絕執行。");
+  }
+
+  console.log(`\n=== 警告：即將執行正式 Firestore 初始化覆寫 [${projectId}] ===`);
+  console.log("此操作將會清除 Firestore 上現有的所有資料，並用本地備援 JSON 初始化資料庫！");
+  console.log("\n預計寫入之本地資料筆數：", JSON.stringify(localCounts, null, 2));
+
   const readline = await import("node:readline");
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
   });
 
-  const confirmInput = await new Promise((resolve) => {
-    rl.question("\n請輸入 'IMPORT_TO_FIRESTORE' 確認執行匯入：\n", (answer) => {
-      resolve(answer.trim());
-    });
-  });
-  rl.close();
+  const askConfirm = (question) => new Promise((resolve) => rl.question(question, resolve));
 
-  if (confirmInput !== "IMPORT_TO_FIRESTORE") {
-    console.log("確認輸入不符，已取消匯入操作。");
+  const confirm1 = await askConfirm("\n[安全確認 1/3] 請輸入 'IMPORT_TO_FIRESTORE' 確認匯入：\n");
+  if (confirm1.trim() !== "IMPORT_TO_FIRESTORE") {
+    console.log("確認字串不符，已取消操作。");
+    rl.close();
     process.exit(0);
   }
 
-  const backup = await backupCollections(db, backupCollectionIds);
+  const confirm2 = await askConfirm("\n[安全確認 2/3] 請輸入 'OVERWRITE_PRODUCTION_FIRESTORE' 確認覆寫正式資料庫：\n");
+  if (confirm2.trim() !== "OVERWRITE_PRODUCTION_FIRESTORE") {
+    console.log("確認字串不符，已取消操作。");
+    rl.close();
+    process.exit(0);
+  }
+
+  const confirm3 = await askConfirm("\n[安全確認 3/3] 請輸入 'I_UNDERSTAND_THIS_WILL_REPLACE_PRODUCTION_DATA' 確認您瞭解後果：\n");
+  if (confirm3.trim() !== "I_UNDERSTAND_THIS_WILL_REPLACE_PRODUCTION_DATA") {
+    console.log("確認字串不符，已取消操作。");
+    rl.close();
+    process.exit(0);
+  }
+
+  rl.close();
+
+  // 開始自動備份
+  console.log("\n[自動防護] 開始進行線上 Firestore 快照備份...");
+  const { backupFirestoreSnapshot } = await import("./export-firestore-snapshot.mjs");
+  const backupResult = await backupFirestoreSnapshot(db, "pre-overwrite-init");
+  console.log(`[自動防護] 備份成功！存至：${backupResult.backupDir}`);
+
+  // 開始清空並寫入
+  console.log("\n[執行] 開始清空並覆寫正式 Firestore...");
   const deleted = {};
   const written = {};
 
   for (const collectionId of TARGET_COLLECTIONS) {
+    console.log(`正在清空集合：${collectionId}...`);
     deleted[collectionId] = await deleteCollection(db, collectionId);
   }
 
   for (const collectionId of TARGET_COLLECTIONS) {
+    console.log(`正在寫入集合：${collectionId}...`);
     written[collectionId] = await seedCollection(db, collectionId, getLocalRecords(data, collectionId));
   }
 
+  console.log("\n=== 匯入初始化成功完成！ ===");
   console.log(
     JSON.stringify(
       {
         ok: true,
-        mode: "apply",
         projectId,
-        backupDir: backup.backupDir,
-        backedUp: backup.summary,
+        backupDir: backupResult.backupDir,
         deleted,
         written,
       },
       null,
-      2,
-    ),
+      2
+    )
   );
 }
 

@@ -1,0 +1,157 @@
+{
+  "categories": [
+    {
+      "id": "TT",
+      "name": "測試分類",
+      "sortOrder": 1,
+      "color": "#06b6d4"
+    }
+  ],
+  "courses": [
+    {
+      "id": "course-master-tt-sf-sf-tt001",
+      "title": "測試課程主檔",
+      "categoryId": "TT",
+      "courseType": "SF",
+      "totalCapacity": 20,
+      "location": "教室 A",
+      "instructorId": "instructor-001",
+      "description": "測試課程說明",
+      "color": "#06b6d4",
+      "isActive": true,
+      "sessions": [
+        {
+          "id": "session-001",
+          "courseId": "course-master-tt-sf-sf-tt001",
+          "offeringId": "offering-001",
+          "categoryId": "TT",
+          "title": "第一堂課",
+          "startsAt": "2026-07-07T10:00:00+08:00",
+          "endsAt": "2026-07-07T12:00:00+08:00",
+          "date": "2026-07-07",
+          "capacity": 20,
+          "bookingDeadline": "2026-07-06 18:00",
+          "status": "scheduled",
+          "bookedCount": 0,
+          "createdAt": "2026-06-29T10:00:00.000Z",
+          "updatedAt": "2026-06-29T10:00:00.000Z"
+        }
+      ]
+    }
+  ],
+  "reservations": [
+    {
+      "id": "r-001",
+      "courseId": "course-master-tt-sf-sf-tt001",
+      "sessionId": "session-001",
+      "studentId": "student-001",
+      "studentName": "測試學員",
+      "idNumberLast3": "789",
+      "phoneLastThree": "789",
+      "status": "booked",
+      "attendanceStatus": "pending",
+      "createdAt": "2026-06-29T10:05:00.000Z"
+    }
+  ],
+  "students": [
+    {
+      "id": "student-001",
+      "name": "測試學員",
+      "idNumberLast3": "789",
+      "phone": "0911222333",
+      "birthday": "1995-10-10",
+      "email": "student@example.com",
+      "mailingAddress": "台中市公益路100號",
+      "address": "台中市公益路100號",
+      "emergencyContactName": "聯絡人",
+      "emergencyContactPhone": "0922333444",
+      "beautyRelated": "是",
+      "note": "去識別化範例學員",
+      "source": "新生自填入口",
+      "isActive": true,
+      "needsReview": false,
+      "createdAt": "2026-06-29T10:00:00.000Z",
+      "updatedAt": "2026-06-29T10:00:00.000Z",
+      "seatNumber": 1
+    }
+  ],
+  "courseSeries": [
+    {
+      "id": "course-master-tt-sf-sf-tt001",
+      "code": "SF-TT001",
+      "title": "測試課程主檔",
+      "categoryId": "TT",
+      "courseType": "SF",
+      "defaultCapacity": 20,
+      "color": "#06b6d4",
+      "isActive": true
+    }
+  ],
+  "courseOfferings": [
+    {
+      "id": "offering-001",
+      "seriesId": "course-master-tt-sf-sf-tt001",
+      "categoryId": "TT",
+      "title": "測試課程主檔",
+      "displayTitle": "測試課程主檔｜115年｜第1期",
+      "year": 115,
+      "term": "1",
+      "termLabel": "第1期",
+      "rosterType": "booking",
+      "courseType": "SF",
+      "bookingStatus": "open",
+      "bookingOpen": true,
+      "status": "open",
+      "color": "#06b6d4",
+      "isActive": true
+    }
+  ],
+  "courseSessions": [
+    {
+      "id": "session-001",
+      "offeringId": "offering-001",
+      "seriesId": "course-master-tt-sf-sf-tt001",
+      "categoryId": "TT",
+      "startsAt": "2026-07-07T10:00:00+08:00",
+      "endsAt": "2026-07-07T12:00:00+08:00",
+      "date": "2026-07-07",
+      "capacity": 20,
+      "bookingDeadline": "2026-07-06 18:00",
+      "status": "scheduled"
+    }
+  ],
+  "studentCourseRecords": [
+    {
+      "id": "elig-001",
+      "studentId": "student-001",
+      "seriesId": "course-master-tt-sf-sf-tt001",
+      "offeringId": "offering-001",
+      "recordType": "roster",
+      "year": 115,
+      "term": "1",
+      "termLabel": "第1期",
+      "isActive": true
+    }
+  ],
+  "enrollments": [
+    {
+      "id": "enroll-001",
+      "studentId": "student-001",
+      "offeringId": "offering-001",
+      "seriesId": "course-master-tt-sf-sf-tt001",
+      "enrollmentType": "roster",
+      "status": "active"
+    }
+  ],
+  "attendanceRecords": [],
+  "entitlements": [],
+  "importBatches": [],
+  "instructors": [
+    {
+      "id": "instructor-001",
+      "name": "測試講師",
+      "phone": "0911000222",
+      "isActive": true
+    }
+  ]
+}
