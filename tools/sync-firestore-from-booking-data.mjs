@@ -2,11 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { cert, getApps, initializeApp } from "firebase-admin/app";
-import { FieldPath, getFirestore } from "firebase-admin/firestore";
+import { getFirestore } from "firebase-admin/firestore";
 
 const DATA_PATH = path.join(process.cwd(), "data", "booking-data.json");
 const KEY_PATH = path.join(process.cwd(), "firebase-admin-key.json");
-const BACKUP_ROOT = path.join(process.cwd(), "firestore-backups");
 const TARGET_COLLECTIONS = [
   "categories",
   "courses",
@@ -24,9 +23,7 @@ const TARGET_COLLECTIONS = [
   "importBatches",
 ];
 
-function timestamp() {
-  return new Date().toISOString().replace(/[:.]/g, "-");
-}
+
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -78,30 +75,9 @@ function initDb() {
   return { db: getFirestore(), projectId };
 }
 
-async function listTopCollections(db) {
-  const collections = await db.listCollections();
-  return collections.map((collection) => collection.id).sort();
-}
 
-async function listCollectionDocs(db, collectionId) {
-  const snapshot = await db.collection(collectionId).orderBy(FieldPath.documentId()).get();
-  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-}
 
-async function backupCollections(db, collectionIds) {
-  const backupDir = path.join(BACKUP_ROOT, timestamp());
-  fs.mkdirSync(backupDir, { recursive: true });
 
-  const summary = {};
-  for (const collectionId of collectionIds) {
-    const docs = await listCollectionDocs(db, collectionId);
-    summary[collectionId] = docs.length;
-    fs.writeFileSync(path.join(backupDir, `${collectionId}.json`), `${JSON.stringify(docs, null, 2)}\n`, "utf8");
-  }
-
-  fs.writeFileSync(path.join(backupDir, "_summary.json"), `${JSON.stringify(summary, null, 2)}\n`, "utf8");
-  return { backupDir, summary };
-}
 
 async function deleteCollection(db, collectionId) {
   let deleted = 0;
@@ -157,7 +133,6 @@ async function main() {
 
   const data = readJson(DATA_PATH);
   const { db, projectId } = initDb();
-  const onlineCollections = await listTopCollections(db);
   const localCounts = Object.fromEntries(TARGET_COLLECTIONS.map((collectionId) => [collectionId, getLocalRecords(data, collectionId).length]));
 
   if (compareMode) {
@@ -171,7 +146,7 @@ async function main() {
       try {
         const snap = await db.collection(col).get();
         onlineCount = snap.docs.length;
-      } catch (err) {
+      } catch {
         onlineCount = "錯誤";
       }
       console.log(`${col.padEnd(20)} | ${(String(localCounts[col])).padStart(14)} | ${(String(onlineCount)).padStart(16)}`);
