@@ -37,6 +37,7 @@ firebase-admin-key.json
 *firebase-admin*.json
 data/beauty-june-*.json
 data/*.backup*.json
+data/booking-data.json
 firestore-backups/
 extracted_*.jpg
 

@@ -21,6 +21,12 @@ related:
 
 本文件只記錄會影響後續 AI 接手、產品方向、技術架構、資料結構或開發流程的重要變更。不要貼完整聊天紀錄，也不要記錄每一行小改動。
 
+## 2026-06-30
+
+### 本次變更
+
+- **正式上線安全防禦與流程建立**：建立了正式上線後開發流程指南 [`docs/POST_LAUNCH_WORKFLOW.md`](file:///C:/Users/User/codex-projects/union-course-booking/docs/POST_LAUNCH_WORKFLOW.md)，重新配置 `.env.local.example` 以及 `package.json` 指令標記。執行 `git rm --cached` 移除了 `data/booking-data.json` 在 Git 庫中的追蹤，並在 `.gitignore` 中予以排除，建立去識別化 Dummy 範本 [`data/booking-data.example.json`](file:///C:/Users/User/codex-projects/union-course-booking/data/booking-data.example.json) 杜絕個資洩漏隱患。
+
 ## 2026-06-29
 
 ### 本次變更

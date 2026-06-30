@@ -34,6 +34,7 @@ related:
 
 ## 最近處理
 
+- 2026-06-30 正式上線安全防禦與開發流建立：撰寫了 [`docs/POST_LAUNCH_WORKFLOW.md`](file:///C:/Users/User/codex-projects/union-course-booking/docs/POST_LAUNCH_WORKFLOW.md)。重寫同步腳本，加入三層確認鎖、強制生產資料庫快照備份、以及 100 筆分批節流限速。執行 git cached 移除了 `data/booking-data.json` 追蹤防範個資洩漏，並建立去識別化範本檔案。
 - 2026-06-29 將前台學員預約與預約查詢改回「姓名 + 身分證後三碼」：修改了 [`booking-form.tsx`](file:///C:/Users/User/codex-projects/union-course-booking/src/components/booking-form.tsx)、[`search/page.tsx`](file:///C:/Users/User/codex-projects/union-course-booking/src/app/booking/search/page.tsx)、[`actions.ts`](file:///C:/Users/User/codex-projects/union-course-booking/src/app/actions.ts) 與 [`booking-repository.ts`](file:///C:/Users/User/codex-projects/union-course-booking/src/lib/booking-repository.ts)。預約資格過濾及查詢均強制同時比對姓名與後三碼，以防止同名同姓誤判。同時更新前台 `localStorage` 記憶與頁面提示。
 - 2026-06-29 實現學員前台使用者記憶機制：在新生資料填寫成功（`/new-student/success`）或預約成功時，在 client-side 將姓名儲存至 `localStorage` 的 `union_booking_student_profile`。當進入 `/booking/search` 且 URL 中沒有 query 時，自動導向並執行預約查詢；查詢頁面頂部支援「改用其他姓名查詢」按鈕以清除記憶。
 - 2026-06-29 執行上線前安全與穩定性排查修正：

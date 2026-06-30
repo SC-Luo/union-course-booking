@@ -24,10 +24,11 @@ related:
 
 - Framework：Next.js App Router。
 - 主要語言：TypeScript。
-- 正式資料來源：Firebase / Firestore。
-- 開發與異常備援：本機 JSON。
+- 正式資料來源：Firebase / Firestore (正式上線後為唯一的 Production 真實資料庫)。
+- 開發與異常備援：本機 JSON (僅供本地開發與離線測試 Dummy 使用，絕對禁止日常同步覆寫至正式環境)。
 - 伺服器端 Firebase 初始化：`src/lib/firebase-admin.ts`。
 - 主要資料存取層：`src/lib/booking-repository.ts`。
+- 上線後規範：請嚴格遵循 `docs/POST_LAUNCH_WORKFLOW.md` 定義的開發分流與資料保護機制。
 
 ## 開發位置
 
