@@ -10,7 +10,7 @@
     "check:prod": "node tools/check-production-readiness.mjs",
     "firestore:compare": "node tools/sync-firestore-from-booking-data.mjs --compare",
     "firestore:backup": "node tools/export-firestore-snapshot.mjs",
-    "firestore:init-from-local": "node tools/sync-firestore-from-booking-data.mjs --target production --overwrite-from-local-json"
+    "firestore:DANGER-OVERWRITE-PROD-DO-NOT-USE": "node tools/sync-firestore-from-booking-data.mjs --target production --overwrite-from-local-json"
   },
   "dependencies": {
     "@fullcalendar/core": "^6.1.20",
