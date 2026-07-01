@@ -381,6 +381,8 @@ function logStudentDirectoryDebug(params: {
   status: string;
   q: string;
 }) {
+  if (process.env.NODE_ENV !== "development") return;
+
   const { students, filteredStudents, status, q } = params;
   const active = students.filter((student) => student.isActive !== false).length;
   const inactive = students.filter((student) => student.isActive === false).length;

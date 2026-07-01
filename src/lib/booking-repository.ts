@@ -191,6 +191,66 @@ export async function getBookingData(): Promise<BookingData> {
   }
 }
 
+export async function getStudentById(studentId: string): Promise<Student | null> {
+  const start = performance.now();
+  const id = String(studentId ?? "").trim();
+
+  if (!id) {
+    console.info("[admin/students/edit] getStudentById", {
+      durationMs: Math.round(performance.now() - start),
+      usedFullDataRead: false,
+      found: false,
+    });
+    return null;
+  }
+
+  const db = getFirestoreDb();
+
+  if (!db) {
+    const data = readBookingData();
+    const student = data.students.find((item) => item.id === id) ?? null;
+    console.info("[admin/students/edit] getStudentById", {
+      durationMs: Math.round(performance.now() - start),
+      usedFullDataRead: true,
+      studentsCount: data.students.length,
+      found: Boolean(student),
+    });
+    return student;
+  }
+
+  try {
+    const doc = await db.collection("students").doc(id).get();
+    const student = doc.exists
+      ? normalizeFirestoreStudent(
+          doc.id,
+          doc.data() as FirestoreStudentDocument,
+        )
+      : null;
+    console.info("[admin/students/edit] getStudentById", {
+      durationMs: Math.round(performance.now() - start),
+      usedFullDataRead: false,
+      studentsCount: student ? 1 : 0,
+      relatedRecordsCount: 0,
+      found: Boolean(student),
+    });
+    return student;
+  } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Student document read failed.", error);
+    }
+    console.warn("Firestore student read failed, falling back to local booking data.", error);
+    const data = readBookingData();
+    const student = data.students.find((item) => item.id === id) ?? null;
+    console.info("[admin/students/edit] getStudentById", {
+      durationMs: Math.round(performance.now() - start),
+      usedFullDataRead: true,
+      studentsCount: data.students.length,
+      found: Boolean(student),
+    });
+    return student;
+  }
+}
+
 export async function getCourseCatalog(): Promise<Pick<BookingData, "categories" | "courses">> {
   const db = getFirestoreDb();
 

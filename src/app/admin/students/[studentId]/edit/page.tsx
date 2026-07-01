@@ -2,10 +2,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { saveStudentIdentityAction } from "@/app/admin/actions";
 import { AdminShell } from "@/components/page-shell";
-import { getBookingData } from "@/lib/booking-repository";
+import { getStudentById } from "@/lib/booking-repository";
 import { StudentForm } from "../../student-form";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 type PageProps = {
   params: Promise<{ studentId: string }>;
@@ -13,8 +14,14 @@ type PageProps = {
 
 export default async function EditStudentPage({ params }: PageProps) {
   const { studentId } = await params;
-  const data = await getBookingData();
-  const student = data.students.find((item) => item.id === studentId);
+  const student = await getStudentById(studentId);
+
+  console.info("[admin/students/edit] render summary", {
+    usedFullDataRead: false,
+    studentsCount: student ? 1 : 0,
+    relatedRecordsCount: 0,
+    found: Boolean(student),
+  });
 
   if (!student) notFound();
 
