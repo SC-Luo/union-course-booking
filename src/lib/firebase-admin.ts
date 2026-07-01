@@ -2,7 +2,13 @@ import { applicationDefault, cert, getApps, initializeApp } from "firebase-admin
 import { getFirestore } from "firebase-admin/firestore";
 
 function getPrivateKey() {
-  return process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n");
+  const raw = process.env.FIREBASE_PRIVATE_KEY;
+  if (!raw) return undefined;
+
+  return raw
+    .trim()
+    .replace(/^["']|["']$/g, "")
+    .replace(/\\n/g, "\n");
 }
 
 export function getAdminDb() {

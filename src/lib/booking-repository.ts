@@ -16,6 +16,20 @@ function allowJsonFallback() {
   return !isProduction();
 }
 
+function shouldFallbackToJson() {
+  return !shouldUseFirestore() || allowJsonFallback();
+}
+
+function createFirestoreRequiredError(context: string, error?: unknown) {
+  const detail =
+    error instanceof Error ? error.message : error ? String(error) : "";
+  return new Error(
+    `Firestore is required in production but is not available. ${context}${
+      detail ? ` Error: ${detail}` : ""
+    }`,
+  );
+}
+
 function getFirestoreDb() {
   if (!shouldUseFirestore()) {
     return null;
@@ -29,11 +43,51 @@ function getFirestoreDb() {
     return db;
   } catch (error) {
     if (!allowJsonFallback()) {
-      throw new Error(`Firestore is required in production but is not available. Error: ${error instanceof Error ? error.message : String(error)}`);
+      throw createFirestoreRequiredError("Firebase Admin initialization failed.", error);
     }
     console.warn("Firestore initialization failed, falling back to local booking data.", error);
     return null;
   }
+}
+
+type FirestoreStudentDocument = Partial<Student> & {
+  memberNumber?: string;
+  phoneLastThree?: string;
+  status?: string;
+};
+
+function normalizeFirestoreStudent(
+  id: string,
+  data: FirestoreStudentDocument,
+): Student {
+  const status = String(data.status ?? "").trim().toLowerCase();
+  const isActive =
+    data.isActive ?? (status ? !["inactive", "deleted"].includes(status) : true);
+  const needsReview = data.needsReview ?? status === "review";
+
+  return {
+    ...data,
+    id: String(data.id || id),
+    name: String(data.name ?? "").trim(),
+    memberNo: data.memberNo ?? data.memberNumber,
+    idNumberLast3: data.idNumberLast3 ?? data.phoneLastThree,
+    isActive,
+    needsReview,
+  } as Student;
+}
+
+function compareStudentsForRoster(a: Student, b: Student) {
+  const seatA = Number(a.seatNumber);
+  const seatB = Number(b.seatNumber);
+  if (Number.isFinite(seatA) && Number.isFinite(seatB) && seatA !== seatB) {
+    return seatA - seatB;
+  }
+  if (Number.isFinite(seatA)) return -1;
+  if (Number.isFinite(seatB)) return 1;
+
+  const keyA = String(a.memberNo || a.studentNo || a.name || a.id);
+  const keyB = String(b.memberNo || b.studentNo || b.name || b.id);
+  return keyA.localeCompare(keyB, "zh-Hant", { numeric: true });
 }
 
 export async function getBookingData(): Promise<BookingData> {
@@ -62,7 +116,7 @@ export async function getBookingData(): Promise<BookingData> {
       db.collection("courses").get(),
       db.collection("sessions").get(),
       db.collection("reservations").get(),
-      db.collection("students").orderBy("seatNumber", "asc").get(),
+      db.collection("students").get(),
       db.collection("courseSeries").get(),
       db.collection("courseOfferings").get(),
       db.collection("courseSessions").get(),
@@ -75,7 +129,11 @@ export async function getBookingData(): Promise<BookingData> {
     const categories = categorySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CourseCategory);
     const sessions = sessionSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CourseSession);
     const reservations = reservationSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Reservation);
-    const students = studentSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Student);
+    const students = studentSnapshot.docs
+      .map((doc) =>
+        normalizeFirestoreStudent(doc.id, doc.data() as FirestoreStudentDocument),
+      )
+      .sort(compareStudentsForRoster);
     const courseSeries = courseSeriesSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CourseSeries);
     const courseOfferings = courseOfferingSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CourseOffering);
     const courseSessions = courseSessionSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as BookingData["courseSessions"][number]);
@@ -106,6 +164,9 @@ export async function getBookingData(): Promise<BookingData> {
       instructors,
     });
   } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Booking data read failed.", error);
+    }
     console.warn("Firestore read failed, falling back to local booking data.", error);
     return readBookingData();
   }
@@ -1229,6 +1290,9 @@ export async function upsertStudent(student: Student) {
   try {
     await db.collection("students").doc(student.id).set(student, { merge: true });
   } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Student write failed.", error);
+    }
     console.warn("Firestore student write failed, falling back to local booking data.", error);
     const data = readBookingData();
     const students = data.students ?? [];

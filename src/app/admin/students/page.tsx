@@ -23,6 +23,7 @@ import type {
 import { StudentDirectoryPage } from "./student-directory-page";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 type PageProps = {
   searchParams: Promise<{
@@ -374,6 +375,42 @@ function dateText(...values: unknown[]) {
   return values.map(text).find(Boolean) ?? "未紀錄時間";
 }
 
+function logStudentDirectoryDebug(params: {
+  students: Student[];
+  filteredStudents: Student[];
+  status: string;
+  q: string;
+}) {
+  const { students, filteredStudents, status, q } = params;
+  const active = students.filter((student) => student.isActive !== false).length;
+  const inactive = students.filter((student) => student.isActive === false).length;
+  const needsReview = students.filter((student) => student.needsReview).length;
+  const misaligned = students.filter(isLikelyMisalignedStudent).length;
+
+  console.info("[admin/students] roster load summary", {
+    totalStudents: students.length,
+    filteredStudents: filteredStudents.length,
+    selectedStatus: status,
+    hasSearchQuery: Boolean(norm(q)),
+    statusCounts: {
+      active,
+      inactive,
+      needsReview,
+      misaligned,
+    },
+    fieldPresenceCounts: {
+      name: students.filter((student) => Boolean(text(student.name))).length,
+      phone: students.filter((student) => Boolean(text(student.phone))).length,
+      memberNo: students.filter((student) => Boolean(text(student.memberNo))).length,
+      idNumberLast3: students.filter((student) => Boolean(text(student.idNumberLast3))).length,
+      isActive: students.filter((student) => student.isActive != null).length,
+      needsReview: students.filter((student) => student.needsReview != null).length,
+      createdAt: students.filter((student) => Boolean(text(student.createdAt))).length,
+      updatedAt: students.filter((student) => Boolean(text(student.updatedAt))).length,
+    },
+  });
+}
+
 export default async function AdminStudentsPage({ searchParams }: PageProps) {
   const {
     mode = "students",
@@ -391,6 +428,29 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
     enrolled,
     filter: queryFilter,
   } = await searchParams;
+  let bookingData;
+  try {
+    bookingData = await getBookingData();
+  } catch (error) {
+    console.error("[admin/students] failed to load booking data", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+
+    return (
+      <AdminShell currentSection="roster.students">
+        <section className="rounded-[2rem] border border-rose-200 bg-rose-50 p-6 shadow-sm">
+          <p className="text-sm font-semibold text-rose-700">資料來源錯誤</p>
+          <h1 className="mt-2 text-2xl font-black text-zinc-950">
+            無法載入 Firestore 學員名冊
+          </h1>
+          <p className="mt-3 text-sm leading-7 text-rose-700">
+            Production 後台需要 Firestore 才能讀取名冊。請檢查 Vercel 的 Firebase Admin 環境變數與 Firestore 權限；這不是單純沒有學員資料。
+          </p>
+        </section>
+      </AdminShell>
+    );
+  }
+
   const {
     students = [],
     courseSeries = [],
@@ -402,7 +462,7 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
     attendanceRecords = [],
     instructors = [],
     categories = [],
-  } = await getBookingData();
+  } = bookingData;
 
   const currentMode = MODES.some(([key]) => key === mode) ? mode : "students";
   const instructorSpecialtyCategories = categories
@@ -455,6 +515,13 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
       return rosterStatus === status;
     })
     .sort(compareStudentsByMemberNo);
+
+  logStudentDirectoryDebug({
+    students,
+    filteredStudents: studentListRows,
+    status,
+    q,
+  });
 
   if (currentMode === "students") {
     return (
