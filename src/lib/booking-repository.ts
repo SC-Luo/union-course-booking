@@ -90,6 +90,25 @@ function compareStudentsForRoster(a: Student, b: Student) {
   return keyA.localeCompare(keyB, "zh-Hant", { numeric: true });
 }
 
+function removeUndefinedFields<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => removeUndefinedFields(item))
+      .filter((item) => item !== undefined) as T;
+  }
+
+  if (value && typeof value === "object") {
+    const cleaned: Record<string, unknown> = {};
+    Object.entries(value).forEach(([key, item]) => {
+      if (item === undefined) return;
+      cleaned[key] = removeUndefinedFields(item);
+    });
+    return cleaned as T;
+  }
+
+  return value;
+}
+
 export async function getBookingData(): Promise<BookingData> {
   const db = getFirestoreDb();
 
@@ -1288,7 +1307,10 @@ export async function upsertStudent(student: Student) {
   }
 
   try {
-    await db.collection("students").doc(student.id).set(student, { merge: true });
+    await db
+      .collection("students")
+      .doc(student.id)
+      .set(removeUndefinedFields(student), { merge: true });
   } catch (error) {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Student write failed.", error);
