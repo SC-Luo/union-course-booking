@@ -8,6 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "check:prod": "node tools/check-production-readiness.mjs",
+    "check:firestore-schema": "node tools/check-firestore-schema.mjs",
+    "verify:firestore-ops": "npx --yes tsx --env-file=.env.local tools/verify-env-and-ops.mjs",
     "firestore:compare": "node tools/sync-firestore-from-booking-data.mjs --compare",
     "firestore:backup": "node tools/export-firestore-snapshot.mjs",
     "firestore:DANGER-OVERWRITE-PROD-DO-NOT-USE": "node tools/sync-firestore-from-booking-data.mjs --target production --overwrite-from-local-json"

@@ -13,6 +13,9 @@ function isProduction() {
 }
 
 function allowJsonFallback() {
+  if (process.env.STRICT_FIRESTORE === "true") {
+    return false;
+  }
   return !isProduction();
 }
 
@@ -37,15 +40,19 @@ function getFirestoreDb() {
 
   try {
     const db = getAdminDb();
-    if (!db && !allowJsonFallback()) {
-      throw new Error("Firestore is required in production but is not available.");
+    if (!db) {
+      if (!allowJsonFallback()) {
+        throw new Error("Firebase Admin initialization returned null.");
+      }
+      console.warn("[DATA_SOURCE] ⚠️ Firebase Admin initialization returned null, falling back to local JSON.");
+      return null;
     }
     return db;
   } catch (error) {
     if (!allowJsonFallback()) {
       throw createFirestoreRequiredError("Firebase Admin initialization failed.", error);
     }
-    console.warn("Firestore initialization failed, falling back to local booking data.", error);
+    console.warn("[DATA_SOURCE] ⚠️ Firestore initialization failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     return null;
   }
 }
@@ -186,7 +193,7 @@ export async function getBookingData(): Promise<BookingData> {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Booking data read failed.", error);
     }
-    console.warn("Firestore read failed, falling back to local booking data.", error);
+    console.warn("[DATA_SOURCE] ⚠️ Firestore read failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     return readBookingData();
   }
 }
@@ -238,7 +245,7 @@ export async function getStudentById(studentId: string): Promise<Student | null>
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Student document read failed.", error);
     }
-    console.warn("Firestore student read failed, falling back to local booking data.", error);
+    console.warn("[DATA_SOURCE] ⚠️ Firestore student read failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     const data = readBookingData();
     const student = data.students.find((item) => item.id === id) ?? null;
     console.info("[admin/students/edit] getStudentById", {
@@ -286,7 +293,10 @@ export async function getCourseCatalog(): Promise<Pick<BookingData, "categories"
       courses: normalized.courses.filter((course) => course.status !== "archived" && course.isActive !== false),
     };
   } catch (error) {
-    console.warn("Firestore catalog read failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Course catalog read failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore catalog read failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     const data = readBookingData();
     return {
       categories: data.categories,
@@ -319,7 +329,10 @@ export async function findReservationsByStudent(studentName: string, phoneLastTh
       .map((doc) => ({ id: doc.id, ...doc.data() }) as Reservation)
       .filter(matchesStudent);
   } catch (error) {
-    console.warn("Firestore reservation search failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Reservation search failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore reservation search failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     const data = readBookingData();
     return data.reservations.filter(matchesStudent);
   }
@@ -499,7 +512,10 @@ export async function createReservation(input: CreateReservationInput) {
       return { ok: true as const, reservation, courseId: course.id, sessionId: session.id };
     });
   } catch (error) {
-    console.warn("Firestore reservation write failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Reservation write failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore reservation write failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     return createReservationInJson(input);
   }
 }
@@ -657,10 +673,16 @@ export async function updateReservationAttendance(
       return;
     }
 
-    console.warn(`Reservation document not found for attendance update: ${reservationId}`);
+    console.warn(`[DATA_SOURCE] Reservation document not found for attendance update: ${reservationId}`);
+    if (!shouldFallbackToJson()) {
+      throw new Error(`Reservation document not found for attendance update: ${reservationId}`);
+    }
     applyLocalFallback();
   } catch (error) {
-    console.warn("Firestore attendance update failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Attendance update failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore attendance update failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     applyLocalFallback();
   }
 }
@@ -754,11 +776,17 @@ export async function updateReservationAttendanceBySessionStudent(
     }
 
     console.warn(
-      `Reservation document not found for attendance update: ${reservationId} (${sessionId}/${studentId})`,
+      `[DATA_SOURCE] Reservation document not found for attendance update: ${reservationId} (${sessionId}/${studentId})`,
     );
+    if (!shouldFallbackToJson()) {
+      throw new Error(`Reservation document not found for attendance update: ${reservationId} (${sessionId}/${studentId})`);
+    }
     applyLocalFallback();
   } catch (error) {
-    console.warn("Firestore attendance update failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Attendance update failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore attendance update failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     applyLocalFallback();
   }
 }
@@ -811,7 +839,10 @@ export async function markSessionReservationsAttended(sessionId: string) {
 
     await Promise.all(snapshot.docs.map((doc) => doc.ref.set(payload, { merge: true })));
   } catch (error) {
-    console.warn("Firestore batch attendance update failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Batch attendance update failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore batch attendance update failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     applyLocalFallback();
   }
 }
@@ -871,10 +902,16 @@ export async function updateReservationLessonNotes(reservationId: string, update
       return;
     }
 
-    console.warn(`Reservation document not found for lesson note update: ${reservationId}`);
+    console.warn(`[DATA_SOURCE] Reservation document not found for lesson note update: ${reservationId}`);
+    if (!shouldFallbackToJson()) {
+      throw new Error(`Reservation document not found for lesson note update: ${reservationId}`);
+    }
     applyLocalFallback();
   } catch (error) {
-    console.warn("Firestore lesson note update failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Lesson note update failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore lesson note update failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     applyLocalFallback();
   }
 }
@@ -956,7 +993,10 @@ export async function ensureSessionRosterReservation(studentId: string, courseId
     }
     return result;
   } catch (error) {
-    console.warn("Firestore roster reservation ensure failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Roster reservation ensure failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore roster reservation ensure failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     const data = readBookingData();
     const result = buildFromData(data);
     if (result.ok && "shouldCreate" in result) {
@@ -1013,7 +1053,10 @@ export async function cancelReservation(reservationId: string, studentName: stri
     return { ok: true as const, courseId: reservation.courseId, sessionId: reservation.sessionId };
     });
   } catch (error) {
-    console.warn("Firestore reservation cancel failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Reservation cancel failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore reservation cancel failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     return cancelReservationInJson(reservationId, studentName, phoneLastThree);
   }
 }
@@ -1066,7 +1109,10 @@ export async function cancelReservationByStaff(reservationId: string) {
       return { ok: true as const, courseId: reservation.courseId, sessionId: reservation.sessionId };
     });
   } catch (error) {
-    console.warn("Firestore staff reservation cancel failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Staff reservation cancel failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore staff reservation cancel failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     const data = readBookingData();
     const reservation = data.reservations.find((item) => item.id === reservationId);
     const session = data.courses.flatMap((course) => course.sessions).find((item) => item.id === reservation?.sessionId);
@@ -1189,7 +1235,10 @@ export async function upsertCategory(category: CourseCategory) {
   try {
     await db.collection("categories").doc(category.id).set(category, { merge: true });
   } catch (error) {
-    console.warn("Firestore category write failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Category write failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore category write failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     const data = readBookingData();
     const index = data.categories.findIndex((item) => item.id === category.id);
     if (index >= 0) data.categories[index] = category;
@@ -1212,7 +1261,10 @@ export async function upsertCourse(course: Omit<Course, "sessions">) {
   try {
     await db.collection("courses").doc(course.id).set(course, { merge: true });
   } catch (error) {
-    console.warn("Firestore course write failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Course write failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore course write failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     const data = readBookingData();
     const index = data.courses.findIndex((item) => item.id === course.id);
     if (index >= 0) data.courses[index] = { ...data.courses[index], ...course };
@@ -1255,7 +1307,10 @@ export async function deleteSessionsByIds(sessionIds: string[]) {
       await batch.commit();
     }
   } catch (error) {
-    console.warn("Firestore session delete failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Sessions delete failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore session delete failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     const data = readBookingData();
     const idSet = new Set(uniqueSessionIds);
 
@@ -1291,7 +1346,10 @@ export async function upsertSession(session: CourseSession) {
   try {
     await db.collection("sessions").doc(session.id).set(session, { merge: true });
   } catch (error) {
-    console.warn("Firestore session write failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Session write failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore session write failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     const data = readBookingData();
     const course = data.courses.find((item) => item.id === session.courseId);
     if (!course) return;
@@ -1319,7 +1377,10 @@ export async function upsertCourseSeries(series: CourseSeries) {
   try {
     await db.collection("courseSeries").doc(series.id).set(series, { merge: true });
   } catch (error) {
-    console.warn("Firestore course series write failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Course series write failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore course series write failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     const data = readBookingData();
     const courseSeries = data.courseSeries ?? [];
     const index = courseSeries.findIndex((item) => item.id === series.id);
@@ -1344,7 +1405,10 @@ export async function upsertCourseOffering(offering: CourseOffering) {
   try {
     await db.collection("courseOfferings").doc(offering.id).set(offering, { merge: true });
   } catch (error) {
-    console.warn("Firestore course offering write failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Course offering write failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore course offering write failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     const data = readBookingData();
     const courseOfferings = data.courseOfferings ?? [];
     const index = courseOfferings.findIndex((item) => item.id === offering.id);
@@ -1375,7 +1439,7 @@ export async function upsertStudent(student: Student) {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Student write failed.", error);
     }
-    console.warn("Firestore student write failed, falling back to local booking data.", error);
+    console.warn("[DATA_SOURCE] ⚠️ Firestore student write failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     const data = readBookingData();
     const students = data.students ?? [];
     const index = students.findIndex((item) => item.id === student.id);
@@ -1400,7 +1464,10 @@ export async function upsertEnrollment(enrollment: Enrollment) {
   try {
     await db.collection("enrollments").doc(enrollment.id).set(enrollment, { merge: true });
   } catch (error) {
-    console.warn("Firestore enrollment write failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Enrollment write failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore enrollment write failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     const data = readBookingData();
     const enrollments = data.enrollments ?? [];
     const index = enrollments.findIndex((item) => item.id === enrollment.id);
@@ -1426,7 +1493,10 @@ export async function upsertStudentCourseRecord(record: StudentCourseRecord) {
   try {
     await db.collection("studentCourseRecords").doc(record.id).set(record, { merge: true });
   } catch (error) {
-    console.warn("Firestore student course record write failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Student course record write failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore student course record write failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     const data = readBookingData();
     const records = data.studentCourseRecords ?? [];
     const index = records.findIndex((item) => item.id === record.id);
@@ -1490,7 +1560,10 @@ export async function removeStudentCourseEligibility(studentId: string, seriesId
       await batch.commit();
     }
   } catch (error) {
-    console.warn("Firestore student course eligibility delete failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Student course eligibility delete failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore student course eligibility delete failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     applyLocal();
   }
 }
@@ -1589,10 +1662,96 @@ export async function addStudentToSessionRoster(studentId: string, courseId: str
   if (!db) return applyLocal();
 
   try {
-    // Firestore 模式先用現有讀寫 fallback，避免點名現場因權限或交易問題中斷。
-    return applyLocal();
+    const data = await getBookingData();
+    const student = (data.students ?? []).find((item) => item.id === studentId && item.isActive !== false);
+    const course = (data.courses ?? []).find((item) => item.id === courseId);
+    const session = course?.sessions?.find((item) => item.id === sessionId);
+
+    if (!student || !course || !session) {
+      return { ok: false as const, reason: "invalid" as const };
+    }
+
+    const hasDuplicate = (data.reservations ?? []).some(
+      (reservation) =>
+        reservation.sessionId === session.id &&
+        reservation.status === "booked" &&
+        (reservation.studentId === student.id ||
+          (normalizeName(reservation.studentName) === normalizeName(student.name) &&
+            cleanIdentityLast3(reservation.idNumberLast3 ?? reservation.phoneLastThree) === cleanIdentityLast3(student.idNumberLast3))),
+    );
+
+    if (hasDuplicate) {
+      return { ok: false as const, reason: "duplicate" as const };
+    }
+
+    const seriesId = course.seriesId || course.courseMasterId || course.courseSeriesId || course.offeringId || course.id;
+    const year = course.year ?? (session.date ? Number(session.date.slice(0, 4)) - 1911 : undefined);
+    const recordId = `elig-${student.id}-${seriesId}-${year ?? "na"}`;
+    const records = data.studentCourseRecords ?? [];
+    const existingRecord = records.find(
+      (record) =>
+        record.id === recordId ||
+        (record.studentId === student.id &&
+          [record.seriesId, record.courseMasterId, (record as StudentCourseRecord & { courseSeriesId?: string }).courseSeriesId].filter(Boolean).includes(seriesId) &&
+          String(record.year ?? record.sourceRocYear ?? "") === String(year ?? "")),
+    );
+
+    const eligibilityRecord: StudentCourseRecord = {
+      ...(existingRecord ?? {}),
+      id: existingRecord ? existingRecord.id : recordId,
+      studentId: student.id,
+      seriesId,
+      courseMasterId: seriesId,
+      offeringId: course.offeringId,
+      sourceColumn: "後台加入課堂名單",
+      rawValue: "可上課",
+      normalizedValue: "可上課",
+      recordType: "roster",
+      sourceRocYear: year,
+      year,
+      term: course.term,
+      termLabel: course.termLabel,
+      classDisplayName: course.displayTitle ?? course.classDisplayName ?? course.title,
+      note: "由點名頁直接加入課堂名單",
+      importedAt: existingRecord ? existingRecord.importedAt : now,
+      createdAt: existingRecord ? existingRecord.createdAt : now,
+      updatedAt: now,
+    } as StudentCourseRecord;
+
+    const studentLast3 = cleanIdentityLast3(student.idNumberLast3) || cleanIdentityLast3(student.phone).slice(-3);
+    const reservation: Reservation = {
+      id: `manual-${session.id}-${student.id}`,
+      courseId: course.id,
+      sessionId: session.id,
+      studentId: student.id,
+      studentName: student.name,
+      phoneLastThree: studentLast3,
+      idNumberLast3: cleanIdentityLast3(student.idNumberLast3),
+      offeringId: course.offeringId,
+      seriesId,
+      bookedAt: now,
+      status: "booked",
+      attendanceStatus: "unchecked",
+      source: "manual",
+      note: "後台點名頁加入",
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const batch = db.batch();
+    batch.set(db.collection("studentCourseRecords").doc(eligibilityRecord.id), removeUndefinedFields(eligibilityRecord), { merge: true });
+    batch.set(db.collection("reservations").doc(reservation.id), removeUndefinedFields(reservation), { merge: true });
+
+    const newBookedCount = (data.reservations ?? []).filter((item) => item.sessionId === session.id && item.status === "booked").length + 1;
+    batch.set(db.collection("sessions").doc(session.id), { bookedCount: newBookedCount, updatedAt: now }, { merge: true });
+
+    await batch.commit();
+    return { ok: true as const, reservation, courseId: course.id, sessionId: session.id };
   } catch (error) {
-    console.warn("Firestore add student to session roster failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Add student to session roster failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore add student to session roster failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     return applyLocal();
   }
 }
@@ -1657,7 +1816,10 @@ export async function setDocumentActive(
     }
     await db.collection(collection).doc(id).set(payload, { merge: true });
   } catch (error) {
-    console.warn("Firestore active-state write failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Active-state write failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore active-state write failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     applyLocal();
   }
 }
@@ -1684,7 +1846,10 @@ export async function deleteManagedDocument(collection: "categories" | "courses"
   try {
     await db.collection(collection).doc(id).delete();
   } catch (error) {
-    console.warn("Firestore managed document delete failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Managed document delete failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore managed document delete failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     applyLocal();
   }
 }
@@ -1729,7 +1894,10 @@ export async function deleteSessionAndReservations(sessionId: string) {
       await batch.commit();
     }
   } catch (error) {
-    console.warn("Firestore session delete failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Session delete failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore session delete failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     const data = readBookingData();
 
     for (const course of data.courses) {
@@ -1792,7 +1960,10 @@ export async function deleteCourseSessionsAndReservations(courseId: string) {
       await batch.commit();
     }
   } catch (error) {
-    console.warn("Firestore course sessions delete failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Course sessions delete failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore course sessions delete failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     const data = readBookingData();
     const course = data.courses.find((item) => item.id === courseId);
     const sessionIds = new Set([
@@ -1947,7 +2118,10 @@ export async function deleteCourseOfferingCascade(offeringId: string): Promise<C
 
     return applyLocal();
   } catch (error) {
-    console.warn("Firestore course offering cascade delete failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Course offering cascade delete failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore course offering cascade delete failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     return applyLocal();
   }
 }
@@ -1984,7 +2158,10 @@ export async function deleteStudentIdentityDocument(studentId: string) {
   try {
     await db.collection("students").doc(studentId).delete();
   } catch (error) {
-    console.warn("Firestore student delete failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Student delete failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore student delete failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     applyLocal();
   }
 }
@@ -2024,7 +2201,10 @@ export async function upsertInstructor(instructor: Instructor) {
   try {
     await db.collection("instructors").doc(instructor.id).set(instructor, { merge: true });
   } catch (error) {
-    console.warn("Firestore instructor write failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Instructor write failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore instructor write failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     const data = readBookingData();
     const instructors = data.instructors ?? [];
     const index = instructors.findIndex((item) => item.id === instructor.id);
@@ -2062,7 +2242,10 @@ export async function deleteInstructorIdentityDocument(instructorId: string) {
       { merge: true },
     );
   } catch (error) {
-    console.warn("Firestore instructor delete failed, falling back to local booking data.", error);
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Instructor delete failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore instructor delete failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     applyLocal();
   }
 }

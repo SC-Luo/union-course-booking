@@ -21,6 +21,16 @@ related:
 
 本文件只記錄會影響後續 AI 接手、產品方向、技術架構、資料結構或開發流程的重要變更。不要貼完整聊天紀錄，也不要記錄每一行小改動。
 
+## 2026-07-06
+
+### 本次變更
+
+- **Firestore 診斷與防護工具**：
+  - **`STRICT_FIRESTORE` 模式**：新增 `STRICT_FIRESTORE=true` 變數支援，確保在開發環境下不會自動回落到 JSON，利於線上行為除錯。
+  - **Schema 檢查腳本**：新增 `tools/check-firestore-schema.mjs`，檢查欄位型別、日期格式與異常枚舉狀態（包含 PII 去識別化保護）。
+  - **驗收腳本**：新增具有防呆前綴與環境限制的 `tools/verify-env-and-ops.mjs` 測試腳本，供手動/自動驗收。
+  - **點名名冊寫入**：將 `addStudentToSessionRoster` 修改為支援寫入 Firestore 且過濾 `undefined` 欄位。
+
 ## 2026-06-30
 
 ### 本次變更
