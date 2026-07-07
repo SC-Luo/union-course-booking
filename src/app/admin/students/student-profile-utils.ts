@@ -34,34 +34,31 @@ export function getStudentStatus(student: Student) {
 }
 
 export function getStudentCompleteness(student: Student) {
-  const checks = [
-    text(student.name),
-    text(student.phone),
-    text(student.birthday),
-    text(student.nationalId || student.idNumberLast3),
-    text(student.email),
-    text(student.address || student.mailingAddress),
-    text(student.emergencyContactName),
-    text(student.memberNo),
-  ];
-  const filled = checks.filter(Boolean).length;
-  const ratio = filled / checks.length;
+  const hasName = text(student.name) !== "";
+  const hasId = text(student.nationalId || student.idNumberLast3) !== "";
+  const hasPhone = text(student.phone) !== "";
+  const hasAddress = text(student.address || student.mailingAddress) !== "";
 
-  if (ratio >= 0.8) {
-    return {
-      label: "完整",
-      className: "border-emerald-200 bg-emerald-50 text-emerald-700",
-    };
-  }
-  if (ratio >= 0.45) {
+  if (!hasName || !hasId || !hasPhone || !hasAddress) {
     return {
       label: "待補資料",
+      className: "border-rose-200 bg-rose-50 text-rose-700",
+    };
+  }
+
+  const basicConfirmed = student.basicConfirmed === true;
+  const contactConfirmed = student.contactConfirmed === true;
+
+  if (!basicConfirmed || !contactConfirmed) {
+    return {
+      label: "待行政確認",
       className: "border-amber-200 bg-amber-50 text-amber-700",
     };
   }
+
   return {
-    label: "基本資料中",
-    className: "border-sky-200 bg-sky-50 text-sky-700",
+    label: "資料完整",
+    className: "border-emerald-200 bg-emerald-50 text-emerald-700",
   };
 }
 
