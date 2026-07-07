@@ -115,16 +115,18 @@ function FloatingModal({
   onClose,
   footerLeft,
   footerRight,
+  visible = true,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   footerLeft?: ReactNode;
   footerRight?: ReactNode;
+  visible?: boolean;
 }) {
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4 py-8"
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4 py-8 ${visible ? "" : "hidden"}`}
       role="dialog"
       aria-modal="true"
     >
@@ -367,6 +369,7 @@ export function StudentForm({
       <input type="hidden" name="nationalId" value={nationalId} />
       <input type="hidden" name="idNumberLast3" value={idNumberLast3 || derivedLast3} />
       <input type="hidden" name="phone" value={phone} />
+      <input type="hidden" name="memberNo" value={student?.memberNo || "系統自動編碼"} />
       <input type="hidden" name="basicConfirmed" value={confirmedSections.basic ? "true" : "false"} />
       <input type="hidden" name="contactConfirmed" value={confirmedSections.contact ? "true" : "false"} />
       <input type="hidden" name="backgroundConfirmed" value={confirmedSections.background ? "true" : "false"} />
@@ -444,10 +447,10 @@ export function StudentForm({
       </div>
 
       {/* SECTION: basic */}
-      {openSection === "basic" && (
-        <FloatingModal
-          title="基本資料"
-          onClose={handleCloseWithoutConfirm}
+      <FloatingModal
+        title="基本資料"
+        visible={openSection === "basic"}
+        onClose={handleCloseWithoutConfirm}
           footerLeft={
             basicRequiredOk ? (
               <span className="text-sm text-zinc-500">此區塊可以確認</span>
@@ -622,13 +625,12 @@ export function StudentForm({
             </FieldGroup>
           </div>
         </FloatingModal>
-      )}
 
       {/* SECTION: contact */}
-      {openSection === "contact" && (
-        <FloatingModal
-          title="聯絡資料"
-          onClose={handleCloseWithoutConfirm}
+      <FloatingModal
+        title="聯絡資料"
+        visible={openSection === "contact"}
+        onClose={handleCloseWithoutConfirm}
           footerLeft={
             contactRequiredOk ? (
               <span className="text-sm text-zinc-500">此區塊可以確認</span>
@@ -700,7 +702,8 @@ export function StudentForm({
 
             <FieldGroup title="地址資訊">
               <label className="text-sm font-bold text-zinc-700 md:col-span-2">
-                通訊地址 (必填)
+                通訊地址
+                <RequiredMark />
                 <input
                   name="mailingAddress"
                   value={mailingAddress}
@@ -742,13 +745,12 @@ export function StudentForm({
             </FieldGroup>
           </div>
         </FloatingModal>
-      )}
 
       {/* SECTION: background */}
-      {openSection === "background" && (
-        <FloatingModal
-          title="背景資料"
-          onClose={handleCloseWithoutConfirm}
+      <FloatingModal
+        title="背景資料"
+        visible={openSection === "background"}
+        onClose={handleCloseWithoutConfirm}
           footerLeft={
             <span className="text-sm text-zinc-500">此區塊可以確認，未來可再補資料</span>
           }
@@ -890,13 +892,12 @@ export function StudentForm({
             </FieldGroup>
           </div>
         </FloatingModal>
-      )}
 
       {/* SECTION: business */}
-      {openSection === "business" && (
-        <FloatingModal
-          title="創業與營業資料"
-          onClose={handleCloseWithoutConfirm}
+      <FloatingModal
+        title="創業與營業資料"
+        visible={openSection === "business"}
+        onClose={handleCloseWithoutConfirm}
           footerLeft={
             <span className="text-sm text-zinc-500">此區塊可以確認，未來可再補資料</span>
           }
@@ -1165,13 +1166,12 @@ export function StudentForm({
             </FieldGroup>
           </div>
         </FloatingModal>
-      )}
 
       {/* SECTION: note */}
-      {openSection === "note" && (
-        <FloatingModal
-          title="備註與來源"
-          onClose={handleCloseWithoutConfirm}
+      <FloatingModal
+        title="備註與來源"
+        visible={openSection === "note"}
+        onClose={handleCloseWithoutConfirm}
           footerLeft={
             <span className="text-sm text-zinc-500">此區塊可以確認，未來可再補資料</span>
           }
@@ -1218,7 +1218,6 @@ export function StudentForm({
             </FieldGroup>
           </div>
         </FloatingModal>
-      )}
 
       {/* bottom actions */}
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-[1.75rem] border border-[#ead7c6] bg-white p-5 shadow-sm">

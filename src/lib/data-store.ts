@@ -63,8 +63,16 @@ export function readBookingData(): BookingData {
 
 export function writeBookingData(data: BookingData) {
   checkFirestoreFallback();
-  fs.mkdirSync(path.dirname(dataFilePath), { recursive: true });
-  fs.writeFileSync(dataFilePath, `${JSON.stringify(normalizeBookingData(data), null, 2)}\n`, "utf8");
+  try {
+    fs.mkdirSync(path.dirname(dataFilePath), { recursive: true });
+    fs.writeFileSync(dataFilePath, `${JSON.stringify(normalizeBookingData(data), null, 2)}\n`, "utf8");
+  } catch (error) {
+    if (shouldUseFirestore()) {
+      console.warn("[DATA_SOURCE] ⚠️ Bypassed local JSON write error in Firestore mode:", error);
+    } else {
+      throw error;
+    }
+  }
 }
 
 export function normalizeBookingData(input: Partial<BookingData>): BookingData {

@@ -2074,8 +2074,41 @@ export async function deleteCourseOfferingCascade(offeringId: string): Promise<C
   if (!db) return applyLocal();
 
   try {
-    const localData = readBookingData();
-    const { legacyCourseIds, courseSessionIds, studentIds } = getCourseOfferingCascadeTargets(localData, offeringId);
+    const legacyCourseIds = new Set<string>();
+    const courseSessionIds = new Set<string>();
+    const studentIds = new Set<string>();
+
+    const offeringDoc = await db.collection("courseOfferings").doc(offeringId).get();
+    if (offeringDoc.exists) {
+      const off = offeringDoc.data();
+      if (off?.legacyCourseId) legacyCourseIds.add(off.legacyCourseId);
+    }
+
+    const coursesSnap = await db.collection("courses").where("offeringId", "==", offeringId).get();
+    coursesSnap.docs.forEach((doc) => legacyCourseIds.add(doc.id));
+
+    const courseSessionsSnap = await db.collection("courseSessions").where("offeringId", "==", offeringId).get();
+    courseSessionsSnap.docs.forEach((doc) => courseSessionIds.add(doc.id));
+
+    const sessionsSnap = await db.collection("sessions").where("offeringId", "==", offeringId).get();
+    sessionsSnap.docs.forEach((doc) => courseSessionIds.add(doc.id));
+
+    for (const cid of legacyCourseIds) {
+      const csSnap = await db.collection("courseSessions").where("legacyCourseId", "==", cid).get();
+      csSnap.docs.forEach((doc) => courseSessionIds.add(doc.id));
+
+      const sSnap = await db.collection("sessions").where("legacyCourseId", "==", cid).get();
+      sSnap.docs.forEach((doc) => courseSessionIds.add(doc.id));
+    }
+
+    const studentsSnap = await db.collection("students").where("offeringId", "==", offeringId).get();
+    studentsSnap.docs.forEach((doc) => studentIds.add(doc.id));
+
+    for (const cid of legacyCourseIds) {
+      const sSnap = await db.collection("students").where("classId", "==", cid).get();
+      sSnap.docs.forEach((doc) => studentIds.add(doc.id));
+    }
+
     const refs = new Map<string, any>();
 
     const collect = async (collection: string, field: string, value: string) => {

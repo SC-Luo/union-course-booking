@@ -120,7 +120,7 @@ export default async function NewStudentPage({ searchParams }: PageProps) {
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <div className="flex flex-col gap-1.5 sm:col-span-2">
                 <label className="text-sm font-bold text-[#4a2a1a]">
-                  通訊地址 <span className="text-rose-500 text-xs">(必填)</span>
+                  通訊地址 <span className="text-red-500">*</span>
                 </label>
                 <input
                   name="mailingAddress"

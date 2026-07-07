@@ -758,23 +758,21 @@ export default async function CourseOfferingsPage({ searchParams }: PageProps) {
       {saved ? <p className="mb-4 rounded-2xl border border-[#d8b69f] bg-[#fff6ed] px-4 py-3 text-sm text-[#8B5035]">已儲存年度課程。</p> : null}
       {error ? <p className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">無法完成操作，請確認欄位或關聯資料。</p> : null}
 
-      <div className="mb-6 rounded-[28px] border border-[#ead8ca] bg-white p-5 shadow-[0_10px_28px_rgba(90,55,38,0.05)]">
-        <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+      <section className="mb-6 rounded-[30px] border border-[#ead8ca] bg-[#fffdf9] p-5 shadow-[0_16px_45px_rgba(90,55,38,0.07)] sm:p-6">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <p className="text-sm font-black text-[#5A3726]">兩階段篩選</p>
-            <p className="mt-1 text-sm font-semibold text-[#8a7c72]">
-              目前顯示：{currentCategoryLabel}｜{currentStatusLabel}｜{sortedOfferings.length} 個年度班級
+            <p className="text-sm font-bold text-[#B46F4A]">課程篩選</p>
+            <h2 className="mt-1 text-xl font-black text-[#1f1712]">篩選年度課程</h2>
+            <p className="mt-1 text-sm leading-6 text-[#8a7c72]">
+              先選課程類別，再依狀態查看年度班級。目前顯示：{currentCategoryLabel} ｜ {currentStatusLabel} ｜ 共 {sortedOfferings.length} 個年度班級
             </p>
           </div>
         </div>
 
-        <div className="mt-5 grid gap-4">
-          <section>
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-[#B46F4A]">課程類別</p>
-              <p className="text-xs font-bold text-[#9a877a]">先選課程所屬的大類</p>
-            </div>
-            <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        <div className="mt-5 space-y-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#B46F4A] mb-2">課程類別</p>
+            <div className="flex flex-wrap gap-2">
               {categoryTabs.map((tab) => {
                 const isActive = selectedCategoryFilter === tab.id;
                 return (
@@ -783,26 +781,23 @@ export default async function CourseOfferingsPage({ searchParams }: PageProps) {
                     href={buildCourseOfferingsHref({ nextCategoryId: tab.id })}
                     className={
                       isActive
-                        ? "inline-flex shrink-0 items-center gap-2 rounded-2xl border border-[#E85F00] bg-[#E85F00] px-4 py-3 text-sm font-black text-white shadow-sm"
-                        : "inline-flex shrink-0 items-center gap-2 rounded-2xl border border-[#ead8ca] bg-[#fffaf5] px-4 py-3 text-sm font-black text-[#5A3726] transition hover:bg-[#fff6ed]"
+                        ? "rounded-2xl bg-[#E85F00] px-4 py-2 text-sm font-black text-white shadow-sm"
+                        : "rounded-2xl border border-[#ead8ca] bg-white px-4 py-2 text-sm font-black text-[#5A3726] hover:bg-[#fff6ed]"
                     }
                   >
-                    <span className="max-w-[260px] truncate">{tab.title}</span>
-                    <span className={isActive ? "rounded-full bg-white/20 px-2 py-0.5 text-xs" : "rounded-full bg-white px-2 py-0.5 text-xs text-[#8B5035]"}>
+                    {tab.title}
+                    <span className={isActive ? "ml-1.5 rounded-full bg-white/20 px-1.5 py-0.5 text-xs" : "ml-1.5 rounded-full bg-[#fff6ed] px-1.5 py-0.5 text-xs text-[#8B5035]"}>
                       {tab.count}
                     </span>
                   </Link>
                 );
               })}
             </div>
-          </section>
+          </div>
 
-          <section>
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-[#B46F4A]">課程狀態</p>
-              <p className="text-xs font-bold text-[#9a877a]">再看這門課目前處在哪個階段</p>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#B46F4A] mb-2">課程狀態</p>
+            <div className="flex flex-wrap gap-2">
               {statusTabs.map((tab) => {
                 const isActive = statusFilter === tab.id;
                 return (
@@ -811,18 +806,21 @@ export default async function CourseOfferingsPage({ searchParams }: PageProps) {
                     href={buildCourseOfferingsHref({ nextStatus: tab.id })}
                     className={
                       isActive
-                        ? "rounded-2xl border border-[#E85F00] bg-[#E85F00] px-4 py-3 text-white shadow-sm"
-                        : "rounded-2xl border border-[#ead8ca] bg-[#fffaf5] px-4 py-3 text-[#5A3726] transition hover:bg-[#fff6ed]"
+                        ? "rounded-2xl bg-[#5A3726] px-4 py-2 text-sm font-black text-white shadow-sm"
+                        : "rounded-2xl border border-[#ead8ca] bg-white px-4 py-2 text-sm font-black text-[#5A3726] hover:bg-[#fff6ed]"
                     }
                   >
-                    <span className="block text-sm font-black">{tab.label}（{statusCounts[tab.id]}）</span>
+                    {tab.label}
+                    <span className={isActive ? "ml-1.5 rounded-full bg-white/20 px-1.5 py-0.5 text-xs" : "ml-1.5 rounded-full bg-[#fff6ed] px-1.5 py-0.5 text-xs text-[#8B5035]"}>
+                      {statusCounts[tab.id]}
+                    </span>
                   </Link>
                 );
               })}
             </div>
-          </section>
+          </div>
         </div>
-      </div>
+      </section>
 
 
       <section className="grid gap-4">
