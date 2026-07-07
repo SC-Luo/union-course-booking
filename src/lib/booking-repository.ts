@@ -1233,7 +1233,7 @@ export async function upsertCategory(category: CourseCategory) {
   }
 
   try {
-    await db.collection("categories").doc(category.id).set(category, { merge: true });
+    await db.collection("categories").doc(category.id).set(removeUndefinedFields(category), { merge: true });
   } catch (error) {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Category write failed.", error);
@@ -1259,7 +1259,7 @@ export async function upsertCourse(course: Omit<Course, "sessions">) {
   }
 
   try {
-    await db.collection("courses").doc(course.id).set(course, { merge: true });
+    await db.collection("courses").doc(course.id).set(removeUndefinedFields(course), { merge: true });
   } catch (error) {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Course write failed.", error);
@@ -1344,7 +1344,7 @@ export async function upsertSession(session: CourseSession) {
   }
 
   try {
-    await db.collection("sessions").doc(session.id).set(session, { merge: true });
+    await db.collection("sessions").doc(session.id).set(removeUndefinedFields(session), { merge: true });
   } catch (error) {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Session write failed.", error);
@@ -1375,7 +1375,7 @@ export async function upsertCourseSeries(series: CourseSeries) {
   }
 
   try {
-    await db.collection("courseSeries").doc(series.id).set(series, { merge: true });
+    await db.collection("courseSeries").doc(series.id).set(removeUndefinedFields(series), { merge: true });
   } catch (error) {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Course series write failed.", error);
@@ -1403,7 +1403,7 @@ export async function upsertCourseOffering(offering: CourseOffering) {
   }
 
   try {
-    await db.collection("courseOfferings").doc(offering.id).set(offering, { merge: true });
+    await db.collection("courseOfferings").doc(offering.id).set(removeUndefinedFields(offering), { merge: true });
   } catch (error) {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Course offering write failed.", error);
@@ -1462,7 +1462,7 @@ export async function upsertEnrollment(enrollment: Enrollment) {
   }
 
   try {
-    await db.collection("enrollments").doc(enrollment.id).set(enrollment, { merge: true });
+    await db.collection("enrollments").doc(enrollment.id).set(removeUndefinedFields(enrollment), { merge: true });
   } catch (error) {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Enrollment write failed.", error);
@@ -1491,7 +1491,7 @@ export async function upsertStudentCourseRecord(record: StudentCourseRecord) {
   }
 
   try {
-    await db.collection("studentCourseRecords").doc(record.id).set(record, { merge: true });
+    await db.collection("studentCourseRecords").doc(record.id).set(removeUndefinedFields(record), { merge: true });
   } catch (error) {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Student course record write failed.", error);
@@ -2199,7 +2199,7 @@ export async function upsertInstructor(instructor: Instructor) {
   }
 
   try {
-    await db.collection("instructors").doc(instructor.id).set(instructor, { merge: true });
+    await db.collection("instructors").doc(instructor.id).set(removeUndefinedFields(instructor), { merge: true });
   } catch (error) {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Instructor write failed.", error);
