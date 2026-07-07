@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { cancelReservation, createReservation, getCourseCatalog, getBookingData, upsertStudent } from "@/lib/booking-repository";
+import { cancelReservation, createReservation, getCourseCatalog, getBookingData, upsertStudent, getFirestoreDb, generateNextStudentNumber } from "@/lib/booking-repository";
 import { getCourse, getSession, isBookingCourse } from "@/lib/course-utils";
 import type { Student } from "@/lib/types";
 
@@ -110,21 +110,21 @@ export async function submitNewStudentProfileAction(formData: FormData) {
   const nationalId = String(formData.get("nationalId") ?? "").trim();
   const phone = String(formData.get("phone") ?? "").trim();
   const birthday = String(formData.get("birthday") ?? "").trim();
-
-  // 必填驗證：姓名、身分證字號、手機與生日
-  if (!name || !nationalId || !phone || !birthday) {
-    redirect("/new-student?error=invalid");
-  }
-
-  const cleanNationalId = nationalId;
-  const idNumberLast3 = cleanNationalId.length >= 3 ? cleanNationalId.slice(-3) : "";
-
   const email = String(formData.get("email") ?? "").trim();
   const mailingAddress = String(formData.get("mailingAddress") ?? "").trim();
   const emergencyContactName = String(formData.get("emergencyContactName") ?? "").trim();
   const emergencyContactPhone = String(formData.get("emergencyContactPhone") ?? "").trim();
   const beautyRelated = String(formData.get("beautyRelated") ?? "").trim();
+  const plannedBusinessCategories = formData.getAll("plannedBusinessCategories").map(String);
+  const plannedBusinessCategoryOther = String(formData.get("plannedBusinessCategoryOther") ?? "").trim();
   const formNote = String(formData.get("note") ?? "").trim();
+
+  if (!name || !nationalId || !phone || !birthday || !mailingAddress) {
+    redirect("/new-student?error=invalid");
+  }
+
+  const cleanNationalId = nationalId;
+  const idNumberLast3 = cleanNationalId.length >= 3 ? cleanNationalId.slice(-3) : "";
 
   // 課程興趣處理
   const interestedCourses = formData.getAll("interestedCourses").map(String);
@@ -150,6 +150,13 @@ export async function submitNewStudentProfileAction(formData: FormData) {
 
   const existing = exactExisting ?? looseExisting;
 
+  // Generate member number if not exists
+  let memberNo = existing?.memberNo;
+  if (!memberNo) {
+    const db = getFirestoreDb();
+    memberNo = await generateNextStudentNumber(db);
+  }
+
   // 處理備註附加
   let updatedNote = existing?.note || "";
   if (interestedCoursesText) {
@@ -162,6 +169,7 @@ export async function submitNewStudentProfileAction(formData: FormData) {
       updatedNote = tag;
     }
   }
+
   if (formNote) {
     const userNoteTag = `[新生自填入口] 備註：${formNote}`;
     if (updatedNote) {
@@ -187,6 +195,9 @@ export async function submitNewStudentProfileAction(formData: FormData) {
     emergencyContactName: emergencyContactName || existing?.emergencyContactName || "",
     emergencyContactPhone: emergencyContactPhone || existing?.emergencyContactPhone || "",
     beautyRelated: beautyRelated || existing?.beautyRelated || "",
+    plannedBusinessCategories: plannedBusinessCategories.length > 0 ? plannedBusinessCategories : existing?.plannedBusinessCategories || [],
+    plannedBusinessCategoryOther: plannedBusinessCategoryOther || existing?.plannedBusinessCategoryOther || "",
+    memberNo,
     note: updatedNote,
     source: "新生自填入口",
     isActive: true,

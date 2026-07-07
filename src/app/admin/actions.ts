@@ -27,6 +27,8 @@ import {
   upsertEnrollment,
   upsertSession,
   upsertStudent,
+  getFirestoreDb,
+  generateNextStudentNumber,
   upsertStudentCourseRecord,
   upsertInstructor,
   deleteInstructorIdentityDocument,
@@ -2173,7 +2175,20 @@ export async function saveStudentIdentityAction(formData: FormData) {
   const rosterStatus = String(formData.get("rosterStatus") ?? "active").trim();
   const phone = String(formData.get("phone") ?? "").trim();
   const birthday = String(formData.get("birthday") ?? "").trim();
-  const memberNo = String(formData.get("memberNo") ?? "").trim();
+  const mailingAddress = String(formData.get("mailingAddress") ?? "").trim();
+
+  // Section confirmation fields
+  const basicConfirmed = formData.get("basicConfirmed") === "true";
+  const contactConfirmed = formData.get("contactConfirmed") === "true";
+  const backgroundConfirmed = formData.get("backgroundConfirmed") === "true";
+  const businessConfirmed = formData.get("businessConfirmed") === "true";
+  const noteConfirmed = formData.get("noteConfirmed") === "true";
+
+  // Business Category checkboxes
+  const plannedBusinessCategories = formData.getAll("plannedBusinessCategories").map(String);
+  const plannedBusinessCategoryOther = String(formData.get("plannedBusinessCategoryOther") ?? "").trim();
+
+  const memberNoInput = String(formData.get("memberNo") ?? "").trim();
   const businessCategories = String(
     formData.get("businessCategoriesText") ?? "",
   )
@@ -2182,7 +2197,7 @@ export async function saveStudentIdentityAction(formData: FormData) {
     .filter(Boolean);
   const note = String(formData.get("note") ?? "").trim();
 
-  if (!name || idNumberLast3.length !== 3 || !phone) {
+  if (!name || idNumberLast3.length !== 3 || !phone || !mailingAddress) {
     redirect(appendAdminQuery(redirectTo, "error=invalid"));
   }
 
@@ -2195,9 +2210,17 @@ export async function saveStudentIdentityAction(formData: FormData) {
           student.name === name && student.idNumberLast3 === idNumberLast3,
       );
 
+  let memberNo = memberNoInput || existing?.memberNo;
+  if (!memberNo || memberNo === "系統自動編碼") {
+    const db = getFirestoreDb();
+    memberNo = await generateNextStudentNumber(db);
+  }
+
+  const studentId = existing?.id ?? `student-${crypto.randomUUID()}`;
+
   await upsertStudent({
     ...(existing ?? {}),
-    id: existing?.id ?? `student-${crypto.randomUUID()}`,
+    id: studentId,
     name,
     englishName:
       String(formData.get("englishName") ?? "").trim() || existing?.englishName,
@@ -2226,7 +2249,14 @@ export async function saveStudentIdentityAction(formData: FormData) {
     emergencyContactPhone:
       String(formData.get("emergencyContactPhone") ?? "").trim() ||
       existing?.emergencyContactPhone,
-    memberNo: memberNo || existing?.memberNo,
+    memberNo,
+    basicConfirmed,
+    contactConfirmed,
+    backgroundConfirmed,
+    businessConfirmed,
+    noteConfirmed,
+    plannedBusinessCategories: plannedBusinessCategories.length > 0 ? plannedBusinessCategories : existing?.plannedBusinessCategories || [],
+    plannedBusinessCategoryOther: plannedBusinessCategoryOther || existing?.plannedBusinessCategoryOther || "",
     educationLevel:
       String(formData.get("educationLevel") ?? "").trim() ||
       existing?.educationLevel,
@@ -2328,7 +2358,10 @@ export async function saveStudentIdentityAction(formData: FormData) {
     updatedAt: now,
   });
 
+  revalidatePath("/admin/students", "layout");
   revalidatePath("/admin/students");
+  revalidatePath(`/admin/students/${studentId}`);
+  revalidatePath(`/admin/students/${studentId}/edit`);
   revalidatePath("/admin/student-imports");
   redirect(appendAdminQuery(redirectTo, "saved=1"));
 }

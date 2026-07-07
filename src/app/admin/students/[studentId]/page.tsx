@@ -238,13 +238,24 @@ export default async function AdminStudentProfilePage({ params }: PageProps) {
               ["月營業額級距", valueOrDash(student.monthlyRevenueRange)],
               ["年營業額級距", valueOrDash(student.annualRevenueRange)],
             ])}
-            <div className="mt-5 grid gap-4 lg:grid-cols-2">
+            <div className="mt-5 grid gap-4 lg:grid-cols-3">
               <div className="rounded-2xl border border-[#f0dfcf] bg-[#fffaf5] p-4">
                 <p className="text-sm font-bold text-zinc-500">主要營業項目</p>
                 <p className="mt-2 text-sm text-zinc-900">
                   {(student.businessCategories ?? []).length > 0
                     ? student.businessCategories?.join("、")
                     : "未填"}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-[#f0dfcf] bg-[#fffaf5] p-4">
+                <p className="text-sm font-bold text-zinc-500">預計營業類別</p>
+                <p className="mt-2 text-sm text-zinc-900">
+                  {(() => {
+                    const cats = student.plannedBusinessCategories ?? [];
+                    if (cats.length === 0) return "未填";
+                    const otherText = student.plannedBusinessCategoryOther ? ` (${student.plannedBusinessCategoryOther})` : "";
+                    return cats.map(c => c === "其他" ? `其他${otherText}` : c).join("、");
+                  })()}
                 </p>
               </div>
               <div className="rounded-2xl border border-[#f0dfcf] bg-[#fffaf5] p-4">

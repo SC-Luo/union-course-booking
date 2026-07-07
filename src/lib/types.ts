@@ -297,6 +297,13 @@ export type Student = {
   businessRegistrationStatus?: string;
   taxId?: string;
   businessCategories?: string[];
+  plannedBusinessCategories?: string[];
+  plannedBusinessCategoryOther?: string;
+  basicConfirmed?: boolean;
+  contactConfirmed?: boolean;
+  backgroundConfirmed?: boolean;
+  businessConfirmed?: boolean;
+  noteConfirmed?: boolean;
   businessPlaceType?: string;
   businessAddress?: string;
   operationMode?: string;

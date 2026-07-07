@@ -33,7 +33,7 @@ function createFirestoreRequiredError(context: string, error?: unknown) {
   );
 }
 
-function getFirestoreDb() {
+export function getFirestoreDb() {
   if (!shouldUseFirestore()) {
     return null;
   }
@@ -76,10 +76,17 @@ function normalizeFirestoreStudent(
     ...data,
     id: String(data.id || id),
     name: String(data.name ?? "").trim(),
-    memberNo: data.memberNo ?? data.memberNumber,
+    memberNo: data.memberNo ?? data.memberNumber ?? (data as any).memberId ?? (data as any).externalMemberNo ?? (data as any).studentNo,
     idNumberLast3: data.idNumberLast3 ?? data.phoneLastThree,
     isActive,
     needsReview,
+    plannedBusinessCategories: data.plannedBusinessCategories ?? [],
+    plannedBusinessCategoryOther: data.plannedBusinessCategoryOther ?? "",
+    basicConfirmed: data.basicConfirmed ?? false,
+    contactConfirmed: data.contactConfirmed ?? false,
+    backgroundConfirmed: data.backgroundConfirmed ?? false,
+    businessConfirmed: data.businessConfirmed ?? false,
+    noteConfirmed: data.noteConfirmed ?? false,
   } as Student;
 }
 
@@ -2072,22 +2079,27 @@ export async function deleteCourseOfferingCascade(offeringId: string): Promise<C
     const refs = new Map<string, any>();
 
     const collect = async (collection: string, field: string, value: string) => {
+      if (!value) return;
       const snapshot = await db.collection(collection).where(field, "==", value).get();
       snapshot.docs.forEach((doc) => refs.set(doc.ref.path, doc.ref));
     };
 
-    refs.set(`courseOfferings/${offeringId}`, db.collection("courseOfferings").doc(offeringId));
-    await collect("courses", "offeringId", offeringId);
-    await collect("courseSessions", "offeringId", offeringId);
-    await collect("students", "offeringId", offeringId);
-    await collect("enrollments", "offeringId", offeringId);
-    await collect("enrollments", "courseOfferingId", offeringId);
-    await collect("reservations", "offeringId", offeringId);
-    await collect("attendanceRecords", "offeringId", offeringId);
-    await collect("studentCourseRecords", "offeringId", offeringId);
-    await collect("entitlements", "offeringId", offeringId);
+    if (offeringId) {
+      refs.set(`courseOfferings/${offeringId}`, db.collection("courseOfferings").doc(offeringId));
+      await collect("courses", "offeringId", offeringId);
+      await collect("courseSessions", "offeringId", offeringId);
+      await collect("sessions", "offeringId", offeringId);
+      await collect("students", "offeringId", offeringId);
+      await collect("enrollments", "offeringId", offeringId);
+      await collect("enrollments", "courseOfferingId", offeringId);
+      await collect("reservations", "offeringId", offeringId);
+      await collect("attendanceRecords", "offeringId", offeringId);
+      await collect("studentCourseRecords", "offeringId", offeringId);
+      await collect("entitlements", "offeringId", offeringId);
+    }
 
     for (const legacyCourseId of legacyCourseIds) {
+      if (!legacyCourseId) continue;
       refs.set(`courses/${legacyCourseId}`, db.collection("courses").doc(legacyCourseId));
       await collect("students", "classId", legacyCourseId);
       await collect("enrollments", "courseId", legacyCourseId);
@@ -2096,12 +2108,15 @@ export async function deleteCourseOfferingCascade(offeringId: string): Promise<C
     }
 
     for (const sessionId of courseSessionIds) {
+      if (!sessionId) continue;
       refs.set(`courseSessions/${sessionId}`, db.collection("courseSessions").doc(sessionId));
+      refs.set(`sessions/${sessionId}`, db.collection("sessions").doc(sessionId));
       await collect("reservations", "sessionId", sessionId);
       await collect("attendanceRecords", "sessionId", sessionId);
     }
 
     for (const studentId of studentIds) {
+      if (!studentId) continue;
       refs.set(`students/${studentId}`, db.collection("students").doc(studentId));
       await collect("enrollments", "studentId", studentId);
       await collect("attendanceRecords", "studentId", studentId);
@@ -2109,7 +2124,7 @@ export async function deleteCourseOfferingCascade(offeringId: string): Promise<C
       await collect("entitlements", "studentId", studentId);
     }
 
-    const refList = Array.from(refs.values());
+    const refList = Array.from(refs.values()).filter(Boolean);
     for (let index = 0; index < refList.length; index += 450) {
       const batch = db.batch();
       refList.slice(index, index + 450).forEach((ref) => batch.delete(ref));
@@ -2282,4 +2297,71 @@ export async function getDataSourceStatus() {
     counts,
     updatedAt: new Date().toISOString(),
   };
+}
+
+export async function generateNextStudentNumber(db: any): Promise<string> {
+  const currentYear = new Date().getFullYear();
+  const rocYear = String(currentYear - 1911); // e.g. "115", "116"
+
+  if (!db) {
+    // Fallback to local JSON mode
+    const data = readBookingData();
+    const prefix = `${rocYear}-`;
+    let maxSeq = 0;
+    for (const student of data.students ?? []) {
+      const memberNo = student.memberNo || student.memberId || student.externalMemberNo || "";
+      if (memberNo.startsWith(prefix)) {
+        const seqStr = memberNo.substring(prefix.length);
+        const seq = parseInt(seqStr, 10);
+        if (Number.isFinite(seq) && seq > maxSeq) {
+          maxSeq = seq;
+        }
+      }
+    }
+    const nextSeq = maxSeq + 1;
+    return `${rocYear}-${String(nextSeq).padStart(4, "0")}`;
+  }
+
+  // Firestore transaction mode
+  const counterRef = db.collection("counters").doc("studentNumber");
+  
+  let nextSeq = 1;
+  await db.runTransaction(async (transaction: any) => {
+    const doc = await transaction.get(counterRef);
+    let currentCounter = 0;
+    
+    if (doc.exists) {
+      const data = doc.data();
+      if (data && typeof data[rocYear] === "number") {
+        currentCounter = data[rocYear];
+      }
+    }
+    
+    if (currentCounter === 0) {
+      const prefix = `${rocYear}-`;
+      const snapshot = await db.collection("students")
+        .where("memberNo", ">=", prefix)
+        .where("memberNo", "<", prefix + "\uf8ff")
+        .get();
+        
+      let maxSeq = 0;
+      snapshot.docs.forEach((studentDoc: any) => {
+        const student = studentDoc.data();
+        const memberNo = student.memberNo || "";
+        if (memberNo.startsWith(prefix)) {
+          const seqStr = memberNo.substring(prefix.length);
+          const seq = parseInt(seqStr, 10);
+          if (Number.isFinite(seq) && seq > maxSeq) {
+            maxSeq = seq;
+          }
+        }
+      });
+      currentCounter = maxSeq;
+    }
+    
+    nextSeq = currentCounter + 1;
+    transaction.set(counterRef, { [rocYear]: nextSeq }, { merge: true });
+  });
+  
+  return `${rocYear}-${String(nextSeq).padStart(4, "0")}`;
 }

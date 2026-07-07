@@ -255,11 +255,11 @@ export function StudentForm({
     note: false,
   });
   const [confirmedSections, setConfirmedSections] = useState<Record<SectionId, boolean>>({
-    basic: false,
-    contact: false,
-    background: false,
-    business: false,
-    note: false,
+    basic: student?.basicConfirmed ?? false,
+    contact: student?.contactConfirmed ?? false,
+    background: student?.backgroundConfirmed ?? false,
+    business: student?.businessConfirmed ?? false,
+    note: student?.noteConfirmed ?? false,
   });
 
   const initialName = splitChineseName(student?.name ?? "");
@@ -274,6 +274,13 @@ export function StudentForm({
     student?.idNumberLast3 ?? "",
   );
   const [phone, setPhone] = useState(student?.phone ?? "");
+  const [mailingAddress, setMailingAddress] = useState(student?.mailingAddress ?? student?.address ?? "");
+  const [plannedBusinessCategories, setPlannedBusinessCategories] = useState<string[]>(
+    student?.plannedBusinessCategories ?? [],
+  );
+  const [plannedBusinessCategoryOther, setPlannedBusinessCategoryOther] = useState(
+    student?.plannedBusinessCategoryOther ?? "",
+  );
 
   const combinedName = lastName + firstName;
   const combinedEnglishName =
@@ -289,7 +296,7 @@ export function StudentForm({
     lastName.trim() !== "" &&
     firstName.trim() !== "" &&
     (hasIdLast3 || hasDerivedId);
-  const contactRequiredOk = phone.trim() !== "";
+  const contactRequiredOk = phone.trim() !== "" && mailingAddress.trim() !== "";
 
   function getSectionStatus(id: SectionId): SectionStatus {
     if (confirmedSections[id]) return "confirmed";
@@ -314,7 +321,10 @@ export function StudentForm({
       return missing.length > 0 ? `缺少：${missing.join("、")}` : undefined;
     }
     if (id === "contact") {
-      if (phone.trim() === "") return "缺少：手機";
+      const missing: string[] = [];
+      if (phone.trim() === "") missing.push("手機");
+      if (mailingAddress.trim() === "") missing.push("通訊地址");
+      return missing.length > 0 ? `缺少：${missing.join("、")}` : undefined;
     }
     return undefined;
   }
@@ -357,6 +367,14 @@ export function StudentForm({
       <input type="hidden" name="nationalId" value={nationalId} />
       <input type="hidden" name="idNumberLast3" value={idNumberLast3 || derivedLast3} />
       <input type="hidden" name="phone" value={phone} />
+      <input type="hidden" name="basicConfirmed" value={confirmedSections.basic ? "true" : "false"} />
+      <input type="hidden" name="contactConfirmed" value={confirmedSections.contact ? "true" : "false"} />
+      <input type="hidden" name="backgroundConfirmed" value={confirmedSections.background ? "true" : "false"} />
+      <input type="hidden" name="businessConfirmed" value={confirmedSections.business ? "true" : "false"} />
+      <input type="hidden" name="noteConfirmed" value={confirmedSections.note ? "true" : "false"} />
+      {plannedBusinessCategories.map((cat) => (
+        <input type="hidden" key={cat} name="plannedBusinessCategories" value={cat} />
+      ))}
 
       {/* progress row */}
       <div className="flex items-center gap-3 rounded-2xl border border-[#ead7c6] bg-white/80 px-5 py-3 text-sm shadow-sm">
@@ -578,8 +596,9 @@ export function StudentForm({
                 會員編號
                 <input
                   name="memberNo"
-                  defaultValue={student?.memberNo ?? ""}
-                  className={fieldClassName()}
+                  value={student?.memberNo || "系統自動編碼"}
+                  disabled
+                  className="h-11 rounded-2xl border border-zinc-200 bg-zinc-50 px-3 font-normal text-zinc-500 outline-none cursor-not-allowed w-full mt-1.5"
                 />
               </label>
               <label className="text-sm font-bold text-zinc-700">
@@ -681,10 +700,15 @@ export function StudentForm({
 
             <FieldGroup title="地址資訊">
               <label className="text-sm font-bold text-zinc-700 md:col-span-2">
-                通訊地址
+                通訊地址 (必填)
                 <input
                   name="mailingAddress"
-                  defaultValue={student?.mailingAddress ?? student?.address ?? ""}
+                  value={mailingAddress}
+                  onChange={(e) => {
+                    setMailingAddress(e.target.value);
+                    if (confirmedSections.contact) setConfirmedSections((prev) => ({ ...prev, contact: false }));
+                  }}
+                  required
                   className={fieldClassName()}
                 />
               </label>
@@ -966,6 +990,46 @@ export function StudentForm({
                   className={fieldClassName()}
                 />
               </label>
+            </FieldGroup>
+
+            <FieldGroup title="預計營業類別 (選填)">
+              <div className="md:col-span-2 flex flex-wrap gap-x-6 gap-y-2 mt-1.5">
+                {["美容", "美體", "美甲", "美睫", "熱蠟", "皮膚管理", "其他"].map((cat) => {
+                  const isChecked = plannedBusinessCategories.includes(cat);
+                  return (
+                    <label key={cat} className="flex items-center gap-2 cursor-pointer text-sm text-zinc-700">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={(e) => {
+                          const next = e.target.checked
+                            ? [...plannedBusinessCategories, cat]
+                            : plannedBusinessCategories.filter((x) => x !== cat);
+                          setPlannedBusinessCategories(next);
+                          if (confirmedSections.business) setConfirmedSections((prev) => ({ ...prev, business: false }));
+                        }}
+                        className="h-4 w-4 rounded border-zinc-300 text-[#6b3b25] focus:ring-[#6b3b25]/40"
+                      />
+                      {cat}
+                    </label>
+                  );
+                })}
+              </div>
+              {plannedBusinessCategories.includes("其他") && (
+                <label className="text-sm font-bold text-zinc-700 md:col-span-2">
+                  其他預計營業類別說明
+                  <input
+                    name="plannedBusinessCategoryOther"
+                    value={plannedBusinessCategoryOther}
+                    onChange={(e) => {
+                      setPlannedBusinessCategoryOther(e.target.value);
+                      if (confirmedSections.business) setConfirmedSections((prev) => ({ ...prev, business: false }));
+                    }}
+                    placeholder="請填寫其他預計營業類別"
+                    className={fieldClassName()}
+                  />
+                </label>
+              )}
             </FieldGroup>
 
             <FieldGroup title="營運內容">

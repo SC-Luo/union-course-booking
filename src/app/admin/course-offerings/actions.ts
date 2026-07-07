@@ -45,9 +45,18 @@ export async function clearCourseOfferingCascadeAction(formData: FormData) {
     redirect("/admin/course-offerings?error=confirm-required");
   }
 
-  await deleteCourseOfferingCascade(offeringId);
-  revalidateCourseOfferingPaths(legacyCourseId);
-  redirect("/admin/course-offerings?saved=cleared");
+  try {
+    await deleteCourseOfferingCascade(offeringId);
+    revalidateCourseOfferingPaths(legacyCourseId);
+    redirect("/admin/course-offerings?saved=cleared");
+  } catch (error: any) {
+    if (error && typeof error === "object" && (error.digest?.startsWith("NEXT_REDIRECT") || error.message?.includes("NEXT_REDIRECT"))) {
+      throw error;
+    }
+    console.error("Clear course offering cascade action failed:", error);
+    const msg = error instanceof Error ? error.message : String(error);
+    redirect(`/admin/course-offerings?error=clear-failed&message=${encodeURIComponent(msg)}`);
+  }
 }
 
 export async function addStudentToCourseOfferingAction(formData: FormData) {
