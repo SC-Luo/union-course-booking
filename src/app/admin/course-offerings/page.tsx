@@ -934,7 +934,7 @@ export default async function CourseOfferingsPage({ searchParams }: PageProps) {
                       </p>
                     </div>
                     <div>
-                      <p className="text-[10px] font-bold text-zinc-400">名冊 / 報名</p>
+                      <p className="text-[10px] font-bold text-zinc-400">名冊人數</p>
                       <p className="font-black text-zinc-800 mt-0.5">
                         {reserved} / {capacity} 人
                       </p>

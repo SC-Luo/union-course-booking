@@ -21,11 +21,7 @@ function addDays(date: string, days: number) {
   return value.toISOString().slice(0, 10);
 }
 
-function getDaysUntil(from: string, to: string) {
-  const start = new Date(`${from}T00:00:00`).getTime();
-  const end = new Date(`${to}T00:00:00`).getTime();
-  return Math.round((end - start) / 86400000);
-}
+
 
 function formatYearTermLabel(course: {
   year?: number;
@@ -58,7 +54,6 @@ export default async function AdminHomePage() {
   } = await getBookingData();
 
   const today = new Date().toISOString().slice(0, 10);
-  const weekEnd = addDays(today, 7);
   const activeCourses = courses.filter((course) => course.isActive);
 
   const categoryMap = new Map(categories.map((category) => [category.id, category]));
@@ -138,27 +133,25 @@ export default async function AdminHomePage() {
     )
     .sort((a, b) => a.session.startTime.localeCompare(b.session.startTime));
 
-  const weeklySessions = courseSummaries
-    .flatMap(({ course, series, color, categoryName, yearTermLabel, rosterCount }) =>
-      course.sessions
-        .filter((session) => session.isActive && session.date >= today && session.date <= weekEnd)
-        .map((session) => {
-          const sessionReservations = reservations.filter(
-            (reservation) =>
-              reservation.courseId === course.id && reservation.sessionId === session.id && reservation.status === "booked",
-          );
-          const bookedCount = sessionReservations.length;
-          const capacity = session.capacity ?? course.totalCapacity ?? 0;
-          return { course, series, session, color, categoryName, yearTermLabel, rosterCount, bookedCount, capacity, daysUntil: getDaysUntil(today, session.date) };
-        }),
-    )
-    .sort((a, b) => `${a.session.date} ${a.session.startTime}`.localeCompare(`${b.session.date} ${b.session.startTime}`));
+
 
   const unscheduledClasses = courseSummaries.filter((item) => !item.nextSession);
   const emptyRosterClasses = courseSummaries.filter((item) => item.rosterCount === 0);
   const pendingAttendanceSessions = todaySessions.filter((item) => item.bookedCount > item.attendedCount + item.absentCount);
-  const weeklyBookingCount = weeklySessions.reduce((sum, item) => sum + item.bookedCount, 0);
-  const weeklyCapacity = weeklySessions.reduce((sum, item) => sum + item.capacity, 0);
+  const twoWeeksEnd = addDays(today, 14);
+  const twoWeeksSessions = courseSummaries
+    .flatMap(({ course, rosterCount }) =>
+      course.sessions
+        .filter((session) => session.isActive && session.date >= today && session.date <= twoWeeksEnd)
+        .map((session) => {
+          const capacity = session.capacity ?? course.totalCapacity ?? 0;
+          return { rosterCount, capacity };
+        }),
+    );
+
+  const twoWeeksRosterSum = twoWeeksSessions.reduce((sum, item) => sum + item.rosterCount, 0);
+  const twoWeeksCapacitySum = twoWeeksSessions.reduce((sum, item) => sum + item.capacity, 0);
+
 
   const taskItems = [
     ...unscheduledClasses.slice(0, 3).map((item) => ({ label: "尚未排課", title: item.series.title, meta: `${item.yearTermLabel}｜${item.categoryName}`, href: `/admin/courses/${item.course.id}/sessions` })),
@@ -227,7 +220,7 @@ export default async function AdminHomePage() {
         {[
           ["今日課程", todaySessions.length, "今天排定上課場次"],
           ["待點名", pendingAttendanceSessions.length, "尚未完成出席標記"],
-          ["本週報名", `${weeklyBookingCount}/${weeklyCapacity}`, "已報名 / 可預約名額"],
+          ["近期課程容量", `${twoWeeksRosterSum}/${twoWeeksCapacitySum}`, "未來 14 天名冊人數 / 總名額"],
           ["待處理", taskItems.length, "未排課或名冊待確認"],
         ].map(([label, value, note]) => (
           <article key={label} className="rounded-[28px] border border-[#ead8ca] bg-[#fffdf9] p-5 shadow-[0_12px_36px_rgba(90,55,38,0.06)]">

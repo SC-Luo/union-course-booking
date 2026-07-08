@@ -144,6 +144,22 @@ function getClassRowCategoryName(row: any, categories: any[]) {
   const category = categories.find((item) => item.id === categoryId || item.code === categoryId);
   return category?.name ?? row.series?.categoryName ?? row.offering?.categoryName ?? row.course?.categoryName ?? "未分類";
 }
+function getRatioStyle(count: number, capacity: number) {
+  if (!capacity) return { textClass: "text-zinc-400", bgClass: "bg-zinc-50" };
+  const ratio = count / capacity;
+  if (ratio <= 0) return { textClass: "text-zinc-400", bgClass: "bg-zinc-50" };
+  if (ratio >= 1.0) return { textClass: "text-rose-600 font-bold", bgClass: "bg-rose-50" };
+  if (ratio >= 0.8) return { textClass: "text-[#E85F00] font-bold", bgClass: "bg-[#fff1e7]" };
+  return { textClass: "text-[#5A3726]", bgClass: "bg-[#fffdf9]" };
+}
+
+function getSessionReservationCount(sessionId: string, reservations: any[]) {
+  return (reservations || []).filter((r) => r.sessionId === sessionId && r.status === "booked").length;
+}
+
+function getSessionCapacity(session: any, course: any, offering: any, series: any) {
+  return session.capacity ?? offering?.capacity ?? course?.totalCapacity ?? series?.defaultCapacity ?? 12;
+}
 
 function getClassRowSessionStats(row: any) {
   const sessions = row.course?.sessions ?? [];
@@ -240,7 +256,7 @@ function encodeRouteSegment(value: string) {
     .replace(/%5C/gi, "~5C");
 }
 
-function GlobalCalendar({ sessionRows, monthParam }: { sessionRows: any[]; monthParam?: string }) {
+function GlobalCalendar({ sessionRows, monthParam, reservations }: { sessionRows: any[]; monthParam?: string; reservations: any[] }) {
   const monthDate = getMonthDate(monthParam);
   const gridStart = startOfMonthGrid(monthDate);
   const gridEnd = endOfMonthGrid(monthDate);
@@ -303,9 +319,13 @@ function GlobalCalendar({ sessionRows, monthParam }: { sessionRows: any[]; month
                       {isToday ? <span className="rounded-full bg-[#e7fff7] px-2 py-0.5 text-[11px] font-bold text-[#0b9f73]">今天</span> : null}
                     </div>
                     <div className="grid gap-1.5">
-                      {day.items.slice(0, 3).map(({ course, session, color }) => {
+                      {day.items.slice(0, 3).map(({ course, session, offering, series, color }) => {
                         const isCancelled = session.status === "cancelled" || session.isActive === false;
                         const isSuspended = session.status === "suspended";
+                        const bookedCount = getSessionReservationCount(session.id, reservations);
+                        const capacity = getSessionCapacity(session, course, offering, series);
+                        const ratioStyle = getRatioStyle(bookedCount, capacity);
+
                         return (
                           <Link
                             key={session.id}
@@ -322,7 +342,9 @@ function GlobalCalendar({ sessionRows, monthParam }: { sessionRows: any[]; month
                             <div className="p-2">
                               <div className="flex items-center justify-between gap-1">
                                 <span className="min-w-0 truncate font-black text-[#1f1712]">{session.startTime || "未定時間"}</span>
-                                <span className="shrink-0 text-[10px] text-[#8a7c72]">{session.bookedCount ?? 0}/{session.capacity ?? "-"}</span>
+                                <span className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-black ${ratioStyle.textClass} ${ratioStyle.bgClass}`}>
+                                  {bookedCount}/{capacity}
+                                </span>
                               </div>
                               <div className="mt-1 truncate font-semibold text-[#1f1712]">{course.displayTitle ?? course.title}</div>
                               <div className="mt-1 truncate text-[10px] text-[#8a7c72]">{session.topic || "未填單元"}</div>
@@ -348,7 +370,7 @@ function GlobalCalendar({ sessionRows, monthParam }: { sessionRows: any[]; month
 
 export default async function CourseSessionsPage({ searchParams }: PageProps) {
   const { saved, error, month, offeringId, categoryId, schedule, bulkUpdated } = await searchParams;
-  const { categories, courses, courseOfferings, courseSeries, instructors = [] } = await getBookingData();
+  const { categories, courses, courseOfferings, courseSeries, instructors = [], students = [], reservations = [] } = await getBookingData();
   const allCourses = courses as any[];
   const offerings = courseOfferings as any[];
   const seriesList = courseSeries as any[];
@@ -484,20 +506,38 @@ export default async function CourseSessionsPage({ searchParams }: PageProps) {
                     href={`/admin/course-sessions?${hrefCategory}offeringId=${encodeURIComponent(currentOfferingId)}${monthQuery}`}
                     className={
                       active
-                        ? "relative min-h-[74px] overflow-hidden rounded-2xl border bg-white px-3 py-2 shadow-sm ring-4 ring-[#E85F00]/10"
-                        : "relative min-h-[74px] overflow-hidden rounded-2xl border border-[#ead8ca] bg-white px-3 py-2 shadow-sm transition hover:-translate-y-0.5 hover:bg-[#fffdf9] hover:shadow-md"
+                        ? "relative min-h-[92px] flex flex-col justify-between overflow-hidden rounded-2xl border bg-white px-3 py-2 shadow-sm ring-4 ring-[#E85F00]/10"
+                        : "relative min-h-[92px] flex flex-col justify-between overflow-hidden rounded-2xl border border-[#ead8ca] bg-white px-3 py-2 shadow-sm transition hover:-translate-y-0.5 hover:bg-[#fffdf9] hover:shadow-md"
                     }
                     style={active ? { borderColor: color } : undefined}
                   >
                     <span className="absolute inset-y-0 left-0 w-1.5" style={{ backgroundColor: color }} />
-                    <div className="min-w-0 pl-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="line-clamp-2 text-xs font-black leading-5 text-[#1f1712]">{title}</p>
-                        <span className="shrink-0 rounded-full bg-[#fff6ed] px-2 py-0.5 text-[10px] font-black text-[#8a5a3b]">{termLabel}</span>
+                    <div className="min-w-0 pl-2 flex-1 flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="line-clamp-2 text-xs font-black leading-4 text-[#1f1712]">{title}</p>
+                          <span className="shrink-0 rounded-full bg-[#fff6ed] px-2 py-0.5 text-[10px] font-black text-[#8a5a3b]">{termLabel}</span>
+                        </div>
+                        <p className="mt-1 line-clamp-1 text-[10px] font-bold text-[#8a7c72]">
+                          {stats.total > 0 ? `已排 ${stats.total} 堂${stats.cancelled ? `（取消 ${stats.cancelled}）` : ""}` : "尚未排課"}
+                        </p>
                       </div>
-                      <p className="mt-1 line-clamp-1 text-[11px] font-bold text-[#8a7c72]">
-                        {stats.total > 0 ? `已排 ${stats.total} 堂${stats.cancelled ? `｜取消 ${stats.cancelled}` : ""}` : "尚未排課"}
-                      </p>
+                      
+                      {(() => {
+                        const linkedCourseId = course.id;
+                        const offeringId = offering?.id ?? course.offeringId ?? course.id;
+                        const rosterCount = students.filter((item) => item.offeringId === offeringId || item.classId === linkedCourseId).length;
+                        const capacity = offering?.capacity ?? course.totalCapacity ?? series?.defaultCapacity ?? 0;
+                        const ratioStyle = getRatioStyle(rosterCount, capacity);
+                        return (
+                          <div className="mt-1.5 flex items-center justify-between border-t border-[#fcf8f4] pt-1 shrink-0">
+                            <span className="text-[10px] text-zinc-400">名冊人數</span>
+                            <span className={`rounded px-1.5 py-0.5 text-[10px] font-black ${ratioStyle.textClass} ${ratioStyle.bgClass}`}>
+                              {rosterCount} / {capacity}
+                            </span>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </Link>
                 );
@@ -513,83 +553,105 @@ export default async function CourseSessionsPage({ searchParams }: PageProps) {
       </section>
 
       {selectedClassRow && scheduleMode ? (
-        <div className="fixed inset-0 z-50 grid place-items-center p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <Link href={scheduleCloseHref} aria-label="關閉排課視窗" className="absolute inset-0 bg-[#1f1712]/40 backdrop-blur-sm" />
-          <div className="relative z-10 w-[min(94vw,760px)] rounded-[32px] border border-[#ead8ca] bg-white p-6 shadow-[0_30px_90px_rgba(31,23,18,0.28)]">
-            <div className="flex items-start justify-between gap-4">
+          <div className="relative z-10 w-[min(94vw,760px)] max-h-[90vh] flex flex-col rounded-[32px] border border-[#ead8ca] bg-white shadow-[0_30px_90px_rgba(31,23,18,0.28)] overflow-hidden">
+            
+            {/* Modal Header (Fixed) */}
+            <div className="flex items-start justify-between gap-4 p-5 pb-4 border-b border-[#f3ede8] bg-[#fffdfa] shrink-0">
               <div>
                 <p className="text-sm font-bold text-[#B46F4A]">{scheduleMode === "single" ? "新增單堂課堂" : "批次排課"}</p>
-                <h3 className="mt-1 text-2xl font-black text-[#1f1712]">{selectedClassRow.course.displayTitle ?? selectedClassRow.course.title}</h3>
-                <p className="mt-2 text-sm leading-6 text-[#8a7c72]">已帶入目前選定的年度課程、預設講師與助教；點背景、右上角關閉或按瀏覽器上一頁都可以回到日曆。</p>
+                <h3 className="mt-1 text-xl font-black text-[#1f1712] line-clamp-1">{selectedClassRow.course.displayTitle ?? selectedClassRow.course.title}</h3>
+                <p className="mt-1 text-xs text-[#8a7c72]">已帶入目前選定的年度課程、預設講師與助教。</p>
               </div>
-              <Link href={scheduleCloseHref} className="rounded-full border border-[#ead8ca] bg-[#fffaf5] px-4 py-2 text-sm font-black text-[#5A3726] hover:bg-[#fff6ed]">關閉</Link>
+              <Link href={scheduleCloseHref} className="rounded-full border border-[#ead8ca] bg-white px-3.5 py-1.5 text-xs font-black text-[#5A3726] hover:bg-[#fff6ed] shrink-0">
+                關閉
+              </Link>
             </div>
 
             {selectedClassArchived ? (
-              <div className="mt-5 rounded-[24px] border border-zinc-200 bg-zinc-50 px-5 py-4 text-sm leading-6 text-zinc-700">
-                <p className="font-black text-zinc-800">此年度課程已封存，僅供查閱。</p>
-                <p className="mt-1">封存後不可新增或批次重排課堂。如需補排，請先回年度課程解除封存。</p>
-              </div>
-            ) : scheduleMode === "single" ? (
-              <form action={saveSessionAction} className="mt-5 grid gap-4 sm:grid-cols-2">
-                <input type="hidden" name="courseId" value={selectedClassRow.course.id} />
-                <input type="hidden" name="redirectTo" value={scheduleCloseHref} />
-                <SessionInstructorFields eligibleInstructors={eligibleSessionInstructors} defaultPrimaryInstructorId={defaultPrimaryInstructorId} defaultAssistantInstructorIds={defaultAssistantInstructorIds} />
-                <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">日期<input required type="date" name="date" className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
-                <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">單元<input name="topic" className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" placeholder="例如 彩妝" /></label>
-                <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">開始時間<input required type="time" name="startTime" defaultValue="10:00" className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
-                <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">結束時間<input required type="time" name="endTime" defaultValue="12:00" className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
-                <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">名額<input required type="number" min={0} name="capacity" defaultValue={selectedClassRow.offering?.capacity ?? selectedClassRow.course.totalCapacity ?? selectedClassRow.series?.defaultCapacity ?? 12} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
-                <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">地點<input name="location" defaultValue={selectedClassRow.offering?.location ?? selectedClassRow.course.defaultLocation ?? selectedClassRow.series?.defaultLocation ?? ""} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
-                <button className="sm:col-span-2 rounded-2xl bg-[#E85F00] px-4 py-3 text-sm font-black text-white shadow-sm hover:brightness-105">建立單堂課堂</button>
-              </form>
-            ) : (
-              <form action={bulkCreateSessionsAction} className="mt-5 grid gap-4 sm:grid-cols-2">
-                <input type="hidden" name="courseId" value={selectedClassRow.course.id} />
-                <input type="hidden" name="redirectTo" value={scheduleCloseHref} />
-                <input type="hidden" name="syncExistingSessions" value="true" />
-                <SessionInstructorFields eligibleInstructors={eligibleSessionInstructors} defaultPrimaryInstructorId={defaultPrimaryInstructorId} defaultAssistantInstructorIds={defaultAssistantInstructorIds} />
-
-                {bulkScheduleDefaults?.hasExistingSessions ? (
-                  <div className="sm:col-span-2 rounded-[24px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
-                    <p className="font-black">這次會更新既有批次課堂</p>
-                    <p className="mt-1">
-                      系統會依下方日期與星期重新整理這個年度課程：保留並更新符合規則的課堂、新增缺少的課堂，並把不在新規則內的舊課堂標記為已取消，不會刪除預約與點名紀錄。
-                    </p>
-                  </div>
-                ) : (
-                  <div className="sm:col-span-2 rounded-[24px] border border-[#ead8ca] bg-[#fffdf9] px-4 py-3 text-sm leading-6 text-[#8a7c72]">
-                    尚未建立批次課堂。請設定日期、時間與上課星期後建立課堂。
-                  </div>
-                )}
-
-                <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">開始日期<input required type="date" name="startDate" defaultValue={bulkScheduleDefaults?.defaultStartDate ?? ""} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
-                <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">結束日期<input required type="date" name="endDate" defaultValue={bulkScheduleDefaults?.defaultEndDate ?? ""} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
-                <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">開始時間<input required type="time" name="startTime" defaultValue={bulkScheduleDefaults?.defaultStartTime ?? "10:00"} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
-                <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">結束時間<input required type="time" name="endTime" defaultValue={bulkScheduleDefaults?.defaultEndTime ?? "12:00"} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
-                <div className="sm:col-span-2 grid gap-2 text-sm font-semibold text-[#4e4038]">
-                  上課星期
-                  <div className="flex flex-wrap gap-2 rounded-2xl border border-[#ead8ca] bg-[#fffdf9] p-3">
-                    {["日", "一", "二", "三", "四", "五", "六"].map((label, index) => (
-                      <label key={label} className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-[#ead8ca] bg-white px-3 py-2 text-xs font-bold text-[#5A3726] has-[:checked]:border-[#E85F00] has-[:checked]:bg-[#fff1e7] has-[:checked]:text-[#E85F00]">
-                        <input type="checkbox" name="weekdays" value={index} defaultChecked={bulkScheduleDefaults?.defaultWeekdays.has(index) ?? false} className="h-4 w-4 accent-[#E85F00]" />週{label}
-                      </label>
-                    ))}
-                  </div>
+              <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                <div className="rounded-[24px] border border-zinc-200 bg-zinc-50 px-5 py-4 text-sm leading-6 text-zinc-700">
+                  <p className="font-black text-zinc-800">此年度課程已封存，僅供查閱。</p>
+                  <p className="mt-1">封存後不可新增或批次重排課堂。如需補排，請先回年度課程解除封存。</p>
                 </div>
-                <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">單元<input name="topic" defaultValue={bulkScheduleDefaults?.defaultTopic ?? ""} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" placeholder="例如 彩妝" /></label>
-                <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">名額<input required type="number" min={0} name="capacity" defaultValue={bulkScheduleDefaults?.defaultCapacity ?? 12} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
-                <label className="grid gap-2 text-sm font-semibold text-[#4e4038] sm:col-span-2">地點<input name="location" defaultValue={bulkScheduleDefaults?.defaultLocation ?? ""} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
-                <button className="sm:col-span-2 rounded-2xl bg-[#5A3726] px-4 py-3 text-sm font-black text-white shadow-sm hover:brightness-105">
-                  {bulkScheduleDefaults?.hasExistingSessions ? "更新這批課堂" : "建立批次課堂"}
-                </button>
+              </div>
+            ) : (
+              <form action={scheduleMode === "single" ? saveSessionAction : bulkCreateSessionsAction} className="flex-1 flex flex-col overflow-hidden">
+                {/* Hidden fields */}
+                <input type="hidden" name="courseId" value={selectedClassRow.course.id} />
+                <input type="hidden" name="redirectTo" value={scheduleCloseHref} />
+                {scheduleMode === "bulk" && <input type="hidden" name="syncExistingSessions" value="true" />}
+
+                {/* Form Fields (Scrollable Content Area) */}
+                <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                  <SessionInstructorFields
+                    eligibleInstructors={eligibleSessionInstructors}
+                    defaultPrimaryInstructorId={defaultPrimaryInstructorId}
+                    defaultAssistantInstructorIds={defaultAssistantInstructorIds}
+                  />
+
+                  {scheduleMode === "single" ? (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">日期<input required type="date" name="date" className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
+                      <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">單元<input name="topic" className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" placeholder="例如 彩妝" /></label>
+                      <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">開始時間<input required type="time" name="startTime" defaultValue="10:00" className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
+                      <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">結束時間<input required type="time" name="endTime" defaultValue="12:00" className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
+                      <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">名額<input required type="number" min={0} name="capacity" defaultValue={selectedClassRow.offering?.capacity ?? selectedClassRow.course.totalCapacity ?? selectedClassRow.series?.defaultCapacity ?? 12} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
+                      <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">地點<input name="location" defaultValue={selectedClassRow.offering?.location ?? selectedClassRow.course.defaultLocation ?? selectedClassRow.series?.defaultLocation ?? ""} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
+                    </div>
+                  ) : (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {bulkScheduleDefaults?.hasExistingSessions ? (
+                        <div className="sm:col-span-2 rounded-[24px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+                          <p className="font-black">這次會更新既有批次課堂</p>
+                          <p className="mt-1">
+                            系統會依下方日期與星期重新整理這個年度課程：保留並更新符合規則的課堂、新增缺少的課堂，並把不在新規則內的舊課堂標記為已取消，不會刪除預約與點名紀錄。
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="sm:col-span-2 rounded-[24px] border border-[#ead8ca] bg-[#fffdf9] px-4 py-3 text-sm leading-6 text-[#8a7c72]">
+                          尚未建立批次課堂。請設定日期、時間與上課星期後建立課堂。
+                        </div>
+                      )}
+
+                      <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">開始日期<input required type="date" name="startDate" defaultValue={bulkScheduleDefaults?.defaultStartDate ?? ""} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
+                      <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">結束日期<input required type="date" name="endDate" defaultValue={bulkScheduleDefaults?.defaultEndDate ?? ""} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
+                      <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">開始時間<input required type="time" name="startTime" defaultValue={bulkScheduleDefaults?.defaultStartTime ?? "10:00"} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
+                      <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">結束時間<input required type="time" name="endTime" defaultValue={bulkScheduleDefaults?.defaultEndTime ?? "12:00"} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
+                      <div className="sm:col-span-2 grid gap-2 text-sm font-semibold text-[#4e4038]">
+                        上課星期
+                        <div className="flex flex-wrap gap-2 rounded-2xl border border-[#ead8ca] bg-[#fffdf9] p-3">
+                          {["日", "一", "二", "三", "四", "五", "六"].map((label, index) => (
+                            <label key={label} className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-[#ead8ca] bg-white px-3 py-2 text-xs font-bold text-[#5A3726] has-[:checked]:border-[#E85F00] has-[:checked]:bg-[#fff1e7] has-[:checked]:text-[#E85F00]">
+                              <input type="checkbox" name="weekdays" value={index} defaultChecked={bulkScheduleDefaults?.defaultWeekdays.has(index) ?? false} className="h-4 w-4 accent-[#E85F00]" />週{label}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                      <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">單元<input name="topic" defaultValue={bulkScheduleDefaults?.defaultTopic ?? ""} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" placeholder="例如 彩妝" /></label>
+                      <label className="grid gap-2 text-sm font-semibold text-[#4e4038]">名額<input required type="number" min={0} name="capacity" defaultValue={bulkScheduleDefaults?.defaultCapacity ?? 12} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
+                      <label className="grid gap-2 text-sm font-semibold text-[#4e4038] sm:col-span-2">地點<input name="location" defaultValue={bulkScheduleDefaults?.defaultLocation ?? ""} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10" /></label>
+                    </div>
+                  )}
+                </div>
+
+                {/* Modal Sticky Footer */}
+                <div className="border-t border-[#ead8ca] bg-[#fffdfa] p-4 flex justify-end gap-3 shrink-0">
+                  <Link href={scheduleCloseHref} className="rounded-2xl border border-[#dbcabd] bg-white px-5 py-3 text-sm font-bold text-[#5A3726] hover:bg-[#fff6ed]">
+                    取消
+                  </Link>
+                  <button className="rounded-2xl bg-[#E85F00] px-6 py-3 text-sm font-black text-white shadow-sm hover:brightness-105">
+                    {scheduleMode === "single" ? "建立單堂課堂" : (bulkScheduleDefaults?.hasExistingSessions ? "更新這批課堂" : "建立批次課堂")}
+                  </button>
+                </div>
               </form>
             )}
           </div>
         </div>
       ) : null}
 
-      <GlobalCalendar sessionRows={visibleSessionRows} monthParam={month} />
+      <GlobalCalendar sessionRows={visibleSessionRows} monthParam={month} reservations={reservations} />
 
     </AdminShell>
   );
