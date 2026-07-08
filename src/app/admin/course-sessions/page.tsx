@@ -370,7 +370,7 @@ function GlobalCalendar({ sessionRows, monthParam, reservations }: { sessionRows
 
 export default async function CourseSessionsPage({ searchParams }: PageProps) {
   const { saved, error, month, offeringId, categoryId, schedule, bulkUpdated } = await searchParams;
-  const { categories, courses, courseOfferings, courseSeries, instructors = [], students = [], reservations = [] } = await getBookingData();
+  const { categories, courses, courseOfferings, courseSeries, instructors = [], reservations = [] } = await getBookingData();
   const allCourses = courses as any[];
   const offerings = courseOfferings as any[];
   const seriesList = courseSeries as any[];
@@ -441,7 +441,17 @@ export default async function CourseSessionsPage({ searchParams }: PageProps) {
       </section>
 
       {saved ? <p className="mb-4 rounded-2xl border border-[#d8b69f] bg-[#fff6ed] px-4 py-3 text-sm text-[#8B5035]">已更新場次{bulkUpdated ? ` ${bulkUpdated} 筆` : ""}。</p> : null}
-      {error ? <p className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">無法完成操作，請確認欄位。</p> : null}
+      {error ? (
+        <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 font-semibold shadow-sm">
+          {error === "has-records" ? (
+            <p>無法完成操作：此日期區間內已有課堂存在學員預約或點名紀錄，為保護資料安全，不允許批次重新排課。</p>
+          ) : error === "invalid" ? (
+            <p>無法完成操作：請確認欄位填寫正確（開始/結束日期、時間與上課星期是否正確，且日期區間內必須包含選定的上課星期）。</p>
+          ) : (
+            <p>無法完成操作，請確認欄位（錯誤代碼: {error}）。</p>
+          )}
+        </div>
+      ) : null}
 
       <section className="mb-6 rounded-[30px] border border-[#ead8ca] bg-[#fffdf9] p-5 shadow-[0_16px_45px_rgba(90,55,38,0.07)] sm:p-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -506,38 +516,20 @@ export default async function CourseSessionsPage({ searchParams }: PageProps) {
                     href={`/admin/course-sessions?${hrefCategory}offeringId=${encodeURIComponent(currentOfferingId)}${monthQuery}`}
                     className={
                       active
-                        ? "relative min-h-[92px] flex flex-col justify-between overflow-hidden rounded-2xl border bg-white px-3 py-2 shadow-sm ring-4 ring-[#E85F00]/10"
-                        : "relative min-h-[92px] flex flex-col justify-between overflow-hidden rounded-2xl border border-[#ead8ca] bg-white px-3 py-2 shadow-sm transition hover:-translate-y-0.5 hover:bg-[#fffdf9] hover:shadow-md"
+                        ? "relative min-h-[74px] overflow-hidden rounded-2xl border bg-white px-3 py-2 shadow-sm ring-4 ring-[#E85F00]/10"
+                        : "relative min-h-[74px] overflow-hidden rounded-2xl border border-[#ead8ca] bg-white px-3 py-2 shadow-sm transition hover:-translate-y-0.5 hover:bg-[#fffdf9] hover:shadow-md"
                     }
                     style={active ? { borderColor: color } : undefined}
                   >
                     <span className="absolute inset-y-0 left-0 w-1.5" style={{ backgroundColor: color }} />
-                    <div className="min-w-0 pl-2 flex-1 flex flex-col justify-between">
-                      <div>
-                        <div className="flex items-start justify-between gap-2">
-                          <p className="line-clamp-2 text-xs font-black leading-4 text-[#1f1712]">{title}</p>
-                          <span className="shrink-0 rounded-full bg-[#fff6ed] px-2 py-0.5 text-[10px] font-black text-[#8a5a3b]">{termLabel}</span>
-                        </div>
-                        <p className="mt-1 line-clamp-1 text-[10px] font-bold text-[#8a7c72]">
-                          {stats.total > 0 ? `已排 ${stats.total} 堂${stats.cancelled ? `（取消 ${stats.cancelled}）` : ""}` : "尚未排課"}
-                        </p>
+                    <div className="min-w-0 pl-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="line-clamp-2 text-xs font-black leading-5 text-[#1f1712]">{title}</p>
+                        <span className="shrink-0 rounded-full bg-[#fff6ed] px-2 py-0.5 text-[10px] font-black text-[#8a5a3b]">{termLabel}</span>
                       </div>
-                      
-                      {(() => {
-                        const linkedCourseId = course.id;
-                        const offeringId = offering?.id ?? course.offeringId ?? course.id;
-                        const rosterCount = students.filter((item) => item.offeringId === offeringId || item.classId === linkedCourseId).length;
-                        const capacity = offering?.capacity ?? course.totalCapacity ?? series?.defaultCapacity ?? 0;
-                        const ratioStyle = getRatioStyle(rosterCount, capacity);
-                        return (
-                          <div className="mt-1.5 flex items-center justify-between border-t border-[#fcf8f4] pt-1 shrink-0">
-                            <span className="text-[10px] text-zinc-400">名冊人數</span>
-                            <span className={`rounded px-1.5 py-0.5 text-[10px] font-black ${ratioStyle.textClass} ${ratioStyle.bgClass}`}>
-                              {rosterCount} / {capacity}
-                            </span>
-                          </div>
-                        );
-                      })()}
+                      <p className="mt-1 line-clamp-1 text-[11px] font-bold text-[#8a7c72]">
+                        {stats.total > 0 ? `已排 ${stats.total} 堂${stats.cancelled ? `（取消 ${stats.cancelled}）` : ""}` : "尚未排課"}
+                      </p>
                     </div>
                   </Link>
                 );

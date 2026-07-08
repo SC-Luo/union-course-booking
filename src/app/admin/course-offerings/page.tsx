@@ -887,7 +887,7 @@ export default async function CourseOfferingsPage({ searchParams }: PageProps) {
             ? instructors.find((instructor: any) => instructor.id === offering.primaryInstructorId)?.name
             : undefined;
           const capacity = offering.capacity ?? legacyCourse?.totalCapacity ?? "-";
-          const reserved = offeringStudents.length || enrollmentCount || reservationCount;
+          const reserved = offeringStudents.length;
           const rosterHref = `/admin/students?mode=eligibility&view=rosterOnly&classId=${encodeURIComponent(linkedCourseId)}&seriesId=${encodeURIComponent(offering.seriesId ?? "")}&year=${encodeURIComponent(String(offering.year ?? ""))}&offeringId=${encodeURIComponent(offering.id)}&term=${encodeURIComponent(String(offering.termLabel ?? offering.term ?? ""))}`;
           const lifecycle = getOfferingLifecycleMeta(offering.status, offering.isActive);
           const isArchived = lifecycle.id === "archived";
@@ -961,18 +961,16 @@ export default async function CourseOfferingsPage({ searchParams }: PageProps) {
                 >
                   {isArchived ? "查看名冊" : `名冊 (${reserved})`}
                 </Link>
-                {legacyCourse ? (
-                  <Link
-                    href={`/admin/courses/${legacyCourse.id}/sessions`}
-                    className={
-                      isArchived
-                        ? "flex-1 text-center py-2 rounded-xl border border-zinc-200 bg-zinc-100 text-xs font-bold text-zinc-600"
-                        : "flex-1 text-center py-2 rounded-xl bg-[#5A3726] text-xs font-bold text-white hover:brightness-105"
-                    }
-                  >
-                    {isArchived ? "查看課堂" : "課堂"}
-                  </Link>
-                ) : null}
+                <Link
+                  href={`/admin/course-sessions?offeringId=${encodeURIComponent(offering.id)}`}
+                  className={
+                    isArchived
+                      ? "flex-1 text-center py-2 rounded-xl border border-zinc-200 bg-zinc-100 text-xs font-bold text-zinc-600"
+                      : "flex-1 text-center py-2 rounded-xl bg-[#5A3726] text-xs font-bold text-white hover:brightness-105"
+                  }
+                >
+                  {isArchived ? "查看課堂" : "課堂"}
+                </Link>
 
                 <SessionInfoModalCard
                   title="年度課程管理"

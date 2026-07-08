@@ -66,6 +66,8 @@ export default async function AdminHomePage() {
         description: series.description ?? "",
         categoryId: series.categoryId,
         color: series.color,
+        defaultInstructorId: series.defaultInstructorId,
+        defaultLocation: series.defaultLocation,
       },
     ]),
   );
@@ -80,6 +82,8 @@ export default async function AdminHomePage() {
       description: course.description ?? "",
       categoryId: course.categoryId,
       color: course.color ?? category?.color,
+      defaultInstructorId: undefined,
+      defaultLocation: course.defaultLocation,
     };
   }
 
@@ -140,17 +144,22 @@ export default async function AdminHomePage() {
   const pendingAttendanceSessions = todaySessions.filter((item) => item.bookedCount > item.attendedCount + item.absentCount);
   const twoWeeksEnd = addDays(today, 14);
   const twoWeeksSessions = courseSummaries
-    .flatMap(({ course, rosterCount }) =>
+    .flatMap(({ course, series, rosterCount }) =>
       course.sessions
         .filter((session) => session.isActive && session.date >= today && session.date <= twoWeeksEnd)
         .map((session) => {
-          const capacity = session.capacity ?? course.totalCapacity ?? 0;
-          return { rosterCount, capacity };
+          const instructorId = session.instructorId || course.primaryInstructorId || series?.defaultInstructorId || "";
+          const location = session.location || course.defaultLocation || series?.defaultLocation || "";
+          
+          const isMissingInstructor = !instructorId || instructorId.trim() === "";
+          const isMissingLocation = !location || location.trim() === "";
+          const isZeroRoster = rosterCount === 0;
+          const isPending = isMissingInstructor || isMissingLocation || isZeroRoster;
+          return { isPending };
         }),
     );
 
-  const twoWeeksRosterSum = twoWeeksSessions.reduce((sum, item) => sum + item.rosterCount, 0);
-  const twoWeeksCapacitySum = twoWeeksSessions.reduce((sum, item) => sum + item.capacity, 0);
+  const pendingTwoWeeksSessionsCount = twoWeeksSessions.filter((s) => s.isPending).length;
 
 
   const taskItems = [
@@ -220,7 +229,7 @@ export default async function AdminHomePage() {
         {[
           ["今日課程", todaySessions.length, "今天排定上課場次"],
           ["待點名", pendingAttendanceSessions.length, "尚未完成出席標記"],
-          ["近期課程容量", `${twoWeeksRosterSum}/${twoWeeksCapacitySum}`, "未來 14 天名冊人數 / 總名額"],
+          ["近期開課待處理", pendingTwoWeeksSessionsCount, "未來 14 天缺講師 / 地點 / 名冊的課堂"],
           ["待處理", taskItems.length, "未排課或名冊待確認"],
         ].map(([label, value, note]) => (
           <article key={label} className="rounded-[28px] border border-[#ead8ca] bg-[#fffdf9] p-5 shadow-[0_12px_36px_rgba(90,55,38,0.06)]">
