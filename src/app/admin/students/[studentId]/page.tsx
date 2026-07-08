@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { AdminShell } from "@/components/page-shell";
 import { getBookingData } from "@/lib/booking-repository";
 import type { Student } from "@/lib/types";
-import { formatDate, getStudentCompleteness, getStudentStatus, text } from "../student-profile-utils";
+import { formatDate, getStudentCompleteness, getStudentStatus, text, isFullyDocumented, maskNationalId } from "../student-profile-utils";
 import { deleteStudentIdentityAction } from "@/app/admin/actions";
 
 export const dynamic = "force-dynamic";
@@ -127,6 +127,11 @@ export default async function AdminStudentProfilePage({ params }: PageProps) {
             <span className={`inline-flex rounded-full border px-4 py-2 text-sm font-bold ${completeness.className}`}>
               {completeness.label}
             </span>
+            {isFullyDocumented(student) ? (
+              <span className="inline-flex rounded-full border border-emerald-300 bg-emerald-100 text-emerald-800 px-4 py-2 text-sm font-bold shadow-sm">
+                ✓ 完整建檔
+              </span>
+            ) : null}
           </div>
           <div className="mt-5 grid gap-4 sm:grid-cols-3">
             {[
@@ -172,7 +177,7 @@ export default async function AdminStudentProfilePage({ params }: PageProps) {
             ["英文名／羅馬拼音", valueOrDash(student.englishName)],
             ["性別", valueOrDash(student.gender)],
             ["生日", formatDate(student.birthday)],
-            ["身分證／居留證", valueOrDash(student.nationalId)],
+            ["身分證／居留證", maskNationalId(student.nationalId)],
             ["證件末三碼", valueOrDash(student.idNumberLast3)],
             ["出生地", valueOrDash(student.birthPlace)],
             ["會員編號", valueOrDash(student.memberNo)],

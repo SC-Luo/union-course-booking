@@ -272,6 +272,11 @@ function ensureStudentsFromReservations(students: Student[], reservations: Reser
     seatNumber: student.seatNumber ?? index + 1,
     source: student.source ?? "manual",
     isActive: student.isActive ?? true,
+    basicConfirmed: student.basicConfirmed ?? false,
+    contactConfirmed: student.contactConfirmed ?? false,
+    backgroundConfirmed: student.backgroundConfirmed ?? false,
+    businessConfirmed: student.businessConfirmed ?? false,
+    noteConfirmed: student.noteConfirmed ?? false,
   }));
 }
 

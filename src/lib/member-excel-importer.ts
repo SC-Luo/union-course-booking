@@ -245,6 +245,7 @@ function upsertStudent(students: Student[], profile: ReturnType<typeof readProfi
     phone: profile.phone || existing?.phone,
     birthday: profile.birthday || existing?.birthday,
     idNumberLast3: profile.nationalId?.slice(-3) || existing?.idNumberLast3,
+    nationalId: profile.nationalId || existing?.nationalId,
     nationalIdHash: profile.nationalId ? `raw:${profile.nationalId}` : existing?.nationalIdHash,
     address: profile.address || existing?.address,
     source: existing?.source ?? "excel_import",

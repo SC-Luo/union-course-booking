@@ -102,6 +102,7 @@ related:
 
 ## 風險與注意
 
+- 目前 Firestore 內的學員資料均為模擬/測試資料，已直接實作新版學員完整度規則；正式上線生產環境前，必須清理所有測試資料並重新確認正式資料導入流程。
 - 工作區仍有大量未提交變更與未追蹤檔案；接手前務必先看 `git status --short`。
 - 目前 `data/booking-data.json` 有在地資料變更；暫時不要假設這是可直接提交的測試資料。
 - 目前仍有未追蹤暫存檔：`src/app/src__app__page.current.tsx.tsx`、`src/app/teaching/sessions/[sessionId]/src__app__teaching__sessions__[sessionId]__page.current.tsx`。提交前先判斷是否刪除或移出。

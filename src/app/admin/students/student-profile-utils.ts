@@ -33,13 +33,32 @@ export function getStudentStatus(student: Student) {
   };
 }
 
+export function maskNationalId(id?: string | null): string {
+  const val = text(id);
+  if (!val) return "未填";
+  if (val.length < 5) return "***";
+  return val.slice(0, 3) + "***" + val.slice(-3);
+}
+
+export function isFullyDocumented(student: Student): boolean {
+  return (
+    student.basicConfirmed === true &&
+    student.contactConfirmed === true &&
+    student.backgroundConfirmed === true &&
+    student.businessConfirmed === true &&
+    student.noteConfirmed === true
+  );
+}
+
 export function getStudentCompleteness(student: Student) {
   const hasName = text(student.name) !== "";
-  const hasId = text(student.nationalId || student.idNumberLast3) !== "";
+  const hasNationalId = text(student.nationalId) !== "";
   const hasPhone = text(student.phone) !== "";
+  const hasBirthday = text(student.birthday) !== "";
   const hasAddress = text(student.address || student.mailingAddress) !== "";
 
-  if (!hasName || !hasId || !hasPhone || !hasAddress) {
+  // 1. 待補資料：姓名、完整證件號、手機、生日、通訊地址缺任一項
+  if (!hasName || !hasNationalId || !hasPhone || !hasBirthday || !hasAddress) {
     return {
       label: "待補資料",
       className: "border-rose-200 bg-rose-50 text-rose-700",
@@ -49,6 +68,7 @@ export function getStudentCompleteness(student: Student) {
   const basicConfirmed = student.basicConfirmed === true;
   const contactConfirmed = student.contactConfirmed === true;
 
+  // 2. 待行政確認：必填資料都有，但基本資料或聯絡資料尚未確認
   if (!basicConfirmed || !contactConfirmed) {
     return {
       label: "待行政確認",
@@ -56,6 +76,7 @@ export function getStudentCompleteness(student: Student) {
     };
   }
 
+  // 3. 資料完整：必填資料都有，且基本資料、聯絡資料皆已確認
   return {
     label: "資料完整",
     className: "border-emerald-200 bg-emerald-50 text-emerald-700",

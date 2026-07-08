@@ -2197,7 +2197,7 @@ export async function saveStudentIdentityAction(formData: FormData) {
     .filter(Boolean);
   const note = String(formData.get("note") ?? "").trim();
 
-  if (!name || idNumberLast3.length !== 3 || !phone || !mailingAddress) {
+  if (!name || !nationalId || !phone || !birthday || !mailingAddress) {
     redirect(appendAdminQuery(redirectTo, "error=invalid"));
   }
 

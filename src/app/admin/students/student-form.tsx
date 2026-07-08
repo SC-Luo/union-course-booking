@@ -276,6 +276,7 @@ export function StudentForm({
     student?.idNumberLast3 ?? "",
   );
   const [phone, setPhone] = useState(student?.phone ?? "");
+  const [birthday, setBirthday] = useState(student?.birthday ?? "");
   const [mailingAddress, setMailingAddress] = useState(student?.mailingAddress ?? student?.address ?? "");
   const [plannedBusinessCategories, setPlannedBusinessCategories] = useState<string[]>(
     student?.plannedBusinessCategories ?? [],
@@ -292,12 +293,11 @@ export function StudentForm({
   const categoriesText = (student?.businessCategories ?? []).join("、");
 
   const derivedLast3 = nationalId ? extractLastThreeDigits(nationalId) : "";
-  const hasIdLast3 = idNumberLast3.length === 3;
-  const hasDerivedId = derivedLast3.length === 3;
   const basicRequiredOk =
     lastName.trim() !== "" &&
     firstName.trim() !== "" &&
-    (hasIdLast3 || hasDerivedId);
+    nationalId.trim() !== "" &&
+    birthday.trim() !== "";
   const contactRequiredOk = phone.trim() !== "" && mailingAddress.trim() !== "";
 
   function getSectionStatus(id: SectionId): SectionStatus {
@@ -319,7 +319,8 @@ export function StudentForm({
       const missing: string[] = [];
       if (lastName.trim() === "") missing.push("姓氏");
       if (firstName.trim() === "") missing.push("名字");
-      if (!hasIdLast3 && !hasDerivedId) missing.push("證件末三碼");
+      if (nationalId.trim() === "") missing.push("證件字號");
+      if (birthday.trim() === "") missing.push("生日");
       return missing.length > 0 ? `缺少：${missing.join("、")}` : undefined;
     }
     if (id === "contact") {
@@ -528,11 +529,14 @@ export function StudentForm({
 
             <FieldGroup
               title="證件與個人資訊"
-              description="身分證字號與證件末三碼擇一；系統會以末三碼作為快速識別。"
+              description="完整身分證字號與生日為必填項目；末三碼將由系統自完整身分證字號自動提取。"
             >
               <label className="text-sm font-bold text-zinc-700">
-                身分證字號<span className="ml-1 text-xs text-zinc-400">（與末三碼擇一）</span>
+                身分證字號
+                <RequiredMark />
                 <input
+                  required
+                  name="nationalId"
                   value={nationalId}
                   onChange={(e) => {
                     setNationalId(e.target.value);
@@ -542,7 +546,7 @@ export function StudentForm({
                 />
                 {numericThirdDigits.length >= 3 ? (
                   <HelperText>
-                    將使用末三碼：
+                    自動生成末三碼：
                     <span className="font-bold text-[#b85c1a]">
                       {extractLastThreeDigits(nationalId)}
                     </span>
@@ -550,9 +554,10 @@ export function StudentForm({
                 ) : null}
               </label>
               <label className="text-sm font-bold text-zinc-700">
-                證件末三碼<span className="ml-1 text-xs text-zinc-400">（與身分證字號擇一）</span>
+                證件末三碼<span className="ml-1 text-xs text-zinc-400">（由完整證件號自動生成，或手動覆蓋）</span>
                 <input
-                  value={idNumberLast3}
+                  name="idNumberLast3"
+                  value={idNumberLast3 || (nationalId ? extractLastThreeDigits(nationalId) : "")}
                   onChange={(e) => {
                     setIdNumberLast3(e.target.value.replace(/\D/g, "").slice(0, 3));
                     if (confirmedSections.basic) setConfirmedSections((prev) => ({ ...prev, basic: false }));
@@ -561,16 +566,19 @@ export function StudentForm({
                   inputMode="numeric"
                   className={fieldClassName()}
                 />
-                <HelperText>
-                  身分證字號或證件末三碼擇一；系統會以末三碼作為快速識別。
-                </HelperText>
               </label>
               <label className="text-sm font-bold text-zinc-700">
                 生日
+                <RequiredMark />
                 <input
+                  required
                   name="birthday"
-                  defaultValue={student?.birthday ?? ""}
-                  placeholder="YYYY-MM-DD"
+                  type="date"
+                  value={birthday}
+                  onChange={(e) => {
+                    setBirthday(e.target.value);
+                    if (confirmedSections.basic) setConfirmedSections((prev) => ({ ...prev, basic: false }));
+                  }}
                   className={fieldClassName()}
                 />
               </label>
