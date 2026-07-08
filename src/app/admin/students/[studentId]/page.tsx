@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { AdminShell } from "@/components/page-shell";
 import { getBookingData } from "@/lib/booking-repository";
 import type { Student } from "@/lib/types";
-import { formatDate, getStudentCompleteness, getStudentStatus, text, isFullyDocumented, maskNationalId } from "../student-profile-utils";
+import { formatDate, getStudentCompleteness, getStudentStatus, text, maskNationalId } from "../student-profile-utils";
 import { deleteStudentIdentityAction } from "@/app/admin/actions";
 
 export const dynamic = "force-dynamic";
@@ -21,12 +21,24 @@ function section(
   title: string,
   description: string,
   children: ReactNode,
+  confirmed?: boolean,
 ) {
   return (
     <section className="rounded-[1.75rem] border border-[#ead7c6] bg-white p-5 shadow-sm">
-      <div className="border-b border-[#f0dfcf] pb-4">
-        <h2 className="text-lg font-black text-zinc-950">{title}</h2>
-        <p className="mt-1 text-sm text-zinc-500">{description}</p>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#f0dfcf] pb-4">
+        <div>
+          <h2 className="text-lg font-black text-zinc-950">{title}</h2>
+          <p className="mt-1 text-sm text-zinc-500">{description}</p>
+        </div>
+        {confirmed !== undefined && (
+          <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold ${
+            confirmed
+              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+              : "border-amber-200 bg-amber-50 text-amber-700"
+          }`}>
+            {confirmed ? "✓ 已行政確認" : "待行政確認"}
+          </span>
+        )}
       </div>
       <div className="mt-5">{children}</div>
     </section>
@@ -127,11 +139,6 @@ export default async function AdminStudentProfilePage({ params }: PageProps) {
             <span className={`inline-flex rounded-full border px-4 py-2 text-sm font-bold ${completeness.className}`}>
               {completeness.label}
             </span>
-            {isFullyDocumented(student) ? (
-              <span className="inline-flex rounded-full border border-emerald-300 bg-emerald-100 text-emerald-800 px-4 py-2 text-sm font-bold shadow-sm">
-                ✓ 完整建檔
-              </span>
-            ) : null}
           </div>
           <div className="mt-5 grid gap-4 sm:grid-cols-3">
             {[
@@ -183,6 +190,7 @@ export default async function AdminStudentProfilePage({ params }: PageProps) {
             ["會員編號", valueOrDash(student.memberNo)],
             ["資料來源", valueOrDash(student.source)],
           ]),
+          student.basicConfirmed === true,
         )}
 
         {section(
@@ -198,6 +206,7 @@ export default async function AdminStudentProfilePage({ params }: PageProps) {
             ["緊急聯絡人", valueOrDash(student.emergencyContactName)],
             ["緊急聯絡人電話", valueOrDash(student.emergencyContactPhone)],
           ]),
+          student.contactConfirmed === true,
         )}
 
         {section(
@@ -217,6 +226,7 @@ export default async function AdminStudentProfilePage({ params }: PageProps) {
             ["產業類別", valueOrDash(student.industryCategory)],
             ["美容相關行業", valueOrDash(student.beautyRelated)],
           ]),
+          student.backgroundConfirmed === true,
         )}
 
         {section(
@@ -269,6 +279,7 @@ export default async function AdminStudentProfilePage({ params }: PageProps) {
               </div>
             </div>
           </>,
+          student.businessConfirmed === true,
         )}
 
         {section(
@@ -296,6 +307,7 @@ export default async function AdminStudentProfilePage({ params }: PageProps) {
               </div>
             </div>
           </>,
+          student.noteConfirmed === true,
         )}
       </div>
 

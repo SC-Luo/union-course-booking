@@ -57,29 +57,29 @@ export function getStudentCompleteness(student: Student) {
   const hasBirthday = text(student.birthday) !== "";
   const hasAddress = text(student.address || student.mailingAddress) !== "";
 
-  // 1. 待補資料：姓名、完整證件號、手機、生日、通訊地址缺任一項
-  if (!hasName || !hasNationalId || !hasPhone || !hasBirthday || !hasAddress) {
+  const requiredComplete = hasName && hasNationalId && hasPhone && hasBirthday && hasAddress;
+  const fullyDocumented = isFullyDocumented(student);
+
+  // 1. 待補基本：姓名、完整證件號、手機、生日、通訊地址缺任一項
+  if (!requiredComplete) {
     return {
-      label: "待補資料",
+      label: "待補基本",
       className: "border-rose-200 bg-rose-50 text-rose-700",
     };
   }
 
-  const basicConfirmed = student.basicConfirmed === true;
-  const contactConfirmed = student.contactConfirmed === true;
-
-  // 2. 待行政確認：必填資料都有，但基本資料或聯絡資料尚未確認
-  if (!basicConfirmed || !contactConfirmed) {
+  // 2. 資料完整：五大區塊全部完成確認
+  if (fullyDocumented) {
     return {
-      label: "待行政確認",
-      className: "border-amber-200 bg-amber-50 text-amber-700",
+      label: "資料完整",
+      className: "border-emerald-200 bg-emerald-50 text-emerald-700",
     };
   }
 
-  // 3. 資料完整：必填資料都有，且基本資料、聯絡資料皆已確認
+  // 3. 填完基本：必填都填了，但五大區塊未全確認
   return {
-    label: "資料完整",
-    className: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    label: "填完基本",
+    className: "border-sky-200 bg-sky-50 text-sky-700",
   };
 }
 
