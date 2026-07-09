@@ -2406,6 +2406,36 @@ export async function hardDeleteStudentIdentityAction(formData: FormData) {
     redirect(appendAdminQuery(redirectTo, "error=invalid"));
   }
 
+  const data = await getBookingData();
+  const student = data.students.find((s) => s.id === studentId);
+  if (!student) {
+    redirect(appendAdminQuery(redirectTo, "error=student_not_found"));
+  }
+
+  // 檢查 reservations
+  const hasReservations = data.reservations.some(
+    (r) => r.studentId === studentId || (r.studentName === student.name && r.phoneLastThree === student.idNumberLast3)
+  );
+
+  // 檢查 enrollments
+  const hasEnrollments = data.enrollments.some(
+    (e) => e.studentId === studentId
+  );
+
+  // 檢查 attendanceRecords
+  const hasAttendance = data.attendanceRecords.some(
+    (a) => a.studentId === studentId
+  );
+
+  // 檢查 studentCourseRecords
+  const hasCourseRecords = data.studentCourseRecords.some(
+    (c) => c.studentId === studentId
+  );
+
+  if (hasReservations || hasEnrollments || hasAttendance || hasCourseRecords) {
+    redirect(appendAdminQuery(redirectTo, "error=has_relations"));
+  }
+
   await deleteStudentIdentityDocument(studentId);
   revalidatePath("/");
   revalidatePath("/admin/students");
