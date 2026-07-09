@@ -9,6 +9,7 @@ import {
   updateStudentCourseEligibilityAction,
   saveInstructorIdentityAction,
   deleteInstructorIdentityAction,
+  removeStudentFromCourseOfferingAction,
 } from "@/app/admin/actions";
 import { AdminShell } from "@/components/page-shell";
 import { RosterFlowNav } from "@/components/roster-flow-nav";
@@ -41,6 +42,7 @@ type PageProps = {
     linked?: string;
     enrolled?: string;
     filter?: string;
+    message?: string;
   }>;
 };
 
@@ -429,6 +431,7 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
     linked,
     enrolled,
     filter: queryFilter,
+    message,
   } = await searchParams;
   let bookingData;
   try {
@@ -867,15 +870,18 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
 
       {saved ? (
         <p className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-bold text-emerald-800">
-          已更新資料{imported ? `，本次處理 ${imported} 筆` : ""}
-          {linked ? `，建立 / 更新 ${linked} 筆課程狀態` : ""}
-          {enrolled ? `，加入 ${enrolled} 筆班級名單` : ""}
-          {skipped ? `，略過 ${skipped} 筆疑似錯位或資料不足的資料` : ""}。
+          {saved === "student-removed"
+            ? "已將學員退出班級。"
+            : `已更新資料${imported ? `，本次處理 ${imported} 筆` : ""}${linked ? `，建立 / 更新 ${linked} 筆課程狀態` : ""}${enrolled ? `，加入 ${enrolled} 筆班級名單` : ""}${skipped ? `，略過 ${skipped} 筆疑似錯位或資料不足的資料` : ""}。`}
         </p>
       ) : null}
       {error ? (
         <p className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-3 text-sm font-bold text-rose-800">
-          資料不足，請確認必填欄位、課程目錄、年度與勾選學員。
+          {error === "has-records" && message
+            ? decodeURIComponent(message)
+            : error === "failed" && message
+              ? `操作失敗：${decodeURIComponent(message)}`
+              : "資料不足，請確認必填欄位、課程目錄、年度與勾選學員。"}
         </p>
       ) : null}
 
@@ -1680,10 +1686,23 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
                               </span>
                             ) : null}
                           </div>
-                          <div className="text-right">
+                          <div className="text-right flex items-center justify-end gap-1.5 md:flex-row flex-col">
                             <span className="inline-block rounded-full bg-[#fff7ed] px-3 py-1 text-xs font-bold text-[#a65f3b]">
                               已加入
                             </span>
+                            <span className="hidden md:inline text-zinc-300">|</span>
+                            <form action={removeStudentFromCourseOfferingAction} onSubmit={(e) => {
+                              if (!confirm("確定要將此學員退出班級嗎？此操作將解除該學員在此班級的資格。")) {
+                                e.preventDefault();
+                              }
+                            }}>
+                              <input type="hidden" name="studentId" value={student.id} />
+                              <input type="hidden" name="offeringId" value={eligibilityOfferingId} />
+                              <input type="hidden" name="redirectTo" value={buildHref({ mode: "eligibility", offeringId: eligibilityOfferingId, filter: currentFilter, q })} />
+                              <button className="text-xs font-bold text-rose-600 hover:text-rose-800 hover:underline">
+                                退出班級
+                              </button>
+                            </form>
                           </div>
                         </div>
                       );
@@ -1812,10 +1831,23 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
                                   </span>
                                 ) : null}
                               </div>
-                              <div className="text-right">
+                              <div className="text-right flex items-center justify-end gap-1.5 md:flex-row flex-col">
                                 <span className="inline-block rounded-full bg-[#fff7ed] px-3 py-1 text-xs font-bold text-[#a65f3b]">
                                   已加入
                                 </span>
+                                <span className="hidden md:inline text-zinc-300">|</span>
+                                <form action={removeStudentFromCourseOfferingAction} onSubmit={(e) => {
+                                  if (!confirm("確定要將此學員退出班級嗎？此操作將解除該學員在此班級的資格。")) {
+                                    e.preventDefault();
+                                  }
+                                }}>
+                                  <input type="hidden" name="studentId" value={student.id} />
+                                  <input type="hidden" name="offeringId" value={eligibilityOfferingId} />
+                                  <input type="hidden" name="redirectTo" value={buildHref({ mode: "eligibility", offeringId: eligibilityOfferingId, filter: currentFilter, q })} />
+                                  <button className="text-xs font-bold text-rose-600 hover:text-rose-800 hover:underline">
+                                    退出班級
+                                  </button>
+                                </form>
                               </div>
                             </div>
                           );

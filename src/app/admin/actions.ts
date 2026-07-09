@@ -35,6 +35,8 @@ import {
   removeStudentCourseEligibility,
   addStudentToSessionRoster,
   ensureSessionRosterReservation,
+  checkStudentOfferingRecords,
+  removeStudentFromOffering,
 } from "@/lib/booking-repository";
 import type {
   AttendanceStatus,
@@ -2867,6 +2869,36 @@ export async function assignStudentsToCourseEligibilityAction(
   revalidatePath("/");
   revalidatePath("/admin/students");
   // 成功時只 revalidate，不 redirect，降低後台點選狀態後畫面跳動。
+}
+
+export async function removeStudentFromCourseOfferingAction(formData: FormData) {
+  const studentId = String(formData.get("studentId") ?? "").trim();
+  const offeringId = String(formData.get("offeringId") ?? "").trim();
+  const redirectTo = normalizeAdminRedirect(formData.get("redirectTo"), "/admin/students?mode=eligibility");
+
+  if (!studentId || !offeringId) {
+    redirect(appendAdminQuery(redirectTo, "error=invalid"));
+  }
+
+  try {
+    const { hasReservations, hasAttendance } = await checkStudentOfferingRecords(studentId, offeringId);
+    if (hasReservations || hasAttendance) {
+      const msg = "此學員已有預約或出席紀錄，請先取消預約或確認是否要保留歷史紀錄。";
+      redirect(appendAdminQuery(redirectTo, `error=has-records&message=${encodeURIComponent(msg)}`));
+    }
+
+    await removeStudentFromOffering(studentId, offeringId);
+    revalidatePath("/");
+    revalidatePath("/admin/students");
+    redirect(appendAdminQuery(redirectTo, "saved=student-removed"));
+  } catch (error: any) {
+    if (error && typeof error === "object" && (error.digest?.startsWith("NEXT_REDIRECT") || error.message?.includes("NEXT_REDIRECT"))) {
+      throw error;
+    }
+    console.error("Remove student from course offering action failed:", error);
+    const msg = error instanceof Error ? error.message : String(error);
+    redirect(appendAdminQuery(redirectTo, `error=failed&message=${encodeURIComponent(msg)}`));
+  }
 }
 
 export async function bulkUpdateStudentCourseEligibilityAction(
