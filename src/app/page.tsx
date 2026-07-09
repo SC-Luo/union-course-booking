@@ -4,6 +4,9 @@ import { LastReservationCard } from "@/components/last-reservation-card";
 import { StudentShell } from "@/components/page-shell";
 import { getCourseCatalog } from "@/lib/booking-repository";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function Home() {
   const { categories, courses } = await getCourseCatalog();
   const activeCourses = courses.filter((course) => course.isActive && course.sessions.length > 0);
