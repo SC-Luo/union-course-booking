@@ -523,3 +523,39 @@ export function getWeekday(date: string) {
   const weekdays = ["日", "一", "二", "三", "四", "五", "六"];
   return `週${weekdays[parsed.getDay()]}`;
 }
+
+export function getBookingCycleRange(dateStr: string) {
+  const normalized = dateStr.trim().split("T")[0];
+  const date = new Date(`${normalized}T12:00:00`);
+  if (Number.isNaN(date.getTime())) {
+    return { sundayStr: "", saturdayStr: "", key: "" };
+  }
+
+  const dayOfWeek = date.getDay();
+
+  const sunday = new Date(date);
+  sunday.setDate(date.getDate() - dayOfWeek);
+
+  const saturday = new Date(sunday);
+  saturday.setDate(sunday.getDate() + 6);
+
+  const formatDate = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const r = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${r}`;
+  };
+
+  const sundayStr = formatDate(sunday);
+  const saturdayStr = formatDate(saturday);
+
+  return {
+    sundayStr,
+    saturdayStr,
+    key: `${sundayStr}~${saturdayStr}`
+  };
+}
+
+export function getBookingCycleKey(dateStr: string): string {
+  return getBookingCycleRange(dateStr).key;
+}

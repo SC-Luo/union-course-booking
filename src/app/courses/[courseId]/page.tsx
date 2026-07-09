@@ -135,6 +135,18 @@ export default async function CourseDetailPage({ params }: PageProps) {
           <p className="text-sm text-zinc-500">課程模式</p>
           <p className="mt-1 font-black text-zinc-900">{modeInfo.shortLabel}</p>
           <p className="mt-3 text-sm leading-6 text-zinc-600">{modeInfo.frontDescription}</p>
+          {isBookingMode && course.bookingPolicy && course.bookingPolicy !== "per_session" && (
+            <>
+              <p className="mt-4 text-sm text-zinc-500 font-medium text-rose-800">預約限制</p>
+              <p className="mt-1 font-black text-rose-600 text-sm">
+                {course.bookingPolicy === "one_per_cycle"
+                  ? "⚠️ 此課程每週限預約一個時段"
+                  : course.bookingPolicy === "one_per_course"
+                  ? "⚠️ 此課程限預約一個時段"
+                  : ""}
+              </p>
+            </>
+          )}
           <p className="mt-4 text-sm text-zinc-500">預設地點</p>
           <p className="mt-1 font-medium text-zinc-900">{course.defaultLocation}</p>
           {course.notes ? (
@@ -152,7 +164,13 @@ export default async function CourseDetailPage({ params }: PageProps) {
             <h2 className="text-xl font-semibold text-zinc-950">{modeInfo.frontTitle}</h2>
             <p className="mt-1 text-sm text-zinc-600">
               {isBookingMode
-                ? "先看單元，再選日期。可預約按鈕會以綠色顯示；已過預約截止時間會自動鎖定。"
+                ? `先看單元，再選日期。可預約按鈕會以綠色顯示；已過預約截止時間會自動鎖定。${
+                    course.bookingPolicy === "one_per_cycle"
+                      ? "（每人每週限預約一個時段，跨週可再次預約）"
+                      : course.bookingPolicy === "one_per_course"
+                      ? "（此課程同一位學員限預約一個時段）"
+                      : ""
+                  }`
                 : "此課程依固定名冊與正式課表進行，不開放學員自行預約。後續可銜接個人出缺勤查詢與作業繳交。"}
             </p>
           </div>

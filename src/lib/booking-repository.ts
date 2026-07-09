@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { normalizeBookingData, readBookingData, writeBookingData } from "./data-store";
 import { getAdminDb } from "./firebase-admin";
-import { canChangeReservation, getReservationCutoff, isBookingCourse } from "./course-utils";
+import { canChangeReservation, getReservationCutoff, isBookingCourse, getBookingCycleKey } from "./course-utils";
 import type { AttendanceStatus, BookingData, Course, CourseCategory, CourseOffering, CourseSeries, CourseSession, Enrollment, Reservation, Student, StudentCourseRecord, Instructor } from "./types";
 
 function shouldUseFirestore() {
@@ -507,12 +507,71 @@ export async function createReservation(input: CreateReservationInput) {
         return { ok: false as const, reason: "duplicate" };
       }
 
+      // Check one_per_course and one_per_cycle policies
+      const quotaGroupId = course.bookingQuotaGroupId || course.offeringId || course.id;
+      const policy = course.bookingPolicy || "per_session";
+
+      if (policy === "one_per_course") {
+        const [dupCourseByStudentId, dupCourseByName] = await Promise.all([
+          transaction.get(
+            db
+              .collection("reservations")
+              .where("bookingQuotaGroupId", "==", quotaGroupId)
+              .where("studentId", "==", eligibleStudent.id)
+              .where("status", "==", "booked")
+              .limit(1),
+          ),
+          transaction.get(
+            db
+              .collection("reservations")
+              .where("bookingQuotaGroupId", "==", quotaGroupId)
+              .where("studentName", "==", input.studentName)
+              .where("status", "==", "booked")
+              .limit(1),
+          ),
+        ]);
+        if (!dupCourseByStudentId.empty || !dupCourseByName.empty) {
+          return { ok: false as const, reason: "duplicate_course" };
+        }
+      }
+
+      const cycleKey = session.date ? getBookingCycleKey(session.date) : "";
+      if (policy === "one_per_cycle" && cycleKey) {
+        const [dupCycleByStudentId, dupCycleByName] = await Promise.all([
+          transaction.get(
+            db
+              .collection("reservations")
+              .where("bookingQuotaGroupId", "==", quotaGroupId)
+              .where("bookingCycleKey", "==", cycleKey)
+              .where("studentId", "==", eligibleStudent.id)
+              .where("status", "==", "booked")
+              .limit(1),
+          ),
+          transaction.get(
+            db
+              .collection("reservations")
+              .where("bookingQuotaGroupId", "==", quotaGroupId)
+              .where("bookingCycleKey", "==", cycleKey)
+              .where("studentName", "==", input.studentName)
+              .where("status", "==", "booked")
+              .limit(1),
+          ),
+        ]);
+        if (!dupCycleByStudentId.empty || !dupCycleByName.empty) {
+          return { ok: false as const, reason: "duplicate_cycle" };
+        }
+      }
+
       if (!course.isActive || !session.isActive || !isSessionBookable(session) || !canChangeReservation(session) || session.bookedCount >= session.capacity) {
         return { ok: false as const, reason: "closed" };
       }
 
       const studentLast3 = cleanIdentityLast3(eligibleStudent.idNumberLast3) || cleanIdentityLast3(eligibleStudent.phone).slice(-3);
-      const reservation = buildReservation({ ...input, phoneLastThree: studentLast3, idNumberLast3: studentLast3, studentId: eligibleStudent.id } as CreateReservationInput & { studentId?: string });
+      const reservation = buildReservation(
+        { ...input, phoneLastThree: studentLast3, idNumberLast3: studentLast3, studentId: eligibleStudent.id } as CreateReservationInput & { studentId?: string },
+        course,
+        session
+      );
       transaction.create(db.collection("reservations").doc(reservation.id), reservation);
       transaction.update(sessionRef, { bookedCount: session.bookedCount + 1 });
 
@@ -1188,12 +1247,48 @@ function createReservationInJson(input: CreateReservationInput) {
     return { ok: false as const, reason: "duplicate" };
   }
 
+  // Check one_per_course and one_per_cycle policies
+  const quotaGroupId = course.bookingQuotaGroupId || course.offeringId || course.id;
+  const policy = course.bookingPolicy || "per_session";
+
+  if (policy === "one_per_course") {
+    const hasDuplicateCourse = data.reservations.some(
+      (r) =>
+        (r.bookingQuotaGroupId || r.offeringId || r.courseId) === quotaGroupId &&
+        r.status === "booked" &&
+        (r.studentId === eligibleStudent.id ||
+          normalizeName(r.studentName) === normalizeName(input.studentName)),
+    );
+    if (hasDuplicateCourse) {
+      return { ok: false as const, reason: "duplicate_course" };
+    }
+  }
+
+  const cycleKey = session.date ? getBookingCycleKey(session.date) : "";
+  if (policy === "one_per_cycle" && cycleKey) {
+    const hasDuplicateCycle = data.reservations.some(
+      (r) =>
+        (r.bookingQuotaGroupId || r.offeringId || r.courseId) === quotaGroupId &&
+        (r.bookingCycleKey || (r.sessionId ? getBookingCycleKey(data.courses.flatMap(c => c.sessions).find(s => s.id === r.sessionId)?.date || "") : "")) === cycleKey &&
+        r.status === "booked" &&
+        (r.studentId === eligibleStudent.id ||
+          normalizeName(r.studentName) === normalizeName(input.studentName)),
+    );
+    if (hasDuplicateCycle) {
+      return { ok: false as const, reason: "duplicate_cycle" };
+    }
+  }
+
   if (!course.isActive || !session.isActive || !isSessionBookable(session) || !canChangeReservation(session) || session.bookedCount >= session.capacity) {
     return { ok: false as const, reason: "closed" };
   }
 
   const studentLast3 = cleanIdentityLast3(eligibleStudent.idNumberLast3) || cleanIdentityLast3(eligibleStudent.phone).slice(-3);
-  const reservation = buildReservation({ ...input, phoneLastThree: studentLast3, idNumberLast3: studentLast3, studentId: eligibleStudent.id } as CreateReservationInput & { studentId?: string });
+  const reservation = buildReservation(
+    { ...input, phoneLastThree: studentLast3, idNumberLast3: studentLast3, studentId: eligibleStudent.id } as CreateReservationInput & { studentId?: string },
+    course,
+    session
+  );
   session.bookedCount += 1;
   data.reservations.push(reservation);
   writeBookingData(data);
@@ -2174,8 +2269,16 @@ export async function deleteCourseOfferingCascade(offeringId: string): Promise<C
   }
 }
 
-function buildReservation(input: CreateReservationInput & { studentId?: string }): Reservation {
+function buildReservation(
+  input: CreateReservationInput & { studentId?: string },
+  course?: Course,
+  session?: CourseSession,
+): Reservation {
   const idNumberLast3 = cleanIdentityLast3(input.idNumberLast3 ?? input.phoneLastThree);
+  const cycleKey = session?.date ? getBookingCycleKey(session.date) : "";
+  const quotaGroupId = course?.bookingQuotaGroupId || input.courseId;
+  const policy = course?.bookingPolicy || "per_session";
+
   return {
     id: `r-${randomUUID()}`,
     courseId: input.courseId,
@@ -2187,6 +2290,9 @@ function buildReservation(input: CreateReservationInput & { studentId?: string }
     bookedAt: buildTimestamp(),
     status: "booked",
     attendanceStatus: "pending",
+    bookingCycleKey: cycleKey,
+    bookingQuotaGroupId: quotaGroupId,
+    bookingPolicy: policy,
   };
 }
 

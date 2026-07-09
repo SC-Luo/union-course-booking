@@ -44,6 +44,9 @@ export type CourseSeries = {
   description?: string;
   color?: string;
   isActive: boolean;
+  bookingPolicy?: BookingPolicy;
+  bookingQuotaGroupId?: string;
+  maxReservationsPerCycle?: number;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -92,6 +95,9 @@ export type CourseOffering = {
   rosterPolicy?: RosterPolicy;
   notes?: string;
   isActive?: boolean;
+  bookingPolicy?: BookingPolicy;
+  bookingQuotaGroupId?: string;
+  maxReservationsPerCycle?: number;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -186,6 +192,8 @@ export type RosterPolicy = {
   allowWalkIn: boolean;
 };
 
+export type BookingPolicy = "none" | "per_session" | "one_per_course" | "one_per_cycle" | string;
+
 export type Course = {
   id: string;
   code?: string;
@@ -224,6 +232,9 @@ export type Course = {
   status?: string;
   entitlementPolicy?: EntitlementPolicy;
   rosterPolicy?: RosterPolicy;
+  bookingPolicy?: BookingPolicy;
+  bookingQuotaGroupId?: string;
+  maxReservationsPerCycle?: number;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -250,6 +261,9 @@ export type Reservation = {
   source?: ReservationSource;
   homework?: string;
   note?: string;
+  bookingCycleKey?: string;
+  bookingQuotaGroupId?: string;
+  bookingPolicy?: BookingPolicy;
   createdAt?: string;
   updatedAt?: string;
 };

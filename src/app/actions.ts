@@ -53,6 +53,8 @@ export async function createReservationAction(
       not_roster: "查無此課程名冊內的學員，請確認姓名是否與名冊一致。",
       identity_mismatch: "查無符合姓名與身分證後三碼的課程名冊資料，請確認資料是否與名冊一致。",
       duplicate: "你已經預約過這一堂課。",
+      duplicate_course: "您已預約過此課程時段，如需更換時段，請先取消原預約後再重新預約。",
+      duplicate_cycle: "您本週已預約此課程其他日期，如需更換日期，請先取消原預約後再重新預約。",
       closed: "此課堂目前已額滿、鎖定或未開放預約。",
       invalid: "預約資料不完整，請回到課程列表重新操作。",
     };

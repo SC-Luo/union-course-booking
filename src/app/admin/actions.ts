@@ -1249,6 +1249,11 @@ export async function saveCourseAction(formData: FormData) {
       ));
   const id = currentId || `${code.toLowerCase()}-${slugify(title)}`;
 
+  const bookingPolicy = String(formData.get("bookingPolicy") ?? existingCourse?.bookingPolicy ?? "per_session").trim();
+  const bookingQuotaGroupId = String(formData.get("bookingQuotaGroupId") ?? "").trim() || undefined;
+  const parsedMaxReservations = Number(formData.get("maxReservationsPerCycle"));
+  const maxReservationsPerCycle = Number.isInteger(parsedMaxReservations) && parsedMaxReservations >= 1 ? parsedMaxReservations : undefined;
+
   await upsertCourse({
     id,
     code,
@@ -1262,6 +1267,9 @@ export async function saveCourseAction(formData: FormData) {
     color: color ?? existingCourse?.color,
     capacityMode,
     totalCapacity,
+    bookingPolicy,
+    bookingQuotaGroupId,
+    maxReservationsPerCycle,
   });
 
   revalidatePath("/");
@@ -2412,9 +2420,22 @@ export async function hardDeleteStudentIdentityAction(formData: FormData) {
     redirect(appendAdminQuery(redirectTo, "error=student_not_found"));
   }
 
-  // 檢查 reservations
+  // 檢查 reservations，防止手機末三碼與證件末三碼錯配
+  const studentPhoneLast3 = student.phone ? student.phone.replace(/\D/g, "").slice(-3) : "";
   const hasReservations = data.reservations.some(
-    (r) => r.studentId === studentId || (r.studentName === student.name && r.phoneLastThree === student.idNumberLast3)
+    (r) => {
+      if (r.studentId === studentId) return true;
+      const nameMatches = r.studentName === student.name;
+      if (!nameMatches) return false;
+
+      // A. 姓名 + 手機末三碼
+      const phoneMatches = studentPhoneLast3 && r.phoneLastThree === studentPhoneLast3;
+
+      // B. 姓名 + 證件末三碼
+      const idMatches = student.idNumberLast3 && r.idNumberLast3 && r.idNumberLast3 === student.idNumberLast3;
+
+      return Boolean(phoneMatches || idMatches);
+    }
   );
 
   // 檢查 enrollments
