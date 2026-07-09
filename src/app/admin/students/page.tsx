@@ -12,7 +12,10 @@ import {
 } from "@/app/admin/actions";
 import { AdminShell } from "@/components/page-shell";
 import { RosterFlowNav } from "@/components/roster-flow-nav";
-import { getBookingData } from "@/lib/booking-repository";
+import {
+  getBookingData,
+  getStudentEligibilityPageData,
+} from "@/lib/booking-repository";
 import type {
   CourseOffering,
   CourseSeries,
@@ -433,9 +436,13 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
     filter: queryFilter,
     message,
   } = await searchParams;
+  const currentMode = MODES.some(([key]) => key === mode) ? mode : "students";
   let bookingData;
   try {
-    bookingData = await getBookingData();
+    bookingData =
+      currentMode === "eligibility"
+        ? await getStudentEligibilityPageData(queryOfferingId)
+        : await getBookingData();
   } catch (error) {
     console.error("[admin/students] failed to load booking data", {
       message: error instanceof Error ? error.message : String(error),
@@ -469,7 +476,6 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
     categories = [],
   } = bookingData;
 
-  const currentMode = MODES.some(([key]) => key === mode) ? mode : "students";
   const instructorSpecialtyCategories = categories
     .filter((category) => category.isActive !== false)
     .sort((a, b) => Number(a.sortOrder ?? 0) - Number(b.sortOrder ?? 0));

@@ -1,12 +1,11 @@
 /* eslint-disable @next/next/no-html-link-for-pages */
 import { notFound } from "next/navigation";
 import { StudentShell } from "@/components/page-shell";
-import { getCourseCatalog } from "@/lib/booking-repository";
+import { getCourseDetailById } from "@/lib/booking-repository";
 import {
   canChangeReservation,
   formatReservationCutoff,
   getCategoryName,
-  getCourse,
   getCourseModeInfo,
   getRemainingSeats,
   getWeekday,
@@ -19,6 +18,11 @@ import { getCourseTypeName } from "@/lib/course-coding";
 type PageProps = {
   params: Promise<{ courseId: string }>;
 };
+
+function isFirestoreQuotaError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /RESOURCE_EXHAUSTED|Quota exceeded/i.test(message);
+}
 
 type SessionTone = "available" | "makeup" | "locked" | "full" | "closed";
 type SessionDisplayState = {
@@ -97,12 +101,32 @@ function sessionBadgeClass(tone: SessionTone) {
 
 export default async function CourseDetailPage({ params }: PageProps) {
   const { courseId } = await params;
-  const { categories, courses } = await getCourseCatalog();
-  const course = getCourse(courseId, courses);
+  let courseDetail = null;
+  try {
+    courseDetail = await getCourseDetailById(courseId);
+  } catch (error) {
+    const message = isFirestoreQuotaError(error)
+      ? "目前系統資料暫時忙碌，請稍後再試。"
+      : "目前無法載入課程資料，請稍後再試。";
 
-  if (!course) {
+    return (
+      <StudentShell>
+        <a href="/" className="mb-6 inline-flex text-sm font-medium text-zinc-600 hover:text-zinc-950">
+          返回課程列表
+        </a>
+        <section className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-sm leading-7 text-amber-900">
+          <p className="text-base font-black">目前無法載入課程資料</p>
+          <p className="mt-2">{message}</p>
+        </section>
+      </StudentShell>
+    );
+  }
+  if (!courseDetail) {
     notFound();
   }
+
+  const { course, category } = courseDetail;
+  const categories = category ? [category] : [];
 
   const modeInfo = getCourseModeInfo(course);
   const isBookingMode = isBookingCourse(course);

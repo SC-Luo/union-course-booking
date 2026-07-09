@@ -1,7 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { normalizeBookingData, readBookingData, writeBookingData } from "./data-store";
 import { getAdminDb } from "./firebase-admin";
-import { canChangeReservation, getReservationCutoff, isBookingCourse, getBookingCycleKey } from "./course-utils";
+import {
+  canChangeReservation,
+  getBookingCycleKey,
+  getCourse,
+  getReservationCutoff,
+  getSession,
+  isBookingCourse,
+} from "./course-utils";
 import type { AttendanceStatus, BookingData, Course, CourseCategory, CourseOffering, CourseSeries, CourseSession, Enrollment, Reservation, Student, StudentCourseRecord, Instructor } from "./types";
 
 function shouldUseFirestore() {
@@ -309,6 +316,251 @@ export async function getCourseCatalog(): Promise<Pick<BookingData, "categories"
       categories: data.categories,
       courses: data.courses.filter((course) => course.status !== "archived" && course.isActive !== false),
     };
+  }
+}
+
+function buildNormalizedCourse(course: Omit<Course, "sessions">, sessions: CourseSession[]) {
+  return normalizeBookingData({
+    courses: [
+      {
+        ...course,
+        sessions,
+      },
+    ],
+  }).courses[0] ?? null;
+}
+
+export async function getCourseDetailById(courseId: string): Promise<{
+  category?: CourseCategory;
+  course: Course;
+} | null> {
+  const lookupId = decodeURIComponent(String(courseId ?? "").trim());
+  if (!lookupId) return null;
+
+  const db = getFirestoreDb();
+  if (!db) {
+    const data = readBookingData();
+    const course = getCourse(lookupId, data.courses);
+    if (!course) return null;
+    return {
+      category: data.categories.find((item) => item.id === course.categoryId),
+      course,
+    };
+  }
+
+  try {
+    const courseDoc = await db.collection("courses").doc(lookupId).get();
+    if (!courseDoc.exists) return null;
+
+    const rawCourse = { id: courseDoc.id, ...courseDoc.data() } as Omit<Course, "sessions">;
+    const [sessionSnapshot, categoryDoc] = await Promise.all([
+      db.collection("sessions").where("courseId", "==", rawCourse.id).get(),
+      rawCourse.categoryId
+        ? db.collection("categories").doc(rawCourse.categoryId).get()
+        : Promise.resolve(null),
+    ]);
+
+    const sessions = sessionSnapshot.docs.map(
+      (doc) => ({ id: doc.id, ...doc.data() }) as CourseSession,
+    );
+    const course = buildNormalizedCourse(rawCourse, sessions);
+    if (!course) return null;
+
+    return {
+      category:
+        categoryDoc && categoryDoc.exists
+          ? ({ id: categoryDoc.id, ...categoryDoc.data() } as CourseCategory)
+          : undefined,
+      course,
+    };
+  } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Course detail read failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore course detail read failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
+    const data = readBookingData();
+    const course = getCourse(lookupId, data.courses);
+    if (!course) return null;
+    return {
+      category: data.categories.find((item) => item.id === course.categoryId),
+      course,
+    };
+  }
+}
+
+export async function getBookingPageData(courseId: string, sessionId: string): Promise<{
+  course: Course;
+  session: CourseSession;
+} | null> {
+  const decodedCourseId = decodeURIComponent(String(courseId ?? "").trim());
+  const decodedSessionId = decodeURIComponent(String(sessionId ?? "").trim());
+  if (!decodedCourseId || !decodedSessionId) return null;
+
+  const db = getFirestoreDb();
+  if (!db) {
+    const data = readBookingData();
+    const course = getCourse(decodedCourseId, data.courses);
+    const session = course
+      ? getSession(course, decodedSessionId) ?? getSession(decodedSessionId, data.courses)
+      : undefined;
+    return course && session ? { course, session } : null;
+  }
+
+  try {
+    const [courseDoc, sessionDoc] = await Promise.all([
+      db.collection("courses").doc(decodedCourseId).get(),
+      db.collection("sessions").doc(decodedSessionId).get(),
+    ]);
+
+    if (!courseDoc.exists || !sessionDoc.exists) return null;
+
+    const rawCourse = { id: courseDoc.id, ...courseDoc.data() } as Omit<Course, "sessions">;
+    const session = { id: sessionDoc.id, ...sessionDoc.data() } as CourseSession;
+    if (session.courseId !== rawCourse.id) return null;
+
+    const course = buildNormalizedCourse(rawCourse, [session]);
+    if (!course) return null;
+
+    return {
+      course,
+      session: course.sessions[0] ?? session,
+    };
+  } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Booking page read failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore booking page read failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
+    const data = readBookingData();
+    const course = getCourse(decodedCourseId, data.courses);
+    const session = course
+      ? getSession(course, decodedSessionId) ?? getSession(decodedSessionId, data.courses)
+      : undefined;
+    return course && session ? { course, session } : null;
+  }
+}
+
+export async function getStudentEligibilityPageData(
+  offeringId?: string,
+): Promise<BookingData> {
+  const targetOfferingId = String(offeringId ?? "").trim();
+  const db = getFirestoreDb();
+
+  if (!db) {
+    const data = readBookingData();
+    return normalizeBookingData({
+      categories: data.categories,
+      students: data.students,
+      courseSeries: data.courseSeries,
+      courseOfferings: data.courseOfferings,
+      studentCourseRecords: data.studentCourseRecords,
+      enrollments: targetOfferingId
+        ? (data.enrollments ?? []).filter(
+            (item) =>
+              item.offeringId === targetOfferingId ||
+              item.courseOfferingId === targetOfferingId,
+          )
+        : [],
+    });
+  }
+
+  try {
+    const [categorySnapshot, studentSnapshot, courseSeriesSnapshot, courseOfferingSnapshot] =
+      await Promise.all([
+        db.collection("categories").orderBy("sortOrder", "asc").get(),
+        db.collection("students").get(),
+        db.collection("courseSeries").get(),
+        db.collection("courseOfferings").get(),
+      ]);
+
+    const categories = categorySnapshot.docs.map(
+      (doc) => ({ id: doc.id, ...doc.data() }) as CourseCategory,
+    );
+    const students = studentSnapshot.docs
+      .map((doc) =>
+        normalizeFirestoreStudent(doc.id, doc.data() as FirestoreStudentDocument),
+      )
+      .sort(compareStudentsForRoster);
+    const courseSeries = courseSeriesSnapshot.docs.map(
+      (doc) => ({ id: doc.id, ...doc.data() }) as CourseSeries,
+    );
+    const courseOfferings = courseOfferingSnapshot.docs.map(
+      (doc) => ({ id: doc.id, ...doc.data() }) as CourseOffering,
+    );
+
+    const selectedOffering = targetOfferingId
+      ? courseOfferings.find((item) => item.id === targetOfferingId)
+      : undefined;
+    const selectedSeriesId =
+      selectedOffering?.seriesId ||
+      selectedOffering?.courseSeriesId ||
+      selectedOffering?.courseMasterId ||
+      "";
+
+    const [enrollmentSnapshots, recordSnapshots] = await Promise.all([
+      targetOfferingId
+        ? Promise.all([
+            db.collection("enrollments").where("offeringId", "==", targetOfferingId).get(),
+            db.collection("enrollments").where("courseOfferingId", "==", targetOfferingId).get(),
+          ])
+        : Promise.resolve([] as FirebaseFirestore.QuerySnapshot[]),
+      selectedSeriesId
+        ? Promise.all([
+            db.collection("studentCourseRecords").where("seriesId", "==", selectedSeriesId).get(),
+            db.collection("studentCourseRecords").where("courseMasterId", "==", selectedSeriesId).get(),
+          ])
+        : Promise.resolve([] as FirebaseFirestore.QuerySnapshot[]),
+    ]);
+
+    const enrollments = Array.from(
+      new Map(
+        enrollmentSnapshots
+          .flatMap((snapshot) => snapshot.docs)
+          .map((doc) => [
+            doc.id,
+            { id: doc.id, ...doc.data() } as Enrollment,
+          ]),
+      ).values(),
+    );
+
+    const studentCourseRecords = Array.from(
+      new Map(
+        recordSnapshots
+          .flatMap((snapshot) => snapshot.docs)
+          .map((doc) => [
+            doc.id,
+            { id: doc.id, ...doc.data() } as StudentCourseRecord,
+          ]),
+      ).values(),
+    );
+
+    return normalizeBookingData({
+      categories,
+      students,
+      courseSeries,
+      courseOfferings,
+      studentCourseRecords,
+      enrollments,
+    });
+  } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Student eligibility page read failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore student eligibility page read failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
+    const data = readBookingData();
+    return normalizeBookingData({
+      categories: data.categories,
+      students: data.students,
+      courseSeries: data.courseSeries,
+      courseOfferings: data.courseOfferings,
+      studentCourseRecords: data.studentCourseRecords,
+      enrollments: targetOfferingId
+        ? (data.enrollments ?? []).filter(
+            (item) =>
+              item.offeringId === targetOfferingId ||
+              item.courseOfferingId === targetOfferingId,
+          )
+        : [],
+    });
   }
 }
 
