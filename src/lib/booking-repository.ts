@@ -414,6 +414,11 @@ function isSessionBookable(session: CourseSession) {
   return ["scheduled", "rescheduled", "makeup", ""].includes(status);
 }
 
+export function getBookingQuotaGroupId(course?: Partial<Course> | null, courseIdFallback?: string): string {
+  if (!course) return courseIdFallback || "";
+  return course.bookingQuotaGroupId || course.offeringId || course.id || courseIdFallback || "";
+}
+
 export async function createReservation(input: CreateReservationInput) {
   const db = getFirestoreDb();
 
@@ -481,83 +486,100 @@ export async function createReservation(input: CreateReservationInput) {
         return { ok: false as const, reason: isIdentityMismatch ? "identity_mismatch" : "not_roster" };
       }
 
-      // 預約制課程允許同一位學員預約同一期課程底下的不同上課日期；
-      // 只有「同一堂 session」不能重複預約。
-      // 另外保留 studentName 查詢，兼容舊預約資料可能沒有 studentId 的情況。
-      const [duplicateByStudentIdSnapshot, duplicateByNameSnapshot] = await Promise.all([
+      // 讀取該學員所有的有效booked預約進行記憶體中核對，防範欄位缺失、未建立複合索引與手機/證件末三碼錯配
+      const [resByStudentIdSnapshot, resByNameSnapshot] = await Promise.all([
         transaction.get(
-          db
-            .collection("reservations")
-            .where("sessionId", "==", session.id)
+          db.collection("reservations")
             .where("studentId", "==", eligibleStudent.id)
             .where("status", "==", "booked")
-            .limit(1),
         ),
         transaction.get(
-          db
-            .collection("reservations")
-            .where("sessionId", "==", session.id)
+          db.collection("reservations")
             .where("studentName", "==", input.studentName)
             .where("status", "==", "booked")
-            .limit(1),
         ),
       ]);
 
-      if (!duplicateByStudentIdSnapshot.empty || !duplicateByNameSnapshot.empty) {
+      const rawReservations = [
+        ...resByStudentIdSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Reservation),
+        ...resByNameSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Reservation),
+      ];
+
+      // 依 ID 去重
+      const activeReservations = Array.from(new Map(rawReservations.map(r => [r.id, r])).values());
+
+      // 安全過濾，必須 studentId 一致，或是「姓名 + 手機末三碼/證件末三碼」一致，但嚴禁 phoneLastThree === idNumberLast3 錯配交叉比對
+      const studentPhoneLast3 = eligibleStudent.phone ? eligibleStudent.phone.replace(/\D/g, "").slice(-3) : "";
+      const studentIdLast3 = cleanIdentityLast3(eligibleStudent.idNumberLast3 || eligibleStudent.nationalId) || "";
+
+      const isStudentMatch = (r: Reservation) => {
+        if (r.studentId && eligibleStudent.id && r.studentId === eligibleStudent.id) return true;
+        const nameMatches = normalizeName(r.studentName) === normalizeName(eligibleStudent.name);
+        if (!nameMatches) return false;
+
+        const phoneMatches = studentPhoneLast3 && r.phoneLastThree && r.phoneLastThree === studentPhoneLast3;
+        const idMatches = studentIdLast3 && r.idNumberLast3 && r.idNumberLast3 === studentIdLast3;
+        return Boolean(phoneMatches || idMatches);
+      };
+
+      const studentReservations = activeReservations.filter(isStudentMatch);
+
+      // 1. 檢查同一個 session 是否重複預約
+      const hasDuplicateSession = studentReservations.some(r => r.sessionId === session.id);
+      if (hasDuplicateSession) {
         return { ok: false as const, reason: "duplicate" };
       }
 
-      // Check one_per_course and one_per_cycle policies
-      const quotaGroupId = course.bookingQuotaGroupId || course.offeringId || course.id;
+      // 取得本次預約的政策與分群 ID
+      const quotaGroupId = getBookingQuotaGroupId(course, input.courseId);
       const policy = course.bookingPolicy || "per_session";
 
+      // 2. 檢查一科一約 (one_per_course)
       if (policy === "one_per_course") {
-        const [dupCourseByStudentId, dupCourseByName] = await Promise.all([
-          transaction.get(
-            db
-              .collection("reservations")
-              .where("bookingQuotaGroupId", "==", quotaGroupId)
-              .where("studentId", "==", eligibleStudent.id)
-              .where("status", "==", "booked")
-              .limit(1),
-          ),
-          transaction.get(
-            db
-              .collection("reservations")
-              .where("bookingQuotaGroupId", "==", quotaGroupId)
-              .where("studentName", "==", input.studentName)
-              .where("status", "==", "booked")
-              .limit(1),
-          ),
-        ]);
-        if (!dupCourseByStudentId.empty || !dupCourseByName.empty) {
+        const hasDuplicateCourse = studentReservations.some(r => {
+          const rQuotaGroupId = getBookingQuotaGroupId({
+            bookingQuotaGroupId: r.bookingQuotaGroupId,
+            offeringId: r.offeringId,
+            id: r.courseId
+          }, r.courseId);
+          return rQuotaGroupId === quotaGroupId;
+        });
+        if (hasDuplicateCourse) {
           return { ok: false as const, reason: "duplicate_course" };
         }
       }
 
+      // 3. 檢查一週一約 (one_per_cycle)
       const cycleKey = session.date ? getBookingCycleKey(session.date) : "";
       if (policy === "one_per_cycle" && cycleKey) {
-        const [dupCycleByStudentId, dupCycleByName] = await Promise.all([
-          transaction.get(
-            db
-              .collection("reservations")
-              .where("bookingQuotaGroupId", "==", quotaGroupId)
-              .where("bookingCycleKey", "==", cycleKey)
-              .where("studentId", "==", eligibleStudent.id)
-              .where("status", "==", "booked")
-              .limit(1),
-          ),
-          transaction.get(
-            db
-              .collection("reservations")
-              .where("bookingQuotaGroupId", "==", quotaGroupId)
-              .where("bookingCycleKey", "==", cycleKey)
-              .where("studentName", "==", input.studentName)
-              .where("status", "==", "booked")
-              .limit(1),
-          ),
-        ]);
-        if (!dupCycleByStudentId.empty || !dupCycleByName.empty) {
+        // 收集所有需要查詢 session date 的課堂 ID
+        const missingSessionIds = studentReservations
+          .filter(r => !r.bookingCycleKey)
+          .map(r => r.sessionId)
+          .filter(Boolean);
+
+        const sessionMap = new Map<string, CourseSession>();
+        if (missingSessionIds.length > 0) {
+          const sessionDocs = await Promise.all(
+            missingSessionIds.map(sid => transaction.get(db.collection("sessions").doc(sid)))
+          );
+          sessionDocs.forEach(doc => {
+            if (doc.exists) {
+              sessionMap.set(doc.id, { id: doc.id, ...doc.data() } as CourseSession);
+            }
+          });
+        }
+
+        const hasDuplicateCycle = studentReservations.some(r => {
+          const rQuotaGroupId = getBookingQuotaGroupId({
+            bookingQuotaGroupId: r.bookingQuotaGroupId,
+            offeringId: r.offeringId,
+            id: r.courseId
+          }, r.courseId);
+          const rCycleKey = r.bookingCycleKey || (r.sessionId ? getBookingCycleKey(sessionMap.get(r.sessionId)?.date || "") : "");
+          return rQuotaGroupId === quotaGroupId && rCycleKey === cycleKey;
+        });
+        if (hasDuplicateCycle) {
           return { ok: false as const, reason: "duplicate_cycle" };
         }
       }
@@ -566,9 +588,16 @@ export async function createReservation(input: CreateReservationInput) {
         return { ok: false as const, reason: "closed" };
       }
 
-      const studentLast3 = cleanIdentityLast3(eligibleStudent.idNumberLast3) || cleanIdentityLast3(eligibleStudent.phone).slice(-3);
+      const actualPhoneLast3 = eligibleStudent.phone ? eligibleStudent.phone.replace(/\D/g, "").slice(-3) : "";
+      const actualIdLast3 = cleanIdentityLast3(eligibleStudent.idNumberLast3 || eligibleStudent.nationalId) || "";
+
       const reservation = buildReservation(
-        { ...input, phoneLastThree: studentLast3, idNumberLast3: studentLast3, studentId: eligibleStudent.id } as CreateReservationInput & { studentId?: string },
+        { 
+          ...input, 
+          phoneLastThree: actualPhoneLast3 || input.phoneLastThree, 
+          idNumberLast3: actualIdLast3 || input.idNumberLast3, 
+          studentId: eligibleStudent.id 
+        },
         course,
         session
       );
@@ -1233,46 +1262,63 @@ function createReservationInJson(input: CreateReservationInput) {
     return { ok: false as const, reason: isIdentityMismatch ? "identity_mismatch" : "not_roster" };
   }
 
-  // 預約制課程允許同一位學員預約同一期課程底下的不同上課日期；
-  // 只有「同一堂 session」不能重複預約。
+  // 安全過濾，必須 studentId 一致，或是「姓名 + 手機末三碼/證件末三碼」一致，但嚴禁 phoneLastThree === idNumberLast3 錯配交叉比對
+  const studentPhoneLast3 = eligibleStudent.phone ? eligibleStudent.phone.replace(/\D/g, "").slice(-3) : "";
+  const studentIdLast3 = cleanIdentityLast3(eligibleStudent.idNumberLast3 || eligibleStudent.nationalId) || "";
+
+  const isStudentMatch = (r: Reservation) => {
+    if (r.studentId && eligibleStudent.id && r.studentId === eligibleStudent.id) return true;
+    const nameMatches = normalizeName(r.studentName) === normalizeName(eligibleStudent.name);
+    if (!nameMatches) return false;
+
+    const phoneMatches = studentPhoneLast3 && r.phoneLastThree && r.phoneLastThree === studentPhoneLast3;
+    const idMatches = studentIdLast3 && r.idNumberLast3 && r.idNumberLast3 === studentIdLast3;
+    return Boolean(phoneMatches || idMatches);
+  };
+
+  // 1. 檢查同一個 session 是否重複預約
   const hasDuplicate = data.reservations.some(
-    (reservation) =>
-      reservation.sessionId === session.id &&
-      reservation.status === "booked" &&
-      (reservation.studentId === eligibleStudent.id ||
-        normalizeName(reservation.studentName) === normalizeName(input.studentName)),
+    (r) => r.sessionId === session.id && r.status === "booked" && isStudentMatch(r)
   );
 
   if (hasDuplicate) {
     return { ok: false as const, reason: "duplicate" };
   }
 
-  // Check one_per_course and one_per_cycle policies
-  const quotaGroupId = course.bookingQuotaGroupId || course.offeringId || course.id;
+  // 取得政策與分群 ID
+  const quotaGroupId = getBookingQuotaGroupId(course, input.courseId);
   const policy = course.bookingPolicy || "per_session";
 
+  // 2. 檢查一科一約 (one_per_course)
   if (policy === "one_per_course") {
     const hasDuplicateCourse = data.reservations.some(
-      (r) =>
-        (r.bookingQuotaGroupId || r.offeringId || r.courseId) === quotaGroupId &&
-        r.status === "booked" &&
-        (r.studentId === eligibleStudent.id ||
-          normalizeName(r.studentName) === normalizeName(input.studentName)),
+      (r) => {
+        const rQuotaGroupId = getBookingQuotaGroupId({
+          bookingQuotaGroupId: r.bookingQuotaGroupId,
+          offeringId: r.offeringId,
+          id: r.courseId
+        }, r.courseId);
+        return rQuotaGroupId === quotaGroupId && r.status === "booked" && isStudentMatch(r);
+      }
     );
     if (hasDuplicateCourse) {
       return { ok: false as const, reason: "duplicate_course" };
     }
   }
 
+  // 3. 檢查一週一約 (one_per_cycle)
   const cycleKey = session.date ? getBookingCycleKey(session.date) : "";
   if (policy === "one_per_cycle" && cycleKey) {
     const hasDuplicateCycle = data.reservations.some(
-      (r) =>
-        (r.bookingQuotaGroupId || r.offeringId || r.courseId) === quotaGroupId &&
-        (r.bookingCycleKey || (r.sessionId ? getBookingCycleKey(data.courses.flatMap(c => c.sessions).find(s => s.id === r.sessionId)?.date || "") : "")) === cycleKey &&
-        r.status === "booked" &&
-        (r.studentId === eligibleStudent.id ||
-          normalizeName(r.studentName) === normalizeName(input.studentName)),
+      (r) => {
+        const rQuotaGroupId = getBookingQuotaGroupId({
+          bookingQuotaGroupId: r.bookingQuotaGroupId,
+          offeringId: r.offeringId,
+          id: r.courseId
+        }, r.courseId);
+        const rCycleKey = r.bookingCycleKey || (r.sessionId ? getBookingCycleKey(data.courses.flatMap(c => c.sessions).find(s => s.id === r.sessionId)?.date || "") : "");
+        return rQuotaGroupId === quotaGroupId && rCycleKey === cycleKey && r.status === "booked" && isStudentMatch(r);
+      }
     );
     if (hasDuplicateCycle) {
       return { ok: false as const, reason: "duplicate_cycle" };
@@ -1283,9 +1329,16 @@ function createReservationInJson(input: CreateReservationInput) {
     return { ok: false as const, reason: "closed" };
   }
 
-  const studentLast3 = cleanIdentityLast3(eligibleStudent.idNumberLast3) || cleanIdentityLast3(eligibleStudent.phone).slice(-3);
+  const actualPhoneLast3 = eligibleStudent.phone ? eligibleStudent.phone.replace(/\D/g, "").slice(-3) : "";
+  const actualIdLast3 = cleanIdentityLast3(eligibleStudent.idNumberLast3 || eligibleStudent.nationalId) || "";
+
   const reservation = buildReservation(
-    { ...input, phoneLastThree: studentLast3, idNumberLast3: studentLast3, studentId: eligibleStudent.id } as CreateReservationInput & { studentId?: string },
+    { 
+      ...input, 
+      phoneLastThree: actualPhoneLast3 || input.phoneLastThree, 
+      idNumberLast3: actualIdLast3 || input.idNumberLast3, 
+      studentId: eligibleStudent.id 
+    },
     course,
     session
   );
@@ -1669,6 +1722,144 @@ export async function removeStudentCourseEligibility(studentId: string, seriesId
     applyLocal();
   }
 }
+
+
+export async function checkStudentOfferingRecords(studentId: string, offeringId: string) {
+  const db = getFirestoreDb();
+  if (!db) {
+    const data = readBookingData();
+    const course = data.courses.find((c) => c.offeringId === offeringId || c.id === offeringId);
+    const courseId = course?.id || offeringId;
+    const seriesId = course?.seriesId || "";
+
+    const hasReservations = data.reservations.some(
+      (r) => r.studentId === studentId && r.status === "booked" && (r.offeringId === offeringId || r.courseId === courseId)
+    );
+    const hasAttendance = (data.attendanceRecords ?? []).some(
+      (a) => a.studentId === studentId && (a.offeringId === offeringId || (seriesId && a.seriesId === seriesId))
+    );
+
+    return { hasReservations, hasAttendance };
+  }
+
+  // Firestore mode
+  const courseSnapshot = await db.collection("courses").where("offeringId", "==", offeringId).get();
+  const course = courseSnapshot.empty ? null : { id: courseSnapshot.docs[0].id, ...courseSnapshot.docs[0].data() } as Course;
+  const courseIds = [offeringId, ...courseSnapshot.docs.map(doc => doc.id)];
+  const seriesId = course?.seriesId || "";
+
+  // Check booked reservations
+  let hasReservations = false;
+  const resSnapshot = await db.collection("reservations").where("studentId", "==", studentId).where("status", "==", "booked").get();
+  for (const doc of resSnapshot.docs) {
+    const data = doc.data();
+    if (data.offeringId === offeringId || courseIds.includes(data.courseId)) {
+      hasReservations = true;
+      break;
+    }
+  }
+
+  // Check attendance records
+  let hasAttendance = false;
+  const attSnapshot = await db.collection("attendanceRecords").where("studentId", "==", studentId).get();
+  for (const doc of attSnapshot.docs) {
+    const data = doc.data();
+    if (data.offeringId === offeringId || (seriesId && data.seriesId === seriesId)) {
+      hasAttendance = true;
+      break;
+    }
+  }
+
+  return { hasReservations, hasAttendance };
+}
+
+export async function removeStudentFromOffering(studentId: string, offeringId: string) {
+  const db = getFirestoreDb();
+
+  const applyLocal = () => {
+    const data = readBookingData();
+    const course = data.courses.find((c) => c.offeringId === offeringId || c.id === offeringId);
+    const courseId = course?.id || offeringId;
+    const seriesId = course?.seriesId || "";
+    const year = course?.year || "";
+
+    // 1. Remove enrollment
+    data.enrollments = (data.enrollments ?? []).filter(
+      (e) => !(e.studentId === studentId && (e.offeringId === offeringId || e.courseId === courseId))
+    );
+
+    // 2. Remove studentCourseRecord
+    if (seriesId && year) {
+      data.studentCourseRecords = (data.studentCourseRecords ?? []).filter(
+        (r) => !(r.studentId === studentId && (r.seriesId === seriesId || r.courseMasterId === seriesId) && String(r.year || "") === String(year))
+      );
+    } else {
+      data.studentCourseRecords = (data.studentCourseRecords ?? []).filter(
+        (r) => !(r.studentId === studentId && r.offeringId === offeringId)
+      );
+    }
+
+    writeBookingData(data);
+  };
+
+  if (!db) {
+    applyLocal();
+    return;
+  }
+
+  try {
+    const courseSnapshot = await db.collection("courses").where("offeringId", "==", offeringId).get();
+    const course = courseSnapshot.empty ? null : { id: courseSnapshot.docs[0].id, ...courseSnapshot.docs[0].data() } as Course;
+    const courseId = course?.id || offeringId;
+    const seriesId = course?.seriesId || "";
+    const year = course?.year || "";
+
+    // Delete enrollments from Firestore
+    const enrollSnapshot = await db.collection("enrollments")
+      .where("studentId", "==", studentId)
+      .where("offeringId", "==", offeringId)
+      .get();
+    const enrollSnapshot2 = await db.collection("enrollments")
+      .where("studentId", "==", studentId)
+      .where("courseId", "==", courseId)
+      .get();
+
+    const enrollDocs = [...enrollSnapshot.docs, ...enrollSnapshot2.docs];
+    const uniqueEnrollDocs = Array.from(new Map(enrollDocs.map(doc => [doc.id, doc])).values());
+
+    // Delete studentCourseRecords from Firestore
+    let recordDocs: any[] = [];
+    if (seriesId && year) {
+      const recordSnapshot = await db.collection("studentCourseRecords")
+        .where("studentId", "==", studentId)
+        .where("seriesId", "==", seriesId)
+        .get();
+      recordDocs = recordSnapshot.docs.filter((doc) => String(doc.data().year || "") === String(year));
+    } else {
+      const recordSnapshot = await db.collection("studentCourseRecords")
+        .where("studentId", "==", studentId)
+        .where("offeringId", "==", offeringId)
+        .get();
+      recordDocs = recordSnapshot.docs;
+    }
+
+    // Batch delete
+    const allDocsToDelete = [...uniqueEnrollDocs, ...recordDocs];
+    for (let index = 0; index < allDocsToDelete.length; index += 450) {
+      const batch = db.batch();
+      allDocsToDelete.slice(index, index + 450).forEach((doc) => batch.delete(doc.ref));
+      await batch.commit();
+    }
+  } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Remove student from offering failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore remove student from offering failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
+    applyLocal();
+  }
+}
+
+
 
 
 export async function addStudentToSessionRoster(studentId: string, courseId: string, sessionId: string) {
@@ -2274,9 +2465,10 @@ function buildReservation(
   course?: Course,
   session?: CourseSession,
 ): Reservation {
-  const idNumberLast3 = cleanIdentityLast3(input.idNumberLast3 ?? input.phoneLastThree);
+  const idNumberLast3 = cleanIdentityLast3(input.idNumberLast3);
+  const phoneLastThree = cleanIdentityLast3(input.phoneLastThree) || idNumberLast3;
   const cycleKey = session?.date ? getBookingCycleKey(session.date) : "";
-  const quotaGroupId = course?.bookingQuotaGroupId || input.courseId;
+  const quotaGroupId = getBookingQuotaGroupId(course, input.courseId);
   const policy = course?.bookingPolicy || "per_session";
 
   return {
@@ -2284,7 +2476,7 @@ function buildReservation(
     courseId: input.courseId,
     sessionId: input.sessionId,
     studentName: input.studentName,
-    phoneLastThree: idNumberLast3,
+    phoneLastThree,
     idNumberLast3,
     studentId: input.studentId,
     bookedAt: buildTimestamp(),
