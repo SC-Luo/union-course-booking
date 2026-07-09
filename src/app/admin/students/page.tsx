@@ -9,7 +9,6 @@ import {
   updateStudentCourseEligibilityAction,
   saveInstructorIdentityAction,
   deleteInstructorIdentityAction,
-  removeStudentFromCourseOfferingAction,
 } from "@/app/admin/actions";
 import { AdminShell } from "@/components/page-shell";
 import { RosterFlowNav } from "@/components/roster-flow-nav";
@@ -22,6 +21,7 @@ import type {
   StudentCourseRecord,
 } from "@/lib/types";
 import { StudentDirectoryPage } from "./student-directory-page";
+import { WithdrawStudentButton } from "./WithdrawStudentButton";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -1691,18 +1691,11 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
                               已加入
                             </span>
                             <span className="hidden md:inline text-zinc-300">|</span>
-                            <form action={removeStudentFromCourseOfferingAction} onSubmit={(e) => {
-                              if (!confirm("確定要將此學員退出班級嗎？此操作將解除該學員在此班級的資格。")) {
-                                e.preventDefault();
-                              }
-                            }}>
-                              <input type="hidden" name="studentId" value={student.id} />
-                              <input type="hidden" name="offeringId" value={eligibilityOfferingId} />
-                              <input type="hidden" name="redirectTo" value={buildHref({ mode: "eligibility", offeringId: eligibilityOfferingId, filter: currentFilter, q })} />
-                              <button className="text-xs font-bold text-rose-600 hover:text-rose-800 hover:underline">
-                                退出班級
-                              </button>
-                            </form>
+                            <WithdrawStudentButton
+                              studentId={student.id}
+                              offeringId={eligibilityOfferingId}
+                              redirectTo={buildHref({ mode: "eligibility", offeringId: eligibilityOfferingId, filter: currentFilter, q })}
+                            />
                           </div>
                         </div>
                       );
@@ -1836,18 +1829,11 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
                                   已加入
                                 </span>
                                 <span className="hidden md:inline text-zinc-300">|</span>
-                                <form action={removeStudentFromCourseOfferingAction} onSubmit={(e) => {
-                                  if (!confirm("確定要將此學員退出班級嗎？此操作將解除該學員在此班級的資格。")) {
-                                    e.preventDefault();
-                                  }
-                                }}>
-                                  <input type="hidden" name="studentId" value={student.id} />
-                                  <input type="hidden" name="offeringId" value={eligibilityOfferingId} />
-                                  <input type="hidden" name="redirectTo" value={buildHref({ mode: "eligibility", offeringId: eligibilityOfferingId, filter: currentFilter, q })} />
-                                  <button className="text-xs font-bold text-rose-600 hover:text-rose-800 hover:underline">
-                                    退出班級
-                                  </button>
-                                </form>
+                                <WithdrawStudentButton
+                                  studentId={student.id}
+                                  offeringId={eligibilityOfferingId}
+                                  redirectTo={buildHref({ mode: "eligibility", offeringId: eligibilityOfferingId, filter: currentFilter, q })}
+                                />
                               </div>
                             </div>
                           );

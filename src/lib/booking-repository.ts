@@ -534,6 +534,10 @@ export async function createReservation(input: CreateReservationInput) {
       const quotaGroupId = getBookingQuotaGroupId(course, input.courseId);
       const policy = course.bookingPolicy || "per_session";
 
+      if (policy !== "one_per_cycle") {
+        console.log(`[DEBUG_POLICY] Non-weekly policy for courseId: ${course.id}, sessionId: ${session.id}, policy: ${policy}, quotaGroupId: ${quotaGroupId}, cycleKey: ${session.date ? getBookingCycleKey(session.date) : ""}`);
+      }
+
       // 2. 檢查一科一約 (one_per_course)
       if (policy === "one_per_course") {
         const hasDuplicateCourse = studentReservations.some(r => {
@@ -1288,6 +1292,10 @@ function createReservationInJson(input: CreateReservationInput) {
   // 取得政策與分群 ID
   const quotaGroupId = getBookingQuotaGroupId(course, input.courseId);
   const policy = course.bookingPolicy || "per_session";
+
+  if (policy !== "one_per_cycle") {
+    console.log(`[DEBUG_POLICY] Non-weekly policy for courseId: ${course.id}, sessionId: ${session.id}, policy: ${policy}, quotaGroupId: ${quotaGroupId}, cycleKey: ${session.date ? getBookingCycleKey(session.date) : ""}`);
+  }
 
   // 2. 檢查一科一約 (one_per_course)
   if (policy === "one_per_course") {
