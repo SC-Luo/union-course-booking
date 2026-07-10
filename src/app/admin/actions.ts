@@ -29,6 +29,7 @@ import {
   upsertStudent,
   getFirestoreDb,
   generateNextStudentNumber,
+  generateNextStudentNumbersBlock,
   upsertStudentCourseRecord,
   upsertInstructor,
   deleteInstructorIdentityDocument,
@@ -1800,15 +1801,23 @@ export async function bulkImportStudentsAction(formData: FormData) {
     ? getRosterColumnIndex(headers, ["備註", "note"])
     : 6;
 
-  let importedCount = 0;
-  const now = new Date().toISOString();
+  const parsedRows: Array<{
+    row: string;
+    cells: string[];
+    name: string;
+    idNumberLast3: string;
+    matchedStudent: any;
+    seatNumber: number;
+    examGroup: string;
+  }> = [];
 
+  let rowCount = 0;
   for (const row of rows) {
     const cells = splitRosterLine(row);
     const name = getRosterCell(cells, nameIndex);
     const idNumberLast3 = normalizeIdLast3(getRosterCell(cells, idIndex));
     const seatNumber = Number(
-      getRosterCell(cells, seatIndex) || importedCount + 1,
+      getRosterCell(cells, seatIndex) || rowCount + 1,
     );
 
     if (
@@ -1826,16 +1835,79 @@ export async function bulkImportStudentsAction(formData: FormData) {
         student.idNumberLast3 === idNumberLast3 &&
         (student.offeringId === offeringId || student.classId === classId),
     );
-    const id = matchedStudent?.id ?? `student-${crypto.randomUUID()}`;
+
     const examGroup = getRosterCell(cells, groupIndex);
+
+    parsedRows.push({
+      row,
+      cells,
+      name,
+      idNumberLast3,
+      matchedStudent,
+      seatNumber,
+      examGroup,
+    });
+    rowCount += 1;
+  }
+
+  const dbMemberNos = new Set<string>();
+  for (const student of data.students ?? []) {
+    const mno = (student.memberNo || "").trim();
+    if (mno && mno !== "未填" && mno !== "M001") {
+      dbMemberNos.add(mno);
+    }
+  }
+
+  const usedInThisImport = new Set<string>();
+  const rowsNeedingNumbers: typeof parsedRows = [];
+  const rowToFinalMemberNo = new Map<any, string>();
+
+  for (const item of parsedRows) {
+    const existingMno = (item.matchedStudent?.memberNo || "").trim();
+    let finalMno = "";
+
+    if (existingMno) {
+      const isExistingValid =
+        existingMno !== "未填" &&
+        existingMno !== "系統自動編碼" &&
+        existingMno !== "M001" &&
+        existingMno !== "test";
+
+      if (isExistingValid) {
+        const isDuplicateInImport = usedInThisImport.has(existingMno);
+        if (!isDuplicateInImport) {
+          finalMno = existingMno;
+          usedInThisImport.add(finalMno);
+        }
+      }
+    }
+
+    if (finalMno) {
+      rowToFinalMemberNo.set(item, finalMno);
+    } else {
+      rowsNeedingNumbers.push(item);
+    }
+  }
+
+  const db = getFirestoreDb();
+  const nextNumbers = await generateNextStudentNumbersBlock(db, rowsNeedingNumbers.length);
+  for (let i = 0; i < rowsNeedingNumbers.length; i++) {
+    rowToFinalMemberNo.set(rowsNeedingNumbers[i], nextNumbers[i]);
+  }
+
+  let importedCount = 0;
+  for (const item of parsedRows) {
+    const { name, idNumberLast3, matchedStudent, seatNumber, examGroup } = item;
+    const id = matchedStudent?.id ?? `student-${crypto.randomUUID()}`;
+    const memberNo = rowToFinalMemberNo.get(item) || "";
 
     await upsertStudent({
       ...(matchedStudent ?? {}),
       id,
       name,
       idNumberLast3,
-      phone: getRosterCell(cells, phoneIndex),
-      birthday: getRosterCell(cells, birthdayIndex) || null,
+      phone: getRosterCell(item.cells, phoneIndex),
+      birthday: getRosterCell(item.cells, birthdayIndex) || null,
       classId,
       offeringId,
       seriesId,
@@ -1847,10 +1919,11 @@ export async function bulkImportStudentsAction(formData: FormData) {
       termLabel: offering?.termLabel ?? course?.termLabel,
       seatNumber,
       examGroup,
-      note: getRosterCell(cells, noteIndex),
+      note: getRosterCell(item.cells, noteIndex),
       source: "Excel / CSV 批次匯入",
       isActive: true,
       needsReview: false,
+      memberNo,
       updatedAt: now,
       createdAt: matchedStudent?.createdAt ?? now,
     });
@@ -2683,81 +2756,171 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
     return idx >= 0 ? String(cells[idx] ?? "").trim() : "";
   }
 
+  const parsedRows: Array<{
+    row: string;
+    cells: string[];
+    name: string;
+    idNumberLast3: string;
+    existingStudent: any;
+    inputMemberNo: string;
+  }> = [];
+
   for (const row of rows) {
     const cells = splitRosterLine(row);
     const name = getRosterCell(cells, nameIndex);
     const idNumberLast3 = normalizeIdLast3(getRosterCell(cells, idIndex));
     if (!name || idNumberLast3.length !== 3) continue;
 
-    const existing = data.students.find(
+    const existingStudent = data.students.find(
       (student) =>
         student.name === name && student.idNumberLast3 === idNumberLast3,
     );
-    const studentId = existing?.id ?? `student-${crypto.randomUUID()}`;
+    const inputMemberNo = getRosterCell(cells, memberIndex).trim();
+
+    parsedRows.push({
+      row,
+      cells,
+      name,
+      idNumberLast3,
+      existingStudent,
+      inputMemberNo,
+    });
+  }
+
+  const dbMemberNos = new Set<string>();
+  for (const student of data.students ?? []) {
+    const mno = (student.memberNo || "").trim();
+    if (mno && mno !== "未填" && mno !== "M001") {
+      dbMemberNos.add(mno);
+    }
+  }
+
+  const usedInThisImport = new Set<string>();
+  const rowsNeedingNumbers: typeof parsedRows = [];
+  const rowToFinalMemberNo = new Map<any, string>();
+
+  for (const item of parsedRows) {
+    const existingMno = (item.existingStudent?.memberNo || "").trim();
+    let finalMno = "";
+
+    const testMno = item.inputMemberNo;
+    const isInputValid =
+      testMno &&
+      testMno !== "未填" &&
+      testMno !== "系統自動編碼" &&
+      testMno !== "M001" &&
+      testMno !== "test";
+
+    if (isInputValid) {
+      const isDuplicateInDb = (() => {
+        if (existingMno === testMno) return false;
+        return dbMemberNos.has(testMno);
+      })();
+      const isDuplicateInImport = usedInThisImport.has(testMno);
+
+      if (!isDuplicateInDb && !isDuplicateInImport) {
+        finalMno = testMno;
+        usedInThisImport.add(finalMno);
+      }
+    }
+
+    if (!finalMno && existingMno) {
+      const isExistingValid =
+        existingMno !== "未填" &&
+        existingMno !== "系統自動編碼" &&
+        existingMno !== "M001" &&
+        existingMno !== "test";
+
+      if (isExistingValid) {
+        const isDuplicateInImport = usedInThisImport.has(existingMno);
+        if (!isDuplicateInImport) {
+          finalMno = existingMno;
+          usedInThisImport.add(finalMno);
+        }
+      }
+    }
+
+    if (finalMno) {
+      rowToFinalMemberNo.set(item, finalMno);
+    } else {
+      rowsNeedingNumbers.push(item);
+    }
+  }
+
+  const db = getFirestoreDb();
+  const nextNumbers = await generateNextStudentNumbersBlock(db, rowsNeedingNumbers.length);
+  for (let i = 0; i < rowsNeedingNumbers.length; i++) {
+    rowToFinalMemberNo.set(rowsNeedingNumbers[i], nextNumbers[i]);
+  }
+
+  for (const item of parsedRows) {
+    const { cells, name, idNumberLast3, existingStudent } = item;
+    const studentId = existingStudent?.id ?? `student-${crypto.randomUUID()}`;
+    const memberNo = rowToFinalMemberNo.get(item) || "";
 
     await upsertStudent({
-      ...(existing ?? {}),
+      ...(existingStudent ?? {}),
       id: studentId,
       name,
       idNumberLast3,
       // Required-contact fields
-      phone: getRosterCell(cells, phoneIndex) || existing?.phone || "",
-      birthday: getRosterCell(cells, birthdayIndex) || existing?.birthday || null,
+      phone: getRosterCell(cells, phoneIndex) || existingStudent?.phone || "",
+      birthday: getRosterCell(cells, birthdayIndex) || existingStudent?.birthday || null,
       // Basic info
-      englishName: cellVal(cells, ["英文姓名", "英文名", "englishName"], 3) || existing?.englishName,
-      nationalId: cellVal(cells, ["身分證字號", "身分證", "nationalId"], 4) || existing?.nationalId,
-      gender: cellVal(cells, ["性別", "gender"], 5) || existing?.gender,
-      birthPlace: cellVal(cells, ["出生地", "birthPlace"], 6) || existing?.birthPlace,
-      memberNo: getRosterCell(cells, memberIndex) || existing?.memberNo,
+      englishName: cellVal(cells, ["英文姓名", "英文名", "englishName"], 3) || existingStudent?.englishName,
+      nationalId: cellVal(cells, ["身分證字號", "身分證", "nationalId"], 4) || existingStudent?.nationalId,
+      gender: cellVal(cells, ["性別", "gender"], 5) || existingStudent?.gender,
+      birthPlace: cellVal(cells, ["出生地", "birthPlace"], 6) || existingStudent?.birthPlace,
+      memberNo,
       // Contact
-      landline: cellVal(cells, ["市話", "landline"], 7) || existing?.landline,
-      email: cellVal(cells, ["Email", "email", "信箱"], 8) || existing?.email,
-      lineId: cellVal(cells, ["Line ID", "lineId", "line"], 9) || existing?.lineId,
-      mailingAddress: cellVal(cells, ["通訊地址", "mailingAddress"], 10) || existing?.mailingAddress,
-      householdAddress: cellVal(cells, ["戶籍地址", "householdAddress"], 11) || existing?.householdAddress,
-      emergencyContactName: cellVal(cells, ["緊急聯絡人", "emergencyContactName"], 12) || existing?.emergencyContactName,
-      emergencyContactPhone: cellVal(cells, ["緊急聯絡人電話", "emergencyContactPhone"], 13) || existing?.emergencyContactPhone,
+      landline: cellVal(cells, ["市話", "landline"], 7) || existingStudent?.landline,
+      email: cellVal(cells, ["Email", "email", "信箱"], 8) || existingStudent?.email,
+      lineId: cellVal(cells, ["Line ID", "lineId", "line"], 9) || existingStudent?.lineId,
+      mailingAddress: cellVal(cells, ["通訊地址", "mailingAddress"], 10) || existingStudent?.mailingAddress,
+      householdAddress: cellVal(cells, ["戶籍地址", "householdAddress"], 11) || existingStudent?.householdAddress,
+      emergencyContactName: cellVal(cells, ["緊急聯絡人", "emergencyContactName"], 12) || existingStudent?.emergencyContactName,
+      emergencyContactPhone: cellVal(cells, ["緊急聯絡人電話", "emergencyContactPhone"], 13) || existingStudent?.emergencyContactPhone,
       // Background
-      educationLevel: cellVal(cells, ["最高學歷", "教育程度", "educationLevel"], 14) || existing?.educationLevel,
-      graduationSchool: cellVal(cells, ["畢業學校", "graduationSchool"], 15) || existing?.graduationSchool,
-      major: cellVal(cells, ["科系", "major"], 16) || existing?.major,
-      maritalStatus: cellVal(cells, ["婚姻狀態", "婚姻狀況", "maritalStatus"], 17) || existing?.maritalStatus,
-      childrenCount: (() => { const v = cellVal(cells, ["子女數", "childrenCount"], 18); return v ? Number(v) || undefined : existing?.childrenCount; })(),
-      childrenAges: cellVal(cells, ["子女年齡", "childrenAges"], 19) || existing?.childrenAges,
-      employmentStatus: cellVal(cells, ["目前職業狀態", "就業狀態", "employmentStatus"], 20) || existing?.employmentStatus,
-      companyName: cellVal(cells, ["公司名稱", "companyName"], 21) || existing?.companyName,
-      jobTitle: cellVal(cells, ["職稱", "jobTitle"], 22) || existing?.jobTitle,
-      workExperience: cellVal(cells, ["工作年資", "workExperience"], 23) || existing?.workExperience,
-      industryCategory: cellVal(cells, ["產業類別", "行業類別", "industryCategory"], 24) || existing?.industryCategory,
-      beautyRelated: cellVal(cells, ["美容相關行業", "美容相關", "beautyRelated"], 25) || existing?.beautyRelated,
+      educationLevel: cellVal(cells, ["最高學歷", "教育程度", "educationLevel"], 14) || existingStudent?.educationLevel,
+      graduationSchool: cellVal(cells, ["畢業學校", "graduationSchool"], 15) || existingStudent?.graduationSchool,
+      major: cellVal(cells, ["科系", "major"], 16) || existingStudent?.major,
+      maritalStatus: cellVal(cells, ["婚姻狀態", "婚姻狀況", "maritalStatus"], 17) || existingStudent?.maritalStatus,
+      childrenCount: (() => { const v = cellVal(cells, ["子女數", "childrenCount"], 18); return v ? Number(v) || undefined : existingStudent?.childrenCount; })(),
+      childrenAges: cellVal(cells, ["子女年齡", "childrenAges"], 19) || existingStudent?.childrenAges,
+      employmentStatus: cellVal(cells, ["目前職業狀態", "就業狀態", "employmentStatus"], 20) || existingStudent?.employmentStatus,
+      companyName: cellVal(cells, ["公司名稱", "companyName"], 21) || existingStudent?.companyName,
+      jobTitle: cellVal(cells, ["職稱", "jobTitle"], 22) || existingStudent?.jobTitle,
+      workExperience: cellVal(cells, ["工作年資", "workExperience"], 23) || existingStudent?.workExperience,
+      industryCategory: cellVal(cells, ["產業類別", "行業類別", "industryCategory"], 24) || existingStudent?.industryCategory,
+      beautyRelated: cellVal(cells, ["美容相關行業", "美容相關", "beautyRelated"], 25) || existingStudent?.beautyRelated,
       // Startup / business
-      startupStatus: cellVal(cells, ["創業狀態", "startupStatus"], 26) || existing?.startupStatus,
-      startupExperience: cellVal(cells, ["創業年資", "創業經驗", "startupExperience"], 27) || existing?.startupExperience,
-      startupType: cellVal(cells, ["創業類型", "startupType"], 28) || existing?.startupType,
-      brandName: cellVal(cells, ["品牌名稱", "brandName"], 29) || existing?.brandName,
-      hasBusinessRegistration: cellVal(cells, ["營業登記", "hasBusinessRegistration"], 30) || existing?.hasBusinessRegistration,
-      businessRegistrationStatus: cellVal(cells, ["營業登記狀況", "businessRegistrationStatus"], 31) || existing?.businessRegistrationStatus,
-      taxId: cellVal(cells, ["統一編號", "taxId"], 32) || existing?.taxId,
-      businessCategories: (() => { const v = cellVal(cells, ["主要營業項目", "businessCategories"], -1); return v ? v.split(/[,，、]/).map((s) => s.trim()).filter(Boolean) : existing?.businessCategories; })(),
-      businessPlaceType: cellVal(cells, ["營業場所類型", "businessPlaceType"], -1) || existing?.businessPlaceType,
-      businessAddress: cellVal(cells, ["營業地址", "businessAddress"], -1) || existing?.businessAddress,
-      operationMode: cellVal(cells, ["經營型態", "operationMode"], -1) || existing?.operationMode,
-      customerType: cellVal(cells, ["主要客群", "客戶類型", "customerType"], -1) || existing?.customerType,
-      serviceDescription: cellVal(cells, ["服務項目說明", "serviceDescription"], -1) || existing?.serviceDescription,
+      startupStatus: cellVal(cells, ["創業狀態", "startupStatus"], 26) || existingStudent?.startupStatus,
+      startupExperience: cellVal(cells, ["創業年資", "創業經驗", "startupExperience"], 27) || existingStudent?.startupExperience,
+      startupType: cellVal(cells, ["創業類型", "startupType"], 28) || existingStudent?.startupType,
+      brandName: cellVal(cells, ["品牌名稱", "brandName"], 29) || existingStudent?.brandName,
+      hasBusinessRegistration: cellVal(cells, ["營業登記", "hasBusinessRegistration"], 30) || existingStudent?.hasBusinessRegistration,
+      businessRegistrationStatus: cellVal(cells, ["營業登記狀況", "businessRegistrationStatus"], 31) || existingStudent?.businessRegistrationStatus,
+      taxId: cellVal(cells, ["統一編號", "taxId"], 32) || existingStudent?.taxId,
+      businessCategories: (() => { const v = cellVal(cells, ["主要營業項目", "businessCategories"], -1); return v ? v.split(/[,，、]/).map((s) => s.trim()).filter(Boolean) : existingStudent?.businessCategories; })(),
+      businessPlaceType: cellVal(cells, ["營業場所類型", "businessPlaceType"], -1) || existingStudent?.businessPlaceType,
+      businessAddress: cellVal(cells, ["營業地址", "businessAddress"], -1) || existingStudent?.businessAddress,
+      operationMode: cellVal(cells, ["經營型態", "operationMode"], -1) || existingStudent?.operationMode,
+      customerType: cellVal(cells, ["主要客群", "客戶類型", "customerType"], -1) || existingStudent?.customerType,
+      serviceDescription: cellVal(cells, ["服務項目說明", "serviceDescription"], -1) || existingStudent?.serviceDescription,
       // Scale
-      employeeStatus: cellVal(cells, ["固定員工", "僱用狀況", "employeeStatus"], -1) || existing?.employeeStatus,
-      employeeCountRange: cellVal(cells, ["員工人數級距", "employeeCountRange"], -1) || existing?.employeeCountRange,
-      fullTimeEmployees: (() => { const v = cellVal(cells, ["正職人數", "fullTimeEmployees"], -1); return v ? Number(v) || undefined : existing?.fullTimeEmployees; })(),
-      partTimeEmployees: (() => { const v = cellVal(cells, ["兼職人數", "partTimeEmployees"], -1); return v ? Number(v) || undefined : existing?.partTimeEmployees; })(),
-      capitalRange: cellVal(cells, ["資本額級距", "capitalRange"], -1) || existing?.capitalRange,
-      monthlyRevenueRange: cellVal(cells, ["月營業額級距", "monthlyRevenueRange"], -1) || existing?.monthlyRevenueRange,
-      annualRevenueRange: cellVal(cells, ["年營業額級距", "annualRevenueRange"], -1) || existing?.annualRevenueRange,
+      employeeStatus: cellVal(cells, ["固定員工", "僱用狀況", "employeeStatus"], -1) || existingStudent?.employeeStatus,
+      employeeCountRange: cellVal(cells, ["員工人數級距", "employeeCountRange"], -1) || existingStudent?.employeeCountRange,
+      fullTimeEmployees: (() => { const v = cellVal(cells, ["正職人數", "fullTimeEmployees"], -1); return v ? Number(v) || undefined : existingStudent?.fullTimeEmployees; })(),
+      partTimeEmployees: (() => { const v = cellVal(cells, ["兼職人數", "partTimeEmployees"], -1); return v ? Number(v) || undefined : existingStudent?.partTimeEmployees; })(),
+      capitalRange: cellVal(cells, ["資本額級距", "capitalRange"], -1) || existingStudent?.capitalRange,
+      monthlyRevenueRange: cellVal(cells, ["月營業額級距", "monthlyRevenueRange"], -1) || existingStudent?.monthlyRevenueRange,
+      annualRevenueRange: cellVal(cells, ["年營業額級距", "annualRevenueRange"], -1) || existingStudent?.annualRevenueRange,
       // Misc
-      source: (cellVal(cells, ["資料來源", "source"], -1) || existing?.source) ?? "Excel / CSV 學員名冊匯入",
-      note: getRosterCell(cells, noteIndex) || importNote || existing?.note,
+      source: (cellVal(cells, ["資料來源", "source"], -1) || existingStudent?.source) ?? "Excel / CSV 學員名冊匯入",
+      note: getRosterCell(cells, noteIndex) || importNote || existingStudent?.note,
       isActive: true,
       needsReview: false,
-      createdAt: existing?.createdAt ?? now,
+      createdAt: existingStudent?.createdAt ?? now,
       updatedAt: now,
     });
 

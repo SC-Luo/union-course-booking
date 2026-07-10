@@ -3077,3 +3077,75 @@ export async function generateNextStudentNumber(db: any): Promise<string> {
   
   return `${rocYear}-${String(nextSeq).padStart(4, "0")}`;
 }
+
+export async function generateNextStudentNumbersBlock(db: any, count: number): Promise<string[]> {
+  if (count <= 0) return [];
+  const currentYear = new Date().getFullYear();
+  const rocYear = String(currentYear - 1911); // e.g. "115"
+  const prefix = `${rocYear}-`;
+
+  if (!db) {
+    const data = readBookingData();
+    let maxSeq = 0;
+    for (const student of data.students ?? []) {
+      const memberNo = student.memberNo || student.memberId || student.externalMemberNo || "";
+      if (memberNo.startsWith(prefix)) {
+        const seqStr = memberNo.substring(prefix.length);
+        const seq = parseInt(seqStr, 10);
+        if (Number.isFinite(seq) && seq > maxSeq) {
+          maxSeq = seq;
+        }
+      }
+    }
+    const numbers: string[] = [];
+    for (let i = 1; i <= count; i++) {
+      numbers.push(`${rocYear}-${String(maxSeq + i).padStart(4, "0")}`);
+    }
+    return numbers;
+  }
+
+  // Firestore transaction mode
+  const counterRef = db.collection("counters").doc("studentNumber");
+  let startSeq = 1;
+  await db.runTransaction(async (transaction: any) => {
+    const doc = await transaction.get(counterRef);
+    let currentCounter = 0;
+    
+    if (doc.exists) {
+      const data = doc.data();
+      if (data && typeof data[rocYear] === "number") {
+        currentCounter = data[rocYear];
+      }
+    }
+    
+    if (currentCounter === 0) {
+      const snapshot = await db.collection("students")
+        .where("memberNo", ">=", prefix)
+        .where("memberNo", "<", prefix + "\uf8ff")
+        .get();
+        
+      let maxSeq = 0;
+      snapshot.docs.forEach((studentDoc: any) => {
+        const student = studentDoc.data();
+        const memberNo = student.memberNo || "";
+        if (memberNo.startsWith(prefix)) {
+          const seqStr = memberNo.substring(prefix.length);
+          const seq = parseInt(seqStr, 10);
+          if (Number.isFinite(seq) && seq > maxSeq) {
+            maxSeq = seq;
+          }
+        }
+      });
+      currentCounter = maxSeq;
+    }
+    
+    startSeq = currentCounter + 1;
+    transaction.set(counterRef, { [rocYear]: currentCounter + count }, { merge: true });
+  });
+
+  const numbers: string[] = [];
+  for (let i = 0; i < count; i++) {
+    numbers.push(`${rocYear}-${String(startSeq + i).padStart(4, "0")}`);
+  }
+  return numbers;
+}
