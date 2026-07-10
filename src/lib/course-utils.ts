@@ -56,8 +56,7 @@ export function getCategoryName(
 
 export type NormalizedCourseMode =
   | "booking_flexible"
-  | "fixed_roster"
-  | "subsidy_roster";
+  | "fixed_roster";
 
 export type CourseModeInfo = {
   mode: NormalizedCourseMode;
@@ -97,20 +96,13 @@ export function getNormalizedCourseMode(
 
   if (
     [
+      "fixed_roster",
+      "roster_fixed",
+      "fixed_roster_exam",
       "subsidy_roster",
       "subsidy_fixed_roster",
       "grant_roster",
       "funded_roster",
-    ].includes(mode)
-  ) {
-    return "subsidy_roster";
-  }
-
-  if (
-    [
-      "fixed_roster",
-      "roster_fixed",
-      "fixed_roster_exam",
       "roster",
       "attendance_roster",
     ].includes(mode)
@@ -124,11 +116,7 @@ export function getNormalizedCourseMode(
     return "booking_flexible";
   }
 
-  if (["subsidy", "subsidy_roster", "grant", "funded"].includes(rosterType)) {
-    return "subsidy_roster";
-  }
-
-  if (["fixed", "roster_fixed", "fixed_roster"].includes(rosterType)) {
+  if (["fixed", "roster_fixed", "fixed_roster", "subsidy", "subsidy_roster", "grant", "funded"].includes(rosterType)) {
     return "fixed_roster";
   }
 
@@ -177,7 +165,7 @@ export function getCourseModeInfo(
     };
   }
 
-  if (mode === "subsidy_roster") {
+  if (false) {
     return {
       mode,
       label: "補助固定名冊",

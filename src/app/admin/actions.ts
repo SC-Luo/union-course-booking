@@ -1932,6 +1932,38 @@ async function resolveEligibilityContext(
   return { data, series, targetOffering, year };
 }
 
+function buildEligibilityRecordId(
+  studentId: string,
+  seriesId: string,
+  year: string | number,
+  offeringId?: string,
+) {
+  return offeringId
+    ? `elig-${studentId}-${offeringId}`
+    : `elig-${studentId}-${seriesId}-${year}`;
+}
+
+function findEligibilityRecord(
+  records: StudentCourseRecord[] | undefined,
+  studentId: string,
+  seriesId: string,
+  year: string | number,
+  offeringId?: string,
+) {
+  const recordId = buildEligibilityRecordId(studentId, seriesId, year, offeringId);
+  return (records ?? []).find((record) => {
+    if (record.id === recordId) return true;
+    if (record.studentId !== studentId) return false;
+    if (offeringId) {
+      return record.offeringId === offeringId;
+    }
+    return (
+      (record.seriesId === seriesId || record.courseMasterId === seriesId) &&
+      String(record.year ?? record.sourceRocYear ?? "") === String(year)
+    );
+  });
+}
+
 function getOrCreateStudentIdentity(
   data: Awaited<ReturnType<typeof getBookingData>>,
   input: {
@@ -2005,7 +2037,7 @@ export async function saveStudentEligibilityAction(formData: FormData) {
   await upsertStudent(student);
 
   const record: StudentCourseRecord = {
-    id: `elig-${student.id}-${series.id}-${year}`,
+    id: buildEligibilityRecordId(student.id, series.id, year, targetOffering?.id),
     studentId: student.id,
     seriesId: series.id,
     courseMasterId: series.id,
@@ -2674,14 +2706,18 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
     });
 
     if (needsEligibility && series && year) {
-      const recordId = `elig-${studentId}-${series.id}-${year}`;
-      const existingRecord = data.studentCourseRecords?.find(
-        (record) =>
-          record.id === recordId ||
-          (record.studentId === studentId &&
-            (record.seriesId === series.id ||
-              record.courseMasterId === series.id) &&
-            String(record.year ?? record.sourceRocYear ?? "") === String(year)),
+      const recordId = buildEligibilityRecordId(
+        studentId,
+        series.id,
+        year,
+        targetOffering?.id,
+      );
+      const existingRecord = findEligibilityRecord(
+        data.studentCourseRecords,
+        studentId,
+        series.id,
+        year,
+        targetOffering?.id,
       );
 
       await upsertStudentCourseRecord({
@@ -2788,14 +2824,18 @@ export async function assignStudentsToCourseEligibilityAction(
     const student = data.students.find((item) => item.id === studentId);
     if (!student) continue;
 
-    const recordId = `elig-${student.id}-${series.id}-${year}`;
-    const existingRecord = data.studentCourseRecords?.find(
-      (record) =>
-        record.id === recordId ||
-        (record.studentId === student.id &&
-          (record.seriesId === series.id ||
-            record.courseMasterId === series.id) &&
-          String(record.year ?? record.sourceRocYear ?? "") === String(year)),
+    const recordId = buildEligibilityRecordId(
+      student.id,
+      series.id,
+      year,
+      targetOffering?.id,
+    );
+    const existingRecord = findEligibilityRecord(
+      data.studentCourseRecords,
+      student.id,
+      series.id,
+      year,
+      targetOffering?.id,
     );
 
     if (targetOffering) {

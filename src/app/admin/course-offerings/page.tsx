@@ -28,7 +28,11 @@ const fallbackColors: Record<string, string> = {
   R: "#f59e0b",
 };
 
-const courseModeOptions = [
+const courseModeOptions: Array<{
+  value?: string;
+  label: string;
+  description: string;
+}> = [
   {
     value: "fixed_roster",
     label: "固定名冊制",
@@ -40,7 +44,6 @@ const courseModeOptions = [
     description: "自費或彈性上課；學員可自行選擇開放時段並受名額與鎖定時間限制。",
   },
   {
-    value: "subsidy_roster",
     label: "補助固定名冊",
     description: "職訓、產投或補助班級；固定名冊並需特別重視出缺勤、作業與結訓紀錄。",
   },
@@ -49,7 +52,6 @@ const courseModeOptions = [
 function normalizeCourseModeValue(value: unknown) {
   const raw = String(value ?? "").trim();
   if (raw === "booking_flexible") return "booking_flexible";
-  if (raw === "subsidy_roster") return "subsidy_roster";
   return "fixed_roster";
 }
 
@@ -63,9 +65,7 @@ function CourseModePill({ value }: { value?: string }) {
   const className =
     normalized === "booking_flexible"
       ? "rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700"
-      : normalized === "subsidy_roster"
-        ? "rounded-full bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700"
-        : "rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700";
+      : "rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700";
 
   return <span className={className}>{getCourseModeLabel(normalized)}</span>;
 }
@@ -516,7 +516,13 @@ function CourseOfferingDetailsFields({
           <p className="text-sm font-black text-[#1f1712]">課程運作模式</p>
         </div>
         <div className="grid gap-3 lg:grid-cols-3">
-          {courseModeOptions.map((option) => (
+          {courseModeOptions
+            .filter(
+              (option) =>
+                option.value === "booking_flexible" ||
+                option.value === "fixed_roster",
+            )
+            .map((option) => (
             <label
               key={option.value}
               className="cursor-pointer rounded-[22px] border border-[#ead8ca] bg-white p-4 transition hover:border-[#E7892B] hover:bg-[#fffaf5] has-[:checked]:border-[#E85F00] has-[:checked]:bg-[#fff1e7] has-[:checked]:shadow-[0_10px_28px_rgba(232,95,0,0.12)]"
@@ -874,20 +880,27 @@ export default async function CourseOfferingsPage({ searchParams }: PageProps) {
           const legacyCourse = courses.find((course) => course.id === offering.legacyCourseId || course.offeringId === offering.id);
           const series = getSeries(offering.seriesId, courseSeries);
           const linkedCourseId = legacyCourse?.id ?? offering.legacyCourseId ?? "";
-          const offeringStudents = students.filter((item) => item.offeringId === offering.id || item.classId === linkedCourseId);
-          const enrollmentCount = enrollments.filter((item) => item.offeringId === offering.id || item.courseOfferingId === offering.id || item.courseId === linkedCourseId).length;
+          const offeringEnrollments = enrollments.filter(
+            (item) =>
+              item.offeringId === offering.id ||
+              item.courseOfferingId === offering.id ||
+              item.courseId === linkedCourseId,
+          );
+          const offeringStudentIds = new Set(offeringEnrollments.map((item) => item.studentId));
+          const offeringStudents = students.filter((item) => offeringStudentIds.has(item.id));
+          const enrollmentCount = offeringEnrollments.length;
           const reservationCount = reservations.filter((item) => item.offeringId === offering.id || item.courseId === linkedCourseId).length;
           const legacySessionCount = legacyCourse?.sessions.length ?? 0;
           const courseSessionCount = courseSessions.filter((item) => item.offeringId === offering.id || item.legacyCourseId === linkedCourseId).length;
           const sessionCount = Math.max(legacySessionCount, courseSessionCount);
           const attendanceCount = attendanceRecords.filter((item) => item.offeringId === offering.id).length;
-          const hasRelations = enrollmentCount > 0 || reservationCount > 0 || sessionCount > 0 || offeringStudents.length > 0 || attendanceCount > 0;
+          const hasRelations = enrollmentCount > 0 || reservationCount > 0 || sessionCount > 0 || offeringStudentIds.size > 0 || attendanceCount > 0;
           const color = offering.color ?? series?.color ?? fallbackColors[offering.categoryId ?? series?.categoryId] ?? "#B46F4A";
           const primaryInstructorName = offering.primaryInstructorId
             ? instructors.find((instructor: any) => instructor.id === offering.primaryInstructorId)?.name
             : undefined;
           const capacity = offering.capacity ?? legacyCourse?.totalCapacity ?? "-";
-          const reserved = offeringStudents.length;
+          const reserved = offeringStudentIds.size;
           const rosterHref = `/admin/students?mode=eligibility&view=rosterOnly&classId=${encodeURIComponent(linkedCourseId)}&seriesId=${encodeURIComponent(offering.seriesId ?? "")}&year=${encodeURIComponent(String(offering.year ?? ""))}&offeringId=${encodeURIComponent(offering.id)}&term=${encodeURIComponent(String(offering.termLabel ?? offering.term ?? ""))}`;
           const lifecycle = getOfferingLifecycleMeta(offering.status, offering.isActive);
           const isArchived = lifecycle.id === "archived";

@@ -297,7 +297,9 @@ function getYearOptions(
 function buildHref(params: Record<string, string | undefined>) {
   const query = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
-    if (value && value !== "all") query.set(key, value);
+    if (!value) return;
+    if (value === "all" && key !== "filter" && key !== "status") return;
+    query.set(key, value);
   });
   const qs = query.toString();
   return `/admin/students${qs ? `?${qs}` : ""}`;
@@ -550,9 +552,17 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
   const records = studentCourseRecords.filter((record) =>
     recordMatches(record, selectedSeriesId, selectedYear),
   );
-  const recordByStudentId = new Map(
-    records.map((record) => [record.studentId, record]),
-  );
+  const recordByStudentId = new Map<string, (typeof records)[number]>();
+  records.forEach((record) => {
+    const existing = recordByStudentId.get(record.studentId);
+    if (
+      !existing ||
+      (selectedOfferingId && record.offeringId === selectedOfferingId) ||
+      (!existing.offeringId && Boolean(record.offeringId))
+    ) {
+      recordByStudentId.set(record.studentId, record);
+    }
+  });
   const seriesById = new Map(courseSeries.map((item) => [item.id, item]));
   const offeringById = new Map(courseOfferings.map((item) => [item.id, item]));
 
@@ -836,7 +846,8 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
   const eligibilityEnrollments = eligibilityOfferingId
     ? enrollments.filter(
         (e) =>
-          e.offeringId === eligibilityOfferingId &&
+          (e.offeringId === eligibilityOfferingId ||
+            e.courseOfferingId === eligibilityOfferingId) &&
           !["withdrawn", "cancelled", "inactive"].includes(text(e.status)),
       )
     : [];
@@ -844,7 +855,12 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
     eligibilityEnrollments.map((e) => [e.studentId, text(e.status || "active")]),
   );
 
-  const currentFilter = currentMode === "eligibility" ? (queryFilter || "available") : "all";
+  const currentFilter =
+    currentMode === "eligibility"
+      ? ["available", "enrolled", "all"].includes(queryFilter ?? "")
+        ? (queryFilter as "available" | "enrolled" | "all")
+        : "available"
+      : "all";
   const enrolledStudentIds = new Set(eligibilityEnrollments.map((e) => e.studentId));
   const availableStudents = filteredStudents.filter((s) => !enrolledStudentIds.has(s.id));
   const enrolledStudentRows = students
