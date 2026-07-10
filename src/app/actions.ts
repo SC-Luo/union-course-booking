@@ -67,9 +67,9 @@ export async function createReservationAction(
   revalidatePath("/booking/search");
   revalidatePath("/admin");
   revalidatePath("/admin/stats");
-  revalidatePath(`/courses/${result.courseId}`);
-  revalidatePath(`/admin/courses/${result.courseId}/sessions`);
-  revalidatePath(`/admin/sessions/${result.sessionId}/reservations`);
+  revalidatePath(encodeURI(`/courses/${result.courseId}`));
+  revalidatePath(encodeURI(`/admin/courses/${result.courseId}/sessions`));
+  revalidatePath(encodeURI(`/admin/sessions/${result.sessionId}/reservations`));
 
   redirect(`/booking/success?id=${encodeURIComponent(result.reservation.id)}`);
 }
@@ -79,7 +79,7 @@ export async function cancelReservationAction(formData: FormData) {
   const studentName = String(formData.get("studentName") ?? "").trim();
   const idNumberLast3 = cleanIdNumberLast3(formData.get("idNumberLast3") ?? formData.get("phoneLastThree"));
   const result = await cancelReservation(reservationId, studentName, idNumberLast3);
-  const query = new URLSearchParams({ name: studentName });
+  const query = new URLSearchParams({ name: studentName, idNumberLast3 });
 
   if (!result.ok) {
     query.set("error", result.reason);
@@ -90,9 +90,9 @@ export async function cancelReservationAction(formData: FormData) {
   revalidatePath("/booking/search");
   revalidatePath("/admin");
   revalidatePath("/admin/stats");
-  revalidatePath(`/courses/${result.courseId}`);
-  revalidatePath(`/admin/courses/${result.courseId}/sessions`);
-  revalidatePath(`/admin/sessions/${result.sessionId}/reservations`);
+  revalidatePath(encodeURI(`/courses/${result.courseId}`));
+  revalidatePath(encodeURI(`/admin/courses/${result.courseId}/sessions`));
+  revalidatePath(encodeURI(`/admin/sessions/${result.sessionId}/reservations`));
 
   redirect(`/booking/search?${query.toString()}`);
 }

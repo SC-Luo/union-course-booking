@@ -1801,6 +1801,8 @@ export async function bulkImportStudentsAction(formData: FormData) {
     ? getRosterColumnIndex(headers, ["備註", "note"])
     : 6;
 
+  const now = new Date().toISOString();
+
   const parsedRows: Array<{
     row: string;
     cells: string[];
