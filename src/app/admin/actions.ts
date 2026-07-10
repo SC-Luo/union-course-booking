@@ -197,11 +197,31 @@ function normalizeCourseMode(
   value: FormDataEntryValue | string | null | undefined,
   fallback?: string,
 ): CourseMode | undefined {
-  const raw = String(value ?? fallback ?? "").trim();
+  const raw = String(value ?? fallback ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
   if (!raw) return undefined;
 
-  if (raw === "roster_fixed" || raw === "fixed_roster_exam") {
+  if (
+    [
+      "roster_fixed",
+      "fixed_roster_exam",
+      "subsidy_roster",
+      "subsidy_fixed_roster",
+      "grant_roster",
+      "funded_roster",
+    ].includes(raw)
+  ) {
     return "fixed_roster";
+  }
+
+  if (
+    ["booking", "reservation", "booking_flex", "flexible_booking"].includes(
+      raw,
+    )
+  ) {
+    return "booking_flexible";
   }
 
   return raw as CourseMode;

@@ -155,36 +155,23 @@ export function getCourseModeInfo(
   if (mode === "booking_flexible") {
     return {
       mode,
-      label: "預約制課程",
+      label: "預約制",
       shortLabel: "預約制",
-      frontTitle: "選擇上課單元與時段",
+      frontTitle: "可預約時段",
       frontDescription:
-        "這類課程可由學員自行選擇可預約時段；名額額滿、鎖定或停課時不可預約。",
+        "學員可從前台選擇開放日期預約，並依名額與預約規則控管。",
       badgeClassName: "border-emerald-200 bg-emerald-50 text-emerald-800",
       isBookingEnabled: true,
     };
   }
 
-  if (false) {
-    return {
-      mode,
-      label: "補助固定名冊",
-      shortLabel: "補助名冊",
-      frontTitle: "固定課表與出席紀錄",
-      frontDescription:
-        "這類課程以正式名冊為準，不開放自行預約。系統將用於每堂點名、出缺勤累計與補助課程紀錄。",
-      badgeClassName: "border-sky-200 bg-sky-50 text-sky-800",
-      isBookingEnabled: false,
-    };
-  }
-
   return {
     mode,
-    label: "固定名冊課程",
-    shortLabel: "固定名冊",
-    frontTitle: "固定課表與出席紀錄",
+    label: "固定名冊制",
+    shortLabel: "固定名冊制",
+    frontTitle: "固定名冊班級",
     frontDescription:
-      "這類課程以班級名冊為準，不開放自行預約。學員依既定課表出席，系統將用於每堂點名與出缺勤累計。",
+      "此班級以前置名冊與點名為主，不開放前台自行預約。",
     badgeClassName: "border-amber-200 bg-amber-50 text-amber-900",
     isBookingEnabled: false,
   };
