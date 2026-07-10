@@ -7,7 +7,7 @@ import {
   getCourse,
   getReservationCutoff,
   getSession,
-  isBookingCourse,
+  resolveEffectiveBookingPolicy,
 } from "./course-utils";
 import type { AttendanceRecord, AttendanceStatus, BookingData, Course, CourseCategory, CourseOffering, CourseSeries, CourseSession, Enrollment, Reservation, Student, StudentCourseRecord, Instructor } from "./types";
 
@@ -722,7 +722,29 @@ export async function createReservation(input: CreateReservationInput) {
         return { ok: false as const, reason: "invalid" };
       }
 
-      if (!isBookingCourse(course)) {
+      // 載入 offering 與 series 資料以進行有效政策解析
+      const offeringId = course.offeringId || session.offeringId || course.id;
+      const seriesId = course.seriesId || course.courseSeriesId || course.courseMasterId || (course.id ? `series-${course.id}` : "");
+
+      const offeringRef = offeringId ? db.collection("courseOfferings").doc(offeringId) : null;
+      const seriesRef = seriesId ? db.collection("courseSeries").doc(seriesId) : null;
+
+      const [offeringDoc, seriesDoc] = await Promise.all([
+        offeringRef ? transaction.get(offeringRef) : Promise.resolve(null),
+        seriesRef ? transaction.get(seriesRef) : Promise.resolve(null),
+      ]);
+
+      const offering = offeringDoc && offeringDoc.exists ? { id: offeringDoc.id, ...offeringDoc.data() } as CourseOffering : null;
+      const series = seriesDoc && seriesDoc.exists ? { id: seriesDoc.id, ...seriesDoc.data() } as CourseSeries : null;
+
+      // 取得有效政策與分群 ID
+      const resolved = resolveEffectiveBookingPolicy({ course, offering, series });
+      const policy = resolved.bookingPolicy;
+      const quotaGroupId = resolved.bookingQuotaGroupId;
+
+      const isBooking = policy !== "none";
+
+      if (!isBooking) {
         return { ok: false as const, reason: "not_booking" };
       }
 
@@ -809,14 +831,6 @@ export async function createReservation(input: CreateReservationInput) {
         return { ok: false as const, reason: "duplicate" };
       }
 
-      // 取得本次預約的政策與分群 ID
-      const quotaGroupId = getBookingQuotaGroupId(course, input.courseId);
-      const policy = course.bookingPolicy || "per_session";
-
-      if (policy !== "one_per_cycle") {
-        console.log(`[DEBUG_POLICY] Non-weekly policy for courseId: ${course.id}, sessionId: ${session.id}, policy: ${policy}, quotaGroupId: ${quotaGroupId}, cycleKey: ${session.date ? getBookingCycleKey(session.date) : ""}`);
-      }
-
       // 2. 檢查一科一約 (one_per_course)
       if (policy === "one_per_course") {
         const hasDuplicateCourse = studentReservations.some(r => {
@@ -882,7 +896,9 @@ export async function createReservation(input: CreateReservationInput) {
           studentId: eligibleStudent.id 
         },
         course,
-        session
+        session,
+        policy,
+        quotaGroupId
       );
       transaction.create(db.collection("reservations").doc(reservation.id), reservation);
       transaction.update(sessionRef, { bookedCount: session.bookedCount + 1 });
@@ -1515,7 +1531,21 @@ function createReservationInJson(input: CreateReservationInput) {
     return { ok: false as const, reason: "invalid" };
   }
 
-  if (!isBookingCourse(course)) {
+  // 載入 offering 與 series 資料以進行有效政策解析
+  const offeringId = course.offeringId || session.offeringId || course.id;
+  const seriesId = course.seriesId || course.courseSeriesId || course.courseMasterId || (course.id ? `series-${course.id}` : "");
+
+  const offering = data.courseOfferings?.find((o) => o.id === offeringId);
+  const series = data.courseSeries?.find((s) => s.id === seriesId);
+
+  // 取得有效政策與分群 ID
+  const resolved = resolveEffectiveBookingPolicy({ course, offering, series });
+  const policy = resolved.bookingPolicy;
+  const quotaGroupId = resolved.bookingQuotaGroupId;
+
+  const isBooking = policy !== "none";
+
+  if (!isBooking) {
     return { ok: false as const, reason: "not_booking" };
   }
 
@@ -1566,14 +1596,6 @@ function createReservationInJson(input: CreateReservationInput) {
 
   if (hasDuplicate) {
     return { ok: false as const, reason: "duplicate" };
-  }
-
-  // 取得政策與分群 ID
-  const quotaGroupId = getBookingQuotaGroupId(course, input.courseId);
-  const policy = course.bookingPolicy || "per_session";
-
-  if (policy !== "one_per_cycle") {
-    console.log(`[DEBUG_POLICY] Non-weekly policy for courseId: ${course.id}, sessionId: ${session.id}, policy: ${policy}, quotaGroupId: ${quotaGroupId}, cycleKey: ${session.date ? getBookingCycleKey(session.date) : ""}`);
   }
 
   // 2. 檢查一科一約 (one_per_course)
@@ -1627,7 +1649,9 @@ function createReservationInJson(input: CreateReservationInput) {
       studentId: eligibleStudent.id 
     },
     course,
-    session
+    session,
+    policy,
+    quotaGroupId
   );
   session.bookedCount += 1;
   data.reservations.push(reservation);
@@ -2799,14 +2823,14 @@ export async function deleteCourseOfferingCascade(offeringId: string): Promise<C
 
 function buildReservation(
   input: CreateReservationInput & { studentId?: string },
-  course?: Course,
-  session?: CourseSession,
+  course: Course | undefined,
+  session: CourseSession | undefined,
+  resolvedPolicy: string,
+  resolvedQuotaGroupId: string,
 ): Reservation {
   const idNumberLast3 = cleanIdentityLast3(input.idNumberLast3);
   const phoneLastThree = cleanIdentityLast3(input.phoneLastThree) || idNumberLast3;
   const cycleKey = session?.date ? getBookingCycleKey(session.date) : "";
-  const quotaGroupId = getBookingQuotaGroupId(course, input.courseId);
-  const policy = course?.bookingPolicy || "per_session";
 
   return {
     id: `r-${randomUUID()}`,
@@ -2820,8 +2844,8 @@ function buildReservation(
     status: "booked",
     attendanceStatus: "pending",
     bookingCycleKey: cycleKey,
-    bookingQuotaGroupId: quotaGroupId,
-    bookingPolicy: policy,
+    bookingQuotaGroupId: resolvedQuotaGroupId,
+    bookingPolicy: resolvedPolicy,
   };
 }
 

@@ -534,3 +534,54 @@ export function getBookingCycleRange(dateStr: string) {
 export function getBookingCycleKey(dateStr: string): string {
   return getBookingCycleRange(dateStr).key;
 }
+
+export function resolveEffectiveBookingPolicy({
+  course,
+  offering,
+  series,
+}: {
+  course?: Partial<Course> | null;
+  offering?: Partial<CourseOffering> | null;
+  series?: Partial<CourseSeries> | null;
+}) {
+  // 1. Resolve bookingPolicy
+  let bookingPolicy = course?.bookingPolicy || offering?.bookingPolicy || series?.bookingPolicy;
+
+  const courseMode = course?.courseMode || offering?.courseMode || series?.defaultCourseMode;
+  const rosterType = course?.rosterType || offering?.rosterType;
+  const isBooking = getNormalizedCourseMode({ courseMode, rosterType }) === "booking_flexible";
+
+  if (!bookingPolicy) {
+    if (isBooking) {
+      bookingPolicy = "per_session";
+    } else {
+      bookingPolicy = "none";
+    }
+  }
+
+  // fixed_roster 不套用 one_per_cycle
+  if (!isBooking && bookingPolicy === "one_per_cycle") {
+    bookingPolicy = "none";
+  }
+
+  // 2. Resolve bookingQuotaGroupId
+  let bookingQuotaGroupId = course?.bookingQuotaGroupId || offering?.bookingQuotaGroupId || series?.bookingQuotaGroupId;
+  if (!bookingQuotaGroupId) {
+    bookingQuotaGroupId = course?.offeringId || offering?.id || course?.id || "";
+  }
+
+  // 3. Resolve maxReservationsPerCycle
+  let maxReservationsPerCycle = course?.maxReservationsPerCycle ?? offering?.maxReservationsPerCycle ?? series?.maxReservationsPerCycle;
+  if (maxReservationsPerCycle == null) {
+    if (bookingPolicy === "one_per_cycle") {
+      maxReservationsPerCycle = 1;
+    }
+  }
+
+  return {
+    bookingPolicy,
+    bookingQuotaGroupId,
+    maxReservationsPerCycle,
+  };
+}
+

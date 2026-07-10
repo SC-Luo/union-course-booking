@@ -912,6 +912,24 @@ export async function saveCourseOfferingAction(formData: FormData) {
   const legacyCourseId = String(
     formData.get("legacyCourseId") ?? existing?.legacyCourseId ?? `class-${id}`,
   ).trim();
+  const existingCourse = legacyCourseId ? data.courses.find((c) => c.id === legacyCourseId) : undefined;
+
+  let bookingPolicy = formData.get("bookingPolicy") !== null
+    ? String(formData.get("bookingPolicy") ?? "").trim()
+    : (existing?.bookingPolicy ?? existingCourse?.bookingPolicy);
+
+  let bookingQuotaGroupId = formData.get("bookingQuotaGroupId") !== null
+    ? String(formData.get("bookingQuotaGroupId") ?? "").trim()
+    : (existing?.bookingQuotaGroupId ?? existingCourse?.bookingQuotaGroupId);
+  if (bookingQuotaGroupId === "") bookingQuotaGroupId = undefined;
+
+  let maxReservationsPerCycle = formData.get("maxReservationsPerCycle") !== null
+    ? Number(formData.get("maxReservationsPerCycle"))
+    : (existing?.maxReservationsPerCycle ?? existingCourse?.maxReservationsPerCycle);
+  if (typeof maxReservationsPerCycle === "number" && (Number.isNaN(maxReservationsPerCycle) || maxReservationsPerCycle < 1)) {
+    maxReservationsPerCycle = undefined;
+  }
+
   const capacity = normalizeNumber(
     formData.get("capacity"),
     existing?.capacity ?? series?.defaultCapacity,
@@ -956,6 +974,18 @@ export async function saveCourseOfferingAction(formData: FormData) {
           : "open";
   const bookingOpen =
     normalizedOfferingStatus === "open" && courseMode === "booking_flexible";
+
+  if (!existing) {
+    if (courseMode === "booking_flexible") {
+      if (!bookingPolicy) {
+        bookingPolicy = "per_session";
+      }
+    }
+  }
+
+  if (bookingPolicy === "one_per_cycle" && maxReservationsPerCycle == null) {
+    maxReservationsPerCycle = 1;
+  }
 
   const offering: CourseOffering = {
     ...(existing ?? {}),
@@ -1042,6 +1072,9 @@ export async function saveCourseOfferingAction(formData: FormData) {
     isActive,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
+    bookingPolicy,
+    bookingQuotaGroupId,
+    maxReservationsPerCycle,
   };
 
   await upsertCourseOffering(offering);
@@ -1090,6 +1123,9 @@ export async function saveCourseOfferingAction(formData: FormData) {
       data.courses.find((course) => course.id === legacyCourseId)?.createdAt ??
       now,
     updatedAt: now,
+    bookingPolicy: offering.bookingPolicy,
+    bookingQuotaGroupId: offering.bookingQuotaGroupId,
+    maxReservationsPerCycle: offering.maxReservationsPerCycle,
   });
 
   revalidatePath("/");
