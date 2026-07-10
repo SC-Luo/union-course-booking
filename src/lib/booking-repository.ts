@@ -9,7 +9,7 @@ import {
   getSession,
   isBookingCourse,
 } from "./course-utils";
-import type { AttendanceStatus, BookingData, Course, CourseCategory, CourseOffering, CourseSeries, CourseSession, Enrollment, Reservation, Student, StudentCourseRecord, Instructor } from "./types";
+import type { AttendanceRecord, AttendanceStatus, BookingData, Course, CourseCategory, CourseOffering, CourseSeries, CourseSession, Enrollment, Reservation, Student, StudentCourseRecord, Instructor } from "./types";
 
 function shouldUseFirestore() {
   return process.env.BOOKING_DATA_SOURCE === "firestore";
@@ -443,10 +443,27 @@ export async function getStudentEligibilityPageData(
   offeringId?: string,
 ): Promise<BookingData> {
   const targetOfferingId = String(offeringId ?? "").trim();
+  const matchesTargetOffering = (
+    item:
+      | Pick<Enrollment, "offeringId" | "courseOfferingId" | "courseId">
+      | undefined,
+    legacyCourseId?: string,
+  ) =>
+    Boolean(
+      targetOfferingId &&
+        item &&
+        (item.offeringId === targetOfferingId ||
+          item.courseOfferingId === targetOfferingId ||
+          (legacyCourseId && item.courseId === legacyCourseId)),
+    );
   const db = getFirestoreDb();
 
   if (!db) {
     const data = readBookingData();
+    const selectedOffering = targetOfferingId
+      ? data.courseOfferings.find((item) => item.id === targetOfferingId)
+      : undefined;
+    const legacyCourseId = selectedOffering?.legacyCourseId;
     return normalizeBookingData({
       categories: data.categories,
       students: data.students,
@@ -455,9 +472,7 @@ export async function getStudentEligibilityPageData(
       studentCourseRecords: data.studentCourseRecords,
       enrollments: targetOfferingId
         ? (data.enrollments ?? []).filter(
-            (item) =>
-              item.offeringId === targetOfferingId ||
-              item.courseOfferingId === targetOfferingId,
+            (item) => matchesTargetOffering(item, legacyCourseId),
           )
         : [],
     });
@@ -490,19 +505,28 @@ export async function getStudentEligibilityPageData(
     const selectedOffering = targetOfferingId
       ? courseOfferings.find((item) => item.id === targetOfferingId)
       : undefined;
+    const legacyCourseId = selectedOffering?.legacyCourseId;
     const selectedSeriesId =
       selectedOffering?.seriesId ||
       selectedOffering?.courseSeriesId ||
       selectedOffering?.courseMasterId ||
       "";
 
+    const enrollmentQueries: Promise<FirebaseFirestore.QuerySnapshot>[] = [];
+    if (targetOfferingId) {
+      enrollmentQueries.push(
+        db.collection("enrollments").where("offeringId", "==", targetOfferingId).get(),
+        db.collection("enrollments").where("courseOfferingId", "==", targetOfferingId).get(),
+      );
+      if (legacyCourseId) {
+        enrollmentQueries.push(
+          db.collection("enrollments").where("courseId", "==", legacyCourseId).get(),
+        );
+      }
+    }
+
     const [enrollmentSnapshots, recordSnapshots] = await Promise.all([
-      targetOfferingId
-        ? Promise.all([
-            db.collection("enrollments").where("offeringId", "==", targetOfferingId).get(),
-            db.collection("enrollments").where("courseOfferingId", "==", targetOfferingId).get(),
-          ])
-        : Promise.resolve([] as FirebaseFirestore.QuerySnapshot[]),
+      Promise.all(enrollmentQueries),
       selectedSeriesId
         ? Promise.all([
             db.collection("studentCourseRecords").where("seriesId", "==", selectedSeriesId).get(),
@@ -556,8 +580,11 @@ export async function getStudentEligibilityPageData(
       enrollments: targetOfferingId
         ? (data.enrollments ?? []).filter(
             (item) =>
-              item.offeringId === targetOfferingId ||
-              item.courseOfferingId === targetOfferingId,
+              matchesTargetOffering(
+                item,
+                data.courseOfferings.find((offering) => offering.id === targetOfferingId)
+                  ?.legacyCourseId,
+              ),
           )
         : [],
     });
@@ -2004,9 +2031,16 @@ export async function checkStudentOfferingRecords(studentId: string, offeringId:
         (r.offeringId === offeringId || r.courseId === courseId || sessionIds.has(r.sessionId))
     );
     const hasAttendance = (data.attendanceRecords ?? []).some(
-      (a) =>
-        a.studentId === studentId &&
-        (a.offeringId === offeringId || (a.sessionId ? sessionIds.has(a.sessionId) : false))
+      (a) => {
+        const record = a as AttendanceRecord & { courseId?: string };
+        return (
+          record.studentId === studentId &&
+          (record.offeringId === offeringId ||
+            record.courseId === courseId ||
+            (record.sessionId ? sessionIds.has(record.sessionId) : false) ||
+            (record.courseSessionId ? sessionIds.has(record.courseSessionId) : false))
+        );
+      }
     );
 
     return { hasReservations, hasAttendance };
@@ -2016,6 +2050,14 @@ export async function checkStudentOfferingRecords(studentId: string, offeringId:
   const courseSnapshot = await db.collection("courses").where("offeringId", "==", offeringId).get();
   const courseIds = Array.from(new Set([offeringId, ...courseSnapshot.docs.map((doc) => doc.id)]));
   const sessionIds = new Set<string>();
+  courseSnapshot.docs.forEach((doc) => {
+    const sessions = doc.data()?.sessions;
+    if (Array.isArray(sessions)) {
+      sessions.forEach((session) => {
+        if (session?.id) sessionIds.add(String(session.id));
+      });
+    }
+  });
   const directSessionSnapshot = await db.collection("sessions").where("offeringId", "==", offeringId).get();
   directSessionSnapshot.docs.forEach((doc) => sessionIds.add(doc.id));
   for (const courseId of courseIds) {
@@ -2039,7 +2081,12 @@ export async function checkStudentOfferingRecords(studentId: string, offeringId:
   const attSnapshot = await db.collection("attendanceRecords").where("studentId", "==", studentId).get();
   for (const doc of attSnapshot.docs) {
     const data = doc.data();
-    if (data.offeringId === offeringId || sessionIds.has(data.sessionId)) {
+    if (
+      data.offeringId === offeringId ||
+      courseIds.includes(data.courseId) ||
+      sessionIds.has(data.sessionId) ||
+      sessionIds.has(data.courseSessionId)
+    ) {
       hasAttendance = true;
       break;
     }
@@ -2617,7 +2664,15 @@ export async function deleteCourseOfferingCascade(offeringId: string): Promise<C
       students: 0,
       enrollments: data.enrollments?.filter((item) => item.offeringId === offeringId || item.courseOfferingId === offeringId || (item.courseId && legacyCourseIds.has(item.courseId))).length ?? 0,
       reservations: data.reservations?.filter((item) => item.offeringId === offeringId || legacyCourseIds.has(item.courseId) || courseSessionIds.has(item.sessionId)).length ?? 0,
-      attendanceRecords: data.attendanceRecords?.filter((item) => item.offeringId === offeringId || (item.sessionId && courseSessionIds.has(item.sessionId))).length ?? 0,
+      attendanceRecords: data.attendanceRecords?.filter((item) => {
+        const record = item as AttendanceRecord & { courseId?: string };
+        return (
+          record.offeringId === offeringId ||
+          (record.courseId ? legacyCourseIds.has(record.courseId) : false) ||
+          (record.sessionId ? courseSessionIds.has(record.sessionId) : false) ||
+          (record.courseSessionId ? courseSessionIds.has(record.courseSessionId) : false)
+        );
+      }).length ?? 0,
       studentCourseRecords: data.studentCourseRecords?.filter((item) => item.offeringId === offeringId || (item.courseId && legacyCourseIds.has(item.courseId))).length ?? 0,
       entitlements: data.entitlements?.filter((item) => item.offeringId === offeringId).length ?? 0,
     };
@@ -2627,7 +2682,15 @@ export async function deleteCourseOfferingCascade(offeringId: string): Promise<C
     data.courseSessions = (data.courseSessions ?? []).filter((item) => item.offeringId !== offeringId && !(item.legacyCourseId && legacyCourseIds.has(item.legacyCourseId)) && !courseSessionIds.has(item.id));
     data.enrollments = (data.enrollments ?? []).filter((item) => item.offeringId !== offeringId && item.courseOfferingId !== offeringId && !(item.courseId && legacyCourseIds.has(item.courseId)));
     data.reservations = (data.reservations ?? []).filter((item) => item.offeringId !== offeringId && !legacyCourseIds.has(item.courseId) && !courseSessionIds.has(item.sessionId));
-    data.attendanceRecords = (data.attendanceRecords ?? []).filter((item) => item.offeringId !== offeringId && !(item.sessionId && courseSessionIds.has(item.sessionId)));
+    data.attendanceRecords = (data.attendanceRecords ?? []).filter((item) => {
+      const record = item as AttendanceRecord & { courseId?: string };
+      return (
+        record.offeringId !== offeringId &&
+        !(record.courseId && legacyCourseIds.has(record.courseId)) &&
+        !(record.sessionId && courseSessionIds.has(record.sessionId)) &&
+        !(record.courseSessionId && courseSessionIds.has(record.courseSessionId))
+      );
+    });
     data.studentCourseRecords = (data.studentCourseRecords ?? []).filter((item) => item.offeringId !== offeringId && !(item.courseId && legacyCourseIds.has(item.courseId)));
     data.entitlements = (data.entitlements ?? []).filter((item) => item.offeringId !== offeringId);
 
@@ -2648,7 +2711,15 @@ export async function deleteCourseOfferingCascade(offeringId: string): Promise<C
     }
 
     const coursesSnap = await db.collection("courses").where("offeringId", "==", offeringId).get();
-    coursesSnap.docs.forEach((doc) => legacyCourseIds.add(doc.id));
+    coursesSnap.docs.forEach((doc) => {
+      legacyCourseIds.add(doc.id);
+      const sessions = doc.data()?.sessions;
+      if (Array.isArray(sessions)) {
+        sessions.forEach((session) => {
+          if (session?.id) courseSessionIds.add(String(session.id));
+        });
+      }
+    });
 
     const courseSessionsSnap = await db.collection("courseSessions").where("offeringId", "==", offeringId).get();
     courseSessionsSnap.docs.forEach((doc) => courseSessionIds.add(doc.id));
@@ -2696,6 +2767,7 @@ export async function deleteCourseOfferingCascade(offeringId: string): Promise<C
       await collect("sessions", "courseId", legacyCourseId);
       await collect("enrollments", "courseId", legacyCourseId);
       await collect("reservations", "courseId", legacyCourseId);
+      await collect("attendanceRecords", "courseId", legacyCourseId);
       await collect("studentCourseRecords", "courseId", legacyCourseId);
     }
 
@@ -2705,6 +2777,7 @@ export async function deleteCourseOfferingCascade(offeringId: string): Promise<C
       refs.set(`sessions/${sessionId}`, db.collection("sessions").doc(sessionId));
       await collect("reservations", "sessionId", sessionId);
       await collect("attendanceRecords", "sessionId", sessionId);
+      await collect("attendanceRecords", "courseSessionId", sessionId);
     }
 
     const refList = Array.from(refs.values()).filter(Boolean);
