@@ -53,7 +53,7 @@ function getSessionDisplayState(
   }
 
   if (badge.status === "one_per_cycle") {
-    return { canBook: true, label: "一週一次", tone: "available" };
+    return { canBook: true, label: "預約", tone: "available" };
   }
 
   const status = String(session.sessionStatus ?? session.status ?? "scheduled").trim() || "scheduled";

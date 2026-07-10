@@ -23,6 +23,7 @@ type CalendarSessionItem = {
   label: string;
   tone: "bookable" | "locked" | "full" | "closed" | "fixed_roster";
   isBookable: boolean;
+  bookingPolicy?: string;
 };
 
 function getShortCourseTitle(title: string) {
@@ -78,7 +79,7 @@ function getAvailability(course: Course, session: CourseSession) {
     return { label: "固定名冊", tone: "fixed_roster" as const };
   }
   if (badge.status === "one_per_cycle") {
-    return { label: "一週一次", tone: "bookable" as const };
+    return { label: "預約", tone: "bookable" as const };
   }
 
   // bookable
@@ -137,7 +138,7 @@ function SessionModal({ item, onClose }: { item: CalendarSessionItem | null; onC
         <p className="mt-4 text-sm leading-6 text-[#7b6252]">
           {item.tone === "fixed_roster"
             ? "此課程為固定名冊制，請依秘書處通知上課，不需自行預約。"
-            : item.label === "一週一次"
+            : item.bookingPolicy === "one_per_cycle"
             ? "此課程採一週一次預約制，同一週只能預約一個時段。如需更換日期，請先取消原預約後再重新預約。"
             : "預約時只需輸入名冊中的姓名。開課前 7 天起停止新增或取消預約。"}
         </p>
@@ -175,6 +176,7 @@ export function MobileCourseCalendar({ courses, categories }: MobileCourseCalend
       label: availability.label,
       tone: availability.tone,
       isBookable: availability.tone === "bookable",
+      bookingPolicy: course.bookingPolicy,
     };
   })).sort((a, b) => `${a.date} ${a.startTime}`.localeCompare(`${b.date} ${b.startTime}`)), [courses, categories]);
 

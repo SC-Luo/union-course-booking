@@ -778,7 +778,7 @@ export default async function CourseOfferingsPage({ searchParams }: PageProps) {
 
       {saved === "cleared" ? (
         <p className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 font-bold">
-          年度課程已清除。
+          年度課程已清除，相關課堂、預約、點名與名冊關聯已移除。
         </p>
       ) : saved ? (
         <p className="mb-4 rounded-2xl border border-[#d8b69f] bg-[#fff6ed] px-4 py-3 text-sm text-[#8B5035] font-bold">

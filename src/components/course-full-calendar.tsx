@@ -83,7 +83,7 @@ function getAvailability(course: Course, session: CourseSession) {
     return { label: "固定名冊", tone: "fixed_roster" as const };
   }
   if (badge.status === "one_per_cycle") {
-    return { label: "一週一次", tone: "bookable" as const };
+    return { label: "預約", tone: "bookable" as const };
   }
 
   // bookable
@@ -155,7 +155,7 @@ function SessionModal({ item, onClose }: { item: CalendarSession | null; onClose
           <p className="mt-2">
             {item.tone === "fixed_roster"
               ? "此課程為固定名冊制，請依秘書處通知上課，不需自行預約。"
-              : item.label === "一週一次"
+              : item.course.bookingPolicy === "one_per_cycle"
               ? "此課程採一週一次預約制，同一週只能預約一個時段。如需更換日期，請先取消原預約後再重新預約。"
               : "預約時只需輸入名冊中的姓名。開課前 7 天起停止新增或取消預約。"}
           </p>

@@ -618,7 +618,7 @@ export function getPublicBookingBadge(
 
   // 4. 一週一次
   if (course.bookingPolicy === "one_per_cycle") {
-    return { status: "one_per_cycle", label: "一週一次" };
+    return { status: "one_per_cycle", label: "預約" };
   }
 
   // 5. 可預約

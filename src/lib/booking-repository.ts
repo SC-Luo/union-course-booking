@@ -2811,7 +2811,27 @@ export async function deleteCourseOfferingCascade(offeringId: string): Promise<C
       await batch.commit();
     }
 
-    return applyLocal();
+    try {
+      return applyLocal();
+    } catch (localError) {
+      console.warn("⚠️ Failed to update local JSON backup during cascade delete:", localError);
+      return {
+        ok: true as const,
+        offeringId,
+        legacyCourseIds: Array.from(legacyCourseIds),
+        deleted: {
+          courseOfferings: 1,
+          courses: legacyCourseIds.size,
+          courseSessions: courseSessionIds.size,
+          students: 0,
+          enrollments: 0,
+          reservations: 0,
+          attendanceRecords: 0,
+          studentCourseRecords: 0,
+          entitlements: 0
+        }
+      };
+    }
   } catch (error) {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Course offering cascade delete failed.", error);
