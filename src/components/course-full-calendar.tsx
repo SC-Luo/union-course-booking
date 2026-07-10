@@ -3,13 +3,13 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { MobileCourseCalendar } from "@/components/mobile-course-calendar";
-import { canChangeReservation, formatReservationCutoff, getRemainingSeats, isSessionBookableByStatus, resolveCourseColor } from "@/lib/course-utils";
+import { formatReservationCutoff, getRemainingSeats, resolveCourseColor, getPublicBookingBadge } from "@/lib/course-utils";
 import type { Course, CourseCategory, CourseSession } from "@/lib/types";
 
 type CourseFullCalendarProps = { courses: Course[]; categories: CourseCategory[] };
 const TAIPEI_TIMEZONE = "Asia/Taipei";
 
-type AvailabilityTone = "bookable" | "locked" | "full" | "closed";
+type AvailabilityTone = "bookable" | "locked" | "full" | "closed" | "fixed_roster";
 
 type CalendarSession = {
   course: Course;
@@ -68,16 +68,27 @@ function getSessionDisplayStatus(session: CourseSession) {
 }
 
 function getAvailability(course: Course, session: CourseSession) {
-  const status = getSessionDisplayStatus(session);
+  const badge = getPublicBookingBadge(course, session);
+  if (badge.status === "full") {
+    return { label: "額滿", tone: "full" as const };
+  }
+  if (badge.status === "closed") {
+    const status = getSessionDisplayStatus(session);
+    if (status === "cancelled") return { label: "已取消", tone: "closed" as const };
+    if (status === "suspended") return { label: "本堂停課", tone: "closed" as const };
+    if (status === "rescheduled") return { label: "已調課", tone: "closed" as const };
+    return { label: "報名截止", tone: "closed" as const };
+  }
+  if (badge.status === "fixed_roster") {
+    return { label: "固定名冊", tone: "fixed_roster" as const };
+  }
+  if (badge.status === "one_per_cycle") {
+    return { label: "一週一次", tone: "bookable" as const };
+  }
 
-  if (!course.isActive || session.isActive === false) return { label: "未開放", tone: "closed" as const };
-  if (status === "cancelled") return { label: "已取消", tone: "closed" as const };
-  if (status === "suspended") return { label: "本堂停課", tone: "closed" as const };
+  // bookable
+  const status = getSessionDisplayStatus(session);
   if (status === "makeup") return { label: "補課", tone: "bookable" as const };
-  if (status === "rescheduled") return { label: "已調課", tone: "closed" as const };
-  if (!isSessionBookableByStatus(session)) return { label: "暫不開放", tone: "closed" as const };
-  if (getRemainingSeats(session) <= 0) return { label: "額滿", tone: "full" as const };
-  if (!canChangeReservation(session)) return { label: "報名截止", tone: "locked" as const };
   return { label: "可預約", tone: "bookable" as const };
 }
 
@@ -85,7 +96,8 @@ function statusClass(tone: AvailabilityTone) {
   if (tone === "bookable") return "border-emerald-200 bg-emerald-50 text-emerald-700";
   if (tone === "locked") return "border-amber-200 bg-amber-50 text-amber-700";
   if (tone === "full") return "border-stone-200 bg-stone-100 text-stone-600";
-  return "border-rose-200 bg-rose-50 text-rose-700";
+  if (tone === "fixed_roster") return "border-amber-200 bg-amber-50 text-amber-900";
+  return "border-rose-200 bg-rose-50 text-rose-700"; // closed
 }
 
 function buildCalendarDays(currentMonth: Date, sessions: CalendarSession[]) {
@@ -140,7 +152,13 @@ function SessionModal({ item, onClose }: { item: CalendarSession | null; onClose
 
         <div className="mt-5 rounded-3xl border border-[#ead8c6] bg-white p-4 text-sm leading-6 text-[#7b6252]">
           <p className="font-bold text-[#34231a]">預約說明</p>
-          <p className="mt-2">預約時只需輸入名冊中的姓名。開課前 7 天起停止新增或取消預約。</p>
+          <p className="mt-2">
+            {item.tone === "fixed_roster"
+              ? "此課程為固定名冊制，請依秘書處通知上課，不需自行預約。"
+              : item.label === "一週一次"
+              ? "此課程採一週一次預約制，同一週只能預約一個時段。如需更換日期，請先取消原預約後再重新預約。"
+              : "預約時只需輸入名冊中的姓名。開課前 7 天起停止新增或取消預約。"}
+          </p>
         </div>
 
         <div className="mt-6 grid gap-3 sm:grid-cols-2">

@@ -585,3 +585,44 @@ export function resolveEffectiveBookingPolicy({
   };
 }
 
+export type PublicBookingBadge = "full" | "closed" | "fixed_roster" | "one_per_cycle" | "bookable";
+
+export function getPublicBookingBadge(
+  course: Pick<Course, "courseMode" | "rosterType" | "bookingOpen" | "bookingPolicy" | "isActive">,
+  session: Pick<CourseSession, "capacity" | "bookedCount" | "date" | "bookingDeadline" | "isActive" | "status" | "sessionStatus">
+): { status: PublicBookingBadge; label: string } {
+  // 1. 額滿
+  const remainingSeats = Math.max(session.capacity - session.bookedCount, 0);
+  if (remainingSeats <= 0) {
+    return { status: "full", label: "額滿" };
+  }
+
+  // 2. 報名截止 (或是停課、已取消等)
+  const isSessionActive = session.isActive !== false;
+  const sessionStatus = String(session.sessionStatus ?? session.status ?? "scheduled").trim() || "scheduled";
+  const isBookableByStatus = isSessionActive && sessionStatus !== "cancelled" && sessionStatus !== "suspended" && sessionStatus !== "rescheduled";
+  const hasEnded = (() => {
+    const cutoff = getReservationCutoff(session);
+    return new Date() > cutoff;
+  })();
+
+  if (!course.isActive || !isBookableByStatus || hasEnded) {
+    return { status: "closed", label: "報名截止" };
+  }
+
+  // 3. 固定名冊
+  const isFixed = isFixedRosterCourse(course);
+  if (isFixed) {
+    return { status: "fixed_roster", label: "固定名冊" };
+  }
+
+  // 4. 一週一次
+  if (course.bookingPolicy === "one_per_cycle") {
+    return { status: "one_per_cycle", label: "一週一次" };
+  }
+
+  // 5. 可預約
+  return { status: "bookable", label: "可預約" };
+}
+
+

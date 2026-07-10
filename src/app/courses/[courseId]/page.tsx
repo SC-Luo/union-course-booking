@@ -3,14 +3,13 @@ import { notFound } from "next/navigation";
 import { StudentShell } from "@/components/page-shell";
 import { getCourseDetailById } from "@/lib/booking-repository";
 import {
-  canChangeReservation,
   formatReservationCutoff,
   getCategoryName,
   getCourseModeInfo,
   getRemainingSeats,
   getWeekday,
   isBookingCourse,
-  isSessionBookableByStatus,
+  getPublicBookingBadge,
 } from "@/lib/course-utils";
 import type { CourseSession } from "@/lib/types";
 import { getCourseTypeName } from "@/lib/course-coding";
@@ -31,59 +30,33 @@ type SessionDisplayState = {
   tone: SessionTone;
 };
 
-function parseTaiwanDateTime(value?: string) {
-  const normalized = value?.trim();
-  if (!normalized) return null;
-
-  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/);
-  if (!match) {
-    const fallback = new Date(normalized);
-    return Number.isNaN(fallback.getTime()) ? null : fallback;
-  }
-
-  const [, year, month, day, hour = "23", minute = "59"] = match;
-  return new Date(`${year}-${month}-${day}T${hour}:${minute}:00+08:00`);
-}
-
-function hasSessionEnded(session: Pick<CourseSession, "date" | "endTime">) {
-  const classEndTime = parseTaiwanDateTime(`${session.date} ${session.endTime || "23:59"}`);
-  return Boolean(classEndTime && Date.now() > classEndTime.getTime());
-}
-
 function getSessionDisplayState(
   session: CourseSession,
-  courseIsActive: boolean,
+  course: any,
 ): SessionDisplayState {
-  const status = String(session.sessionStatus ?? session.status ?? "scheduled").trim() || "scheduled";
+  const badge = getPublicBookingBadge(course, session);
 
-  if (!courseIsActive || session.isActive === false) {
-    return { canBook: false, label: "未開放", tone: "closed" };
-  }
-
-  if (status === "cancelled") {
-    return { canBook: false, label: "已取消", tone: "closed" };
-  }
-
-  if (status === "suspended") {
-    return { canBook: false, label: "本堂停課", tone: "closed" };
-  }
-
-  if (status === "rescheduled") {
-    return { canBook: false, label: "已調課", tone: "closed" };
-  }
-
-  if (!isSessionBookableByStatus(session)) {
-    return { canBook: false, label: "暫不開放", tone: "closed" };
-  }
-
-  if (getRemainingSeats(session) <= 0) {
+  if (badge.status === "full") {
     return { canBook: false, label: "已額滿", tone: "full" };
   }
 
-  if (!canChangeReservation(session) || hasSessionEnded(session)) {
-    return { canBook: false, label: "報名截止", tone: "locked" };
+  if (badge.status === "closed") {
+    const status = String(session.sessionStatus ?? session.status ?? "scheduled").trim() || "scheduled";
+    if (status === "cancelled") return { canBook: false, label: "已取消", tone: "closed" };
+    if (status === "suspended") return { canBook: false, label: "本堂停課", tone: "closed" };
+    if (status === "rescheduled") return { canBook: false, label: "已調課", tone: "closed" };
+    return { canBook: false, label: "報名截止", tone: "closed" };
   }
 
+  if (badge.status === "fixed_roster") {
+    return { canBook: false, label: "固定名冊", tone: "locked" };
+  }
+
+  if (badge.status === "one_per_cycle") {
+    return { canBook: true, label: "一週一次", tone: "available" };
+  }
+
+  const status = String(session.sessionStatus ?? session.status ?? "scheduled").trim() || "scheduled";
   if (status === "makeup") {
     return { canBook: true, label: "補課", tone: "makeup" };
   }
@@ -218,7 +191,7 @@ export default async function CourseDetailPage({ params }: PageProps) {
               </div>
               <div className="grid gap-3">
                 {sessions.map((session) => {
-                  const displayState = getSessionDisplayState(session, course.isActive);
+                  const displayState = getSessionDisplayState(session, course);
                   const canBook = isBookingMode && displayState.canBook;
 
                   return (
