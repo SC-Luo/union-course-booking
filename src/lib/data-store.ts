@@ -14,6 +14,7 @@ import type {
   Student,
   StudentCourseRecord,
 } from "./types";
+import { getBookingCycleKey } from "./course-utils";
 
 const dataFilePath = path.join(process.cwd(), "data", "booking-data.json");
 
@@ -63,8 +64,16 @@ export function readBookingData(): BookingData {
 
 export function writeBookingData(data: BookingData) {
   checkFirestoreFallback();
-  fs.mkdirSync(path.dirname(dataFilePath), { recursive: true });
-  fs.writeFileSync(dataFilePath, `${JSON.stringify(normalizeBookingData(data), null, 2)}\n`, "utf8");
+  try {
+    fs.mkdirSync(path.dirname(dataFilePath), { recursive: true });
+    fs.writeFileSync(dataFilePath, `${JSON.stringify(normalizeBookingData(data), null, 2)}\n`, "utf8");
+  } catch (error) {
+    if (shouldUseFirestore()) {
+      console.warn("[DATA_SOURCE] ⚠️ Bypassed local JSON write error in Firestore mode:", error);
+    } else {
+      throw error;
+    }
+  }
 }
 
 export function normalizeBookingData(input: Partial<BookingData>): BookingData {
@@ -264,6 +273,11 @@ function ensureStudentsFromReservations(students: Student[], reservations: Reser
     seatNumber: student.seatNumber ?? index + 1,
     source: student.source ?? "manual",
     isActive: student.isActive ?? true,
+    basicConfirmed: student.basicConfirmed ?? false,
+    contactConfirmed: student.contactConfirmed ?? false,
+    backgroundConfirmed: student.backgroundConfirmed ?? false,
+    businessConfirmed: student.businessConfirmed ?? false,
+    noteConfirmed: student.noteConfirmed ?? false,
   }));
 }
 
@@ -286,6 +300,11 @@ function normalizeReservation(reservation: Reservation, courses: Course[], stude
   const course = courses.find((item) => item.id === reservation.courseId || item.offeringId === reservation.offeringId);
   const studentId = reservation.studentId ?? students.find((student) => student.name === reservation.studentName && (student.idNumberLast3 ?? student.phone) === reservation.phoneLastThree)?.id ?? buildStudentId(reservation.studentName, reservation.phoneLastThree);
 
+  const session = course?.sessions?.find((s) => s.id === reservation.sessionId);
+  const calculatedCycleKey = session?.date ? getBookingCycleKey(session.date) : "";
+  const calculatedQuotaGroupId = course?.bookingQuotaGroupId || reservation.offeringId || reservation.courseId;
+  const calculatedPolicy = course?.bookingPolicy || "per_session";
+
   return {
     ...reservation,
     studentId,
@@ -293,6 +312,9 @@ function normalizeReservation(reservation: Reservation, courses: Course[], stude
     seriesId: reservation.seriesId ?? course?.seriesId ?? `series-${reservation.courseId}`,
     reservationType: reservation.reservationType ?? "front_booking",
     source: reservation.source ?? "online",
+    bookingCycleKey: reservation.bookingCycleKey || calculatedCycleKey,
+    bookingQuotaGroupId: reservation.bookingQuotaGroupId || calculatedQuotaGroupId,
+    bookingPolicy: reservation.bookingPolicy || calculatedPolicy,
     createdAt: reservation.createdAt ?? reservation.bookedAt,
     updatedAt: reservation.updatedAt ?? reservation.bookedAt,
   };

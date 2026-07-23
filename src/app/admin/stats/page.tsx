@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { AdminShell } from "@/components/page-shell";
-import { getBookingData } from "@/lib/booking-repository";
+import { getAdminStatsData } from "@/lib/booking-repository";
 import { getCategoryName, resolveCourseColor } from "@/lib/course-utils";
 
 export const dynamic = "force-dynamic";
@@ -79,7 +79,7 @@ function isWithinRange(date: string, start: string, end: string) {
 
 export default async function AdminStatsPage({ searchParams }: PageProps) {
   const { courseId, report } = await searchParams;
-  const { categories, courses, reservations } = await getBookingData();
+  const { categories, courses, reservations } = await getAdminStatsData();
   const activeCourses = courses.filter((course) => course.isActive);
   const selectedCourse =
     courses.find((course) => course.id === courseId) ??

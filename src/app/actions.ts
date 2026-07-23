@@ -2,12 +2,16 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { cancelReservation, createReservation, getCourseCatalog, getBookingData, upsertStudent } from "@/lib/booking-repository";
-import { getCourse, getSession, isBookingCourse } from "@/lib/course-utils";
+import { cancelReservation, createReservation, getBookingData, upsertStudent, getFirestoreDb, generateNextStudentNumber } from "@/lib/booking-repository";
 import type { Student } from "@/lib/types";
 
 function cleanIdNumberLast3(value: FormDataEntryValue | null) {
   return String(value ?? "").replace(/\D/g, "").slice(0, 3);
+}
+
+function isFirestoreQuotaError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /RESOURCE_EXHAUSTED|Quota exceeded/i.test(message);
 }
 
 export type CreateReservationFormState = {
@@ -23,38 +27,38 @@ export async function createReservationAction(
   const studentName = String(formData.get("studentName") ?? "").trim();
   const idNumberLast3 = cleanIdNumberLast3(formData.get("idNumberLast3") ?? formData.get("phoneLastThree"));
 
-  const { courses } = await getCourseCatalog();
-  const course = getCourse(courseId, courses);
-  const session = course ? getSession(course, sessionId) : undefined;
-
-  if (!course || !session) {
-    return { error: "找不到課程或課堂，請回到課程列表重新操作。" };
-  }
-
-  if (!isBookingCourse(course)) {
-    return { error: "此課程為固定名冊課程，不開放前台預約。" };
-  }
-
   if (!studentName || idNumberLast3.length !== 3) {
-    return { error: "請輸入姓名與身分證後三碼。" };
+    return { error: "請填寫完整姓名與證件末三碼。" };
   }
 
-  const result = await createReservation({
-    courseId,
-    sessionId,
-    studentName,
-    phoneLastThree: idNumberLast3,
-    idNumberLast3,
-  });
+  let result;
+  try {
+    result = await createReservation({
+      courseId,
+      sessionId,
+      studentName,
+      phoneLastThree: idNumberLast3,
+      idNumberLast3,
+    });
+  } catch (error) {
+    return {
+      error: isFirestoreQuotaError(error)
+        ? "目前系統資料暫時忙碌，請稍後再試。"
+        : "目前無法完成預約，請稍後再試。",
+    };
+  }
 
   if (!result.ok) {
     const reasonText: Record<string, string> = {
-      not_booking: "此課程為固定名冊課程，不開放前台預約。",
-      not_roster: "查無此課程名冊內的學員，請確認姓名是否與名冊一致。",
-      identity_mismatch: "查無符合姓名與身分證後三碼的課程名冊資料，請確認資料是否與名冊一致。",
-      duplicate: "你已經預約過這一堂課。",
-      closed: "此課堂目前已額滿、鎖定或未開放預約。",
-      invalid: "預約資料不完整，請回到課程列表重新操作。",
+      not_booking: "這門課目前不是開放預約的課程。",
+      not_roster: "查無符合資格的學員資料，請先確認是否已加入對應班級名冊。",
+      identity_mismatch: "姓名或證件末三碼與名冊資料不符，請重新確認後再試。",
+      duplicate: "您已預約這堂課程。",
+      duplicate_course: "您已預約此課程，如需更換時段，請先取消原預約後再重新預約。",
+      duplicate_cycle: "您本週已預約此課程其他日期，如需更換日期，請先取消原預約後再重新預約。",
+      closed: "這堂課目前無法預約，可能已截止、額滿或狀態已變更。",
+      invalid: "找不到課程或課堂，請回到課程列表重新操作。",
+      system_unavailable: "目前系統資料暫時忙碌，請稍後再試。",
     };
     return { error: reasonText[result.reason] ?? result.reason };
   }
@@ -63,9 +67,9 @@ export async function createReservationAction(
   revalidatePath("/booking/search");
   revalidatePath("/admin");
   revalidatePath("/admin/stats");
-  revalidatePath(`/courses/${result.courseId}`);
-  revalidatePath(`/admin/courses/${result.courseId}/sessions`);
-  revalidatePath(`/admin/sessions/${result.sessionId}/reservations`);
+  revalidatePath(encodeURI(`/courses/${result.courseId}`));
+  revalidatePath(encodeURI(`/admin/courses/${result.courseId}/sessions`));
+  revalidatePath(encodeURI(`/admin/sessions/${result.sessionId}/reservations`));
 
   redirect(`/booking/success?id=${encodeURIComponent(result.reservation.id)}`);
 }
@@ -75,7 +79,7 @@ export async function cancelReservationAction(formData: FormData) {
   const studentName = String(formData.get("studentName") ?? "").trim();
   const idNumberLast3 = cleanIdNumberLast3(formData.get("idNumberLast3") ?? formData.get("phoneLastThree"));
   const result = await cancelReservation(reservationId, studentName, idNumberLast3);
-  const query = new URLSearchParams({ name: studentName });
+  const query = new URLSearchParams({ name: studentName, idNumberLast3 });
 
   if (!result.ok) {
     query.set("error", result.reason);
@@ -86,21 +90,21 @@ export async function cancelReservationAction(formData: FormData) {
   revalidatePath("/booking/search");
   revalidatePath("/admin");
   revalidatePath("/admin/stats");
-  revalidatePath(`/courses/${result.courseId}`);
-  revalidatePath(`/admin/courses/${result.courseId}/sessions`);
-  revalidatePath(`/admin/sessions/${result.sessionId}/reservations`);
+  revalidatePath(encodeURI(`/courses/${result.courseId}`));
+  revalidatePath(encodeURI(`/admin/courses/${result.courseId}/sessions`));
+  revalidatePath(encodeURI(`/admin/sessions/${result.sessionId}/reservations`));
 
   redirect(`/booking/search?${query.toString()}`);
 }
 
 export async function submitNewStudentProfileAction(formData: FormData) {
-  // Honeypot 防垃圾送出
+  // Honeypot ?脣??暸
   const website = String(formData.get("website") ?? "").trim();
   if (website) {
     redirect("/new-student/success");
   }
 
-  // 個資同意驗證
+  // ????撽?
   const consent = String(formData.get("consent") ?? "").trim();
   if (consent !== "yes") {
     redirect("/new-student?error=consent");
@@ -110,31 +114,31 @@ export async function submitNewStudentProfileAction(formData: FormData) {
   const nationalId = String(formData.get("nationalId") ?? "").trim();
   const phone = String(formData.get("phone") ?? "").trim();
   const birthday = String(formData.get("birthday") ?? "").trim();
+  const email = String(formData.get("email") ?? "").trim();
+  const mailingAddress = String(formData.get("mailingAddress") ?? "").trim();
+  const emergencyContactName = String(formData.get("emergencyContactName") ?? "").trim();
+  const emergencyContactPhone = String(formData.get("emergencyContactPhone") ?? "").trim();
+  const beautyRelated = String(formData.get("beautyRelated") ?? "").trim();
+  const plannedBusinessCategories = formData.getAll("plannedBusinessCategories").map(String);
+  const plannedBusinessCategoryOther = String(formData.get("plannedBusinessCategoryOther") ?? "").trim();
+  const formNote = String(formData.get("note") ?? "").trim();
 
-  // 必填驗證：姓名、身分證字號、手機與生日
-  if (!name || !nationalId || !phone || !birthday) {
+  if (!name || !nationalId || !phone || !birthday || !mailingAddress) {
     redirect("/new-student?error=invalid");
   }
 
   const cleanNationalId = nationalId;
   const idNumberLast3 = cleanNationalId.length >= 3 ? cleanNationalId.slice(-3) : "";
 
-  const email = String(formData.get("email") ?? "").trim();
-  const mailingAddress = String(formData.get("mailingAddress") ?? "").trim();
-  const emergencyContactName = String(formData.get("emergencyContactName") ?? "").trim();
-  const emergencyContactPhone = String(formData.get("emergencyContactPhone") ?? "").trim();
-  const beautyRelated = String(formData.get("beautyRelated") ?? "").trim();
-  const formNote = String(formData.get("note") ?? "").trim();
-
-  // 課程興趣處理
+  // 隤脩??閎??
   const interestedCourses = formData.getAll("interestedCourses").map(String);
-  const interestedCoursesText = interestedCourses.join("、");
+  const interestedCoursesText = interestedCourses.join(", ");
 
-  // 取得現有資料做比對
+  // ???暹?鞈???撠?
   const data = await getBookingData();
   const students = data.students ?? [];
 
-  // 精準與模糊比對 (改用 nationalId)
+  // 蝎暹??芋蝟?撠?(?寧 nationalId)
   const exactExisting = students.find(
     (student) =>
       student.name === name &&
@@ -150,10 +154,17 @@ export async function submitNewStudentProfileAction(formData: FormData) {
 
   const existing = exactExisting ?? looseExisting;
 
-  // 處理備註附加
+  // Generate member number if not exists
+  let memberNo = existing?.memberNo;
+  if (!memberNo) {
+    const db = getFirestoreDb();
+    memberNo = await generateNextStudentNumber(db);
+  }
+
+  // ???酉??
   let updatedNote = existing?.note || "";
   if (interestedCoursesText) {
-    const tag = `[新生自填入口] 想了解課程：${interestedCoursesText}`;
+    const tag = `[?啁??芸‵?亙] ?喃?閫?玨蝔?${interestedCoursesText}`;
     if (updatedNote) {
       if (!updatedNote.includes(tag)) {
         updatedNote = `${updatedNote}\n${tag}`;
@@ -162,8 +173,9 @@ export async function submitNewStudentProfileAction(formData: FormData) {
       updatedNote = tag;
     }
   }
+
   if (formNote) {
-    const userNoteTag = `[新生自填入口] 備註：${formNote}`;
+    const userNoteTag = `[新學員表單] 備註：${formNote}`;
     if (updatedNote) {
       if (!updatedNote.includes(userNoteTag)) {
         updatedNote = `${updatedNote}\n${userNoteTag}`;
@@ -187,8 +199,11 @@ export async function submitNewStudentProfileAction(formData: FormData) {
     emergencyContactName: emergencyContactName || existing?.emergencyContactName || "",
     emergencyContactPhone: emergencyContactPhone || existing?.emergencyContactPhone || "",
     beautyRelated: beautyRelated || existing?.beautyRelated || "",
+    plannedBusinessCategories: plannedBusinessCategories.length > 0 ? plannedBusinessCategories : existing?.plannedBusinessCategories || [],
+    plannedBusinessCategoryOther: plannedBusinessCategoryOther || existing?.plannedBusinessCategoryOther || "",
+    memberNo,
     note: updatedNote,
-    source: "新生自填入口",
+    source: "?啁??芸‵?亙",
     isActive: true,
     needsReview: true,
     createdAt: existing?.createdAt ?? new Date().toISOString(),
@@ -201,8 +216,11 @@ export async function submitNewStudentProfileAction(formData: FormData) {
     revalidatePath("/admin/students");
     revalidatePath("/new-student");
   } catch {
-    // 忽略在獨立測試環境下 Next.js 靜態快取存儲未就緒的錯誤
+    // 敹賜?函蝡葫閰衣憓? Next.js ??敹怠?摮?芸停蝺??航炊
   }
 
   redirect(`/new-student/success?name=${encodeURIComponent(name)}&idNumberLast3=${encodeURIComponent(idNumberLast3)}`);
 }
+
+
+

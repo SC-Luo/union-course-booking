@@ -4,6 +4,7 @@ import {
   saveCourseSeriesAction,
 } from "@/app/admin/actions";
 import { AdminShell } from "@/components/page-shell";
+import Link from "next/link";
 import { courseTypes, professionalCategories } from "@/lib/course-coding";
 import { getBookingData } from "@/lib/booking-repository";
 import { CourseMasterCodeField } from "./CourseMasterCodeField";
@@ -11,7 +12,7 @@ import { CourseMasterCodeField } from "./CourseMasterCodeField";
 export const dynamic = "force-dynamic";
 
 type PageProps = {
-  searchParams: Promise<{ saved?: string; error?: string }>;
+  searchParams: Promise<{ saved?: string; error?: string; categoryId?: string; status?: string; q?: string }>;
 };
 
 const defaultCategoryColors: Record<string, string> = {
@@ -106,7 +107,7 @@ function InstructorSelectField({
 }
 
 export default async function CourseMastersPage({ searchParams }: PageProps) {
-  const { saved, error } = await searchParams;
+  const { saved, error, categoryId, status, q } = await searchParams;
   const { categories, courseSeries, courseOfferings, courses, instructors = [] } = await getBookingData();
   const presetCategoryIds = new Set(professionalCategories.map((category) => category.id));
   const presetCategories = professionalCategories.map((base) => {
@@ -139,8 +140,74 @@ export default async function CourseMastersPage({ searchParams }: PageProps) {
   });
   const activeCategories = mergedCategories.filter((category) => category.isActive);
   const getCategoryName = (id?: string) => mergedCategories.find((item) => item.id === id)?.name ?? id ?? "未分類";
+
+  const selectedCategoryFilter = categoryId && activeCategories.some((c) => c.id === categoryId) ? categoryId : "all";
+  const statusFilter = ["all", "active", "inactive"].includes(status ?? "") ? (status ?? "all") : "all";
+  const filterQuery = String(q ?? "").trim().toLowerCase();
+
   const sortedSeries = courseSeries.slice().sort((a, b) => (a.code ?? a.title).localeCompare(b.code ?? b.title));
   const existingCodes = courseSeries.map((series) => series.code).filter(Boolean) as string[];
+
+  const categoryTabs = [
+    {
+      id: "all",
+      title: "全部類別",
+      count: courseSeries.length,
+    },
+    ...activeCategories.map((category) => ({
+      id: category.id,
+      title: category.name,
+      count: courseSeries.filter((series) => series.categoryId === category.id).length,
+    })),
+  ];
+
+  const statusCounts = courseSeries.reduce(
+    (acc, series) => {
+      acc.all += 1;
+      if (series.isActive !== false) acc.active += 1;
+      else acc.inactive += 1;
+      return acc;
+    },
+    { all: 0, active: 0, inactive: 0 }
+  );
+
+  const statusTabs = [
+    { id: "all", label: "全部狀態" },
+    { id: "active", label: "啟用" },
+    { id: "inactive", label: "停用" },
+  ] as const;
+
+  const buildCourseSeriesHref = ({
+    nextCategoryId = selectedCategoryFilter,
+    nextStatus = statusFilter,
+  }: {
+    nextCategoryId?: string;
+    nextStatus?: string;
+  } = {}) => {
+    const params = new URLSearchParams();
+    if (nextCategoryId !== "all") params.set("categoryId", nextCategoryId);
+    if (nextStatus !== "all") params.set("status", nextStatus);
+    if (q) params.set("q", q);
+    const query = params.toString();
+    return query ? `/admin/course-masters?${query}` : "/admin/course-masters";
+  };
+
+  const filteredSeries = sortedSeries
+    .filter((series) => {
+      if (selectedCategoryFilter !== "all" && series.categoryId !== selectedCategoryFilter) return false;
+      if (statusFilter === "active" && series.isActive === false) return false;
+      if (statusFilter === "inactive" && series.isActive !== false) return false;
+      if (filterQuery) {
+        const title = series.title || "";
+        const code = series.code || "";
+        const catName = getCategoryName(series.categoryId) || "";
+        const statusLabel = series.isActive ? "啟用" : "停用";
+        return [title, code, catName, statusLabel].some((val) =>
+          String(val).toLowerCase().includes(filterQuery)
+        );
+      }
+      return true;
+    });
 
   return (
     <AdminShell currentSection="course-settings.master">
@@ -201,8 +268,94 @@ export default async function CourseMastersPage({ searchParams }: PageProps) {
         </div>
       </details>
 
-      <section className="grid gap-4">
-        {sortedSeries.map((series) => {
+      <section className="mb-6 rounded-[30px] border border-[#ead8ca] bg-[#fffdf9] p-5 shadow-[0_16px_45px_rgba(90,55,38,0.07)] sm:p-6">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-sm font-bold text-[#B46F4A]">課程篩選</p>
+            <h2 className="mt-1 text-xl font-black text-[#1f1712]">篩選課程目錄</h2>
+            <p className="mt-1 text-sm leading-6 text-[#8a7c72]">
+              先選類別與狀態，再搜尋關鍵字。目前顯示：共 {filteredSeries.length} 個課程主檔
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-5 space-y-4">
+          {/* Search bar */}
+          <form className="flex gap-2">
+            {selectedCategoryFilter !== "all" && <input type="hidden" name="categoryId" value={selectedCategoryFilter} />}
+            {statusFilter !== "all" && <input type="hidden" name="status" value={statusFilter} />}
+            <input
+              name="q"
+              defaultValue={q}
+              placeholder="搜尋課程名稱、課程代碼、類別..."
+              className="h-11 flex-1 rounded-2xl border border-[#ead8ca] bg-white px-4 text-sm text-[#5A3726] shadow-sm outline-none focus:border-[#ef6c00] focus:ring-2 focus:ring-[#f7c58d]/40"
+            />
+            <button className="rounded-2xl bg-[#5A3726] px-5 py-2 text-sm font-bold text-white shadow-sm hover:brightness-105">
+              搜尋
+            </button>
+            {q && (
+              <Link href={`/admin/course-masters?categoryId=${encodeURIComponent(selectedCategoryFilter)}&status=${encodeURIComponent(statusFilter)}`} className="rounded-2xl border border-[#ead8ca] bg-white px-4 py-2.5 text-sm font-bold text-[#5A3726] hover:bg-[#fff6ed]">
+                清除
+              </Link>
+            )}
+          </form>
+
+          {/* Categories */}
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#B46F4A] mb-2">課程類別</p>
+            <div className="flex flex-wrap gap-2">
+              {categoryTabs.map((tab) => {
+                const isActive = selectedCategoryFilter === tab.id;
+                return (
+                  <Link
+                    key={tab.id}
+                    href={buildCourseSeriesHref({ nextCategoryId: tab.id })}
+                    className={
+                      isActive
+                        ? "rounded-2xl bg-[#E85F00] px-4 py-2 text-sm font-black text-white shadow-sm"
+                        : "rounded-2xl border border-[#ead8ca] bg-white px-4 py-2 text-sm font-black text-[#5A3726] hover:bg-[#fff6ed]"
+                    }
+                  >
+                    {tab.title}
+                    <span className={isActive ? "ml-1.5 rounded-full bg-white/20 px-1.5 py-0.5 text-xs" : "ml-1.5 rounded-full bg-[#fff6ed] px-1.5 py-0.5 text-xs text-[#8B5035]"}>
+                      {tab.count}
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Status */}
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#B46F4A] mb-2">課程狀態</p>
+            <div className="flex flex-wrap gap-2">
+              {statusTabs.map((tab) => {
+                const isActive = statusFilter === tab.id;
+                return (
+                  <Link
+                    key={tab.id}
+                    href={buildCourseSeriesHref({ nextStatus: tab.id })}
+                    className={
+                      isActive
+                        ? "rounded-2xl bg-[#5A3726] px-4 py-2 text-sm font-black text-white shadow-sm"
+                        : "rounded-2xl border border-[#ead8ca] bg-white px-4 py-2 text-sm font-black text-[#5A3726] hover:bg-[#fff6ed]"
+                    }
+                  >
+                    {tab.label}
+                    <span className={isActive ? "ml-1.5 rounded-full bg-white/20 px-1.5 py-0.5 text-xs" : "ml-1.5 rounded-full bg-[#fff6ed] px-1.5 py-0.5 text-xs text-[#8B5035]"}>
+                      {statusCounts[tab.id]}
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {filteredSeries.map((series) => {
           const offeringCount = courseOfferings.filter((offering) => offering.seriesId === series.id || offering.courseSeriesId === series.id || offering.courseMasterId === series.id).length;
           const legacyCount = courses.filter((course) => course.seriesId === series.id || course.courseSeriesId === series.id || course.courseMasterId === series.id).length;
           const hasRelations = offeringCount > 0 || legacyCount > 0;
@@ -212,66 +365,87 @@ export default async function CourseMastersPage({ searchParams }: PageProps) {
           const categoryName = category?.name ?? getCategoryName(series.categoryId);
 
           return (
-            <article key={series.id} className="overflow-hidden rounded-[28px] border border-[#ead8ca] bg-white shadow-sm">
-              <div className="h-2 w-full" style={{ backgroundColor: categoryColor }} />
-              <div className="p-5 sm:p-6">
-                <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-full bg-[#fff6ed] px-3 py-1 text-xs font-bold text-[#8B5035]">{series.code ?? series.id}</span>
-                      <span className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold" style={{ borderColor: `${categoryColor}55`, backgroundColor: `${categoryColor}14`, color: categoryColor }}>
-                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: categoryColor }} />
+            <article key={series.id} className="overflow-hidden rounded-[24px] border border-[#ead8ca] bg-white shadow-[0_8px_24px_rgba(90,55,38,0.04)] flex flex-col justify-between">
+              <div>
+                <div className="h-1 w-full" style={{ backgroundColor: categoryColor }} />
+                <div className="p-4">
+                  {/* Top tags */}
+                  <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+                    <span className="text-[11px] font-black uppercase text-[#B46F4A] tracking-wider">
+                      {series.code ?? series.id}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold" style={{ borderColor: `${categoryColor}55`, backgroundColor: `${categoryColor}14`, color: categoryColor }}>
+                        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: categoryColor }} />
                         {categoryName}
                       </span>
-                      <span className="rounded-full bg-[#fffaf5] px-3 py-1 text-xs font-semibold text-[#66584f]">{courseTypeName(series.courseType)}</span>
+                      <span className="rounded-full bg-[#fffaf5] px-2 py-0.5 text-[10px] font-semibold text-[#66584f]">{courseTypeName(series.courseType)}</span>
                       <StatusPill active={series.isActive} />
                     </div>
-                    <h2 className="mt-3 text-2xl font-black text-[#1f1712]">{series.title}</h2>
-                    <p className="mt-2 max-w-3xl text-sm leading-6 text-[#66584f]">{series.description || "尚未填寫課程說明。"}</p>
                   </div>
 
-                  <div className="flex shrink-0 flex-wrap gap-2 xl:justify-end">
-                    <a href={`/admin/course-offerings?seriesId=${series.id}`} className="rounded-2xl bg-[#5A3726] px-4 py-2 text-sm font-bold text-white hover:brightness-105">建立期別</a>
-                    <form action={disableCourseSeriesAction}>
-                      <input type="hidden" name="id" value={series.id} />
-                      <input type="hidden" name="isActive" value={series.isActive ? "false" : "true"} />
-                      <button
-                        className={
-                          series.isActive
-                            ? "rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100"
-                            : "rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100"
-                        }
-                      >
-                        {series.isActive ? "停用" : "啟用"}
-                      </button>
-                    </form>
-                    <form action={deleteCourseSeriesAction}>
-                      <input type="hidden" name="id" value={series.id} />
-                      <button disabled={hasRelations} className="rounded-2xl border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40">刪除</button>
-                    </form>
+                  {/* Title and description */}
+                  <div>
+                    <h3 className="text-base font-black text-zinc-950 line-clamp-2 min-h-[2.5rem] leading-tight">
+                      {series.title}
+                    </h3>
+                    <p className="mt-1.5 text-xs text-zinc-500 line-clamp-2 min-h-[2rem]">
+                      {series.description || "尚未填寫課程說明。"}
+                    </p>
                   </div>
-                </div>
 
-                <div className="mt-5 grid gap-2 text-sm sm:grid-cols-4">
-                  <div className="rounded-2xl bg-[#fffaf5] px-4 py-3"><span className="block text-xs text-[#8a7c72]">年度課程</span><span className="font-black text-[#1f1712]">{offeringCount}</span></div>
-                  <div className="rounded-2xl bg-[#fffaf5] px-4 py-3"><span className="block text-xs text-[#8a7c72]">預設名額</span><span className="font-black text-[#1f1712]">{series.defaultCapacity ?? "未設"}</span></div>
-                  <div className="rounded-2xl bg-[#fffaf5] px-4 py-3"><span className="block text-xs text-[#8a7c72]">預設講師</span><span className="font-black text-[#1f1712]">{series.defaultInstructorName ?? "未設"}</span></div>
-                  <div className="rounded-2xl bg-[#fffaf5] px-4 py-3"><span className="block text-xs text-[#8a7c72]">預設地點</span><span className="font-black text-[#1f1712]">{series.defaultLocation || "未設"}</span></div>
-                </div>
-
-                <details className="mt-5 rounded-[24px] border border-[#ead8ca] bg-[#fffaf5] p-4">
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-4">
+                  {/* Metadata Grid */}
+                  <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-zinc-600 bg-[#fffdfa] p-3 rounded-2xl border border-[#f0dfd2]">
                     <div>
-                      <p className="text-sm font-black text-[#1f1712]">編輯課程目錄</p>
-                      <p className="mt-1 text-xs leading-5 text-[#8a7c72]">平常只看課程摘要；需要調整名稱、分類、預設名額或地點時再展開。</p>
+                      <p className="text-[10px] font-bold text-zinc-400">年度課程數</p>
+                      <p className="font-black text-zinc-800 mt-0.5">{offeringCount}</p>
                     </div>
-                    <span className="rounded-2xl border border-[#dbcabd] bg-white px-4 py-2 text-sm font-black text-[#5A3726]">展開編輯</span>
+                    <div>
+                      <p className="text-[10px] font-bold text-zinc-400">預設名額</p>
+                      <p className="font-black text-zinc-800 mt-0.5">{series.defaultCapacity ?? "未設"}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-zinc-400">預設主要講師</p>
+                      <p className="font-black text-zinc-800 truncate mt-0.5" title={series.defaultInstructorName || "未設"}>
+                        {series.defaultInstructorName ?? "未設"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-zinc-400">預設授課地點</p>
+                      <p className="font-black text-zinc-800 truncate mt-0.5" title={series.defaultLocation || "未設"}>
+                        {series.defaultLocation || "未設"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bottom actions */}
+              <div className="border-t border-[#f3ede8] bg-[#fffdfa] p-3 flex flex-wrap gap-2 items-center">
+                <a href={`/admin/course-offerings?seriesId=${series.id}`} className="flex-1 text-center py-2 rounded-xl bg-[#5A3726] text-xs font-bold text-white hover:brightness-105">
+                  建立期別
+                </a>
+                <form action={disableCourseSeriesAction} className="flex-1">
+                  <input type="hidden" name="id" value={series.id} />
+                  <input type="hidden" name="isActive" value={series.isActive ? "false" : "true"} />
+                  <button className={series.isActive ? "w-full text-center py-2 rounded-xl border border-rose-200 bg-rose-50 text-xs font-bold text-rose-700 hover:bg-rose-100" : "w-full text-center py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-xs font-bold text-emerald-700 hover:bg-emerald-100"}>
+                    {series.isActive ? "停用" : "啟用"}
+                  </button>
+                </form>
+                <form action={deleteCourseSeriesAction} className="flex-1">
+                  <input type="hidden" name="id" value={series.id} />
+                  <button disabled={hasRelations} className="w-full text-center py-2 rounded-xl border border-rose-200 bg-white text-xs font-bold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40">
+                    刪除
+                  </button>
+                </form>
+
+                <details className="w-full mt-2 rounded-xl border border-[#ead8ca] bg-[#fffaf5] p-2">
+                  <summary className="flex cursor-pointer list-none items-center justify-between text-xs font-bold text-[#5A3726]">
+                    <span>編輯課程目錄</span>
+                    <span className="text-[10px] border border-[#dbcabd] bg-white px-2 py-0.5 rounded-lg">展開</span>
                   </summary>
-                  <form action={saveCourseSeriesAction} className="mt-4 grid gap-4 rounded-[22px] border border-[#ead8ca] bg-white p-4 xl:grid-cols-2">
+                  <form action={saveCourseSeriesAction} className="mt-2 grid gap-3 rounded-lg border border-[#ead8ca] bg-white p-3">
                     <input type="hidden" name="id" value={series.id} />
-                    <div className="rounded-2xl border border-[#ead8ca] bg-[#fffaf5]/70 p-3 text-xs leading-5 text-[#8a7c72] xl:col-span-2">
-                      先確認所屬類別與課程類型；若組合改變，目錄代碼會重新自動產生，代表色也會同步跟隨類別更新。
-                    </div>
                     <CourseMasterCodeField
                       categories={activeCategories}
                       courseTypes={courseTypes}
@@ -280,28 +454,35 @@ export default async function CourseMastersPage({ searchParams }: PageProps) {
                       initialCourseType={series.courseType}
                       initialCode={series.code}
                     />
-                    <label className="grid min-h-[104px] content-start gap-2 text-sm font-semibold text-[#4e4038]">
+                    <label className="grid gap-1 text-xs font-semibold text-[#4e4038]">
                       <span>課程名稱</span>
-                      <input name="title" defaultValue={series.title} className="h-12 rounded-2xl border border-[#dbcabd] px-3 font-normal" />
-                      <span className="min-h-[20px] text-xs font-normal leading-5 text-[#8a7c72]">目錄名稱不含年度、期別與日期。</span>
+                      <input name="title" defaultValue={series.title} className="h-9 rounded-xl border border-[#dbcabd] px-2 font-normal" />
                     </label>
-                    <label className="grid gap-1 text-sm font-semibold text-[#4e4038]">預設名額<input name="defaultCapacity" type="number" defaultValue={series.defaultCapacity} className="rounded-2xl border border-[#dbcabd] px-3 py-3 font-normal" /></label>
-                    <label className="grid gap-1 text-sm font-semibold text-[#4e4038]">預設地點<input name="defaultLocation" defaultValue={series.defaultLocation} className="rounded-2xl border border-[#dbcabd] px-3 py-3 font-normal" /></label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="grid gap-1 text-xs font-semibold text-[#4e4038]">預設名額<input name="defaultCapacity" type="number" defaultValue={series.defaultCapacity} className="h-9 rounded-xl border border-[#dbcabd] px-2 font-normal" /></label>
+                      <label className="grid gap-1 text-xs font-semibold text-[#4e4038]">預設地點<input name="defaultLocation" defaultValue={series.defaultLocation} className="h-9 rounded-xl border border-[#dbcabd] px-2 font-normal" /></label>
+                    </div>
                     <InstructorSelectField
                       categoryId={series.categoryId}
                       categories={activeCategories}
                       instructors={instructors}
                       selectedInstructorId={findInstructorSelection(series.defaultInstructorId, series.defaultInstructorName, instructors)}
                     />
-                    <label className="grid gap-1 text-sm font-semibold text-[#4e4038] xl:col-span-2">課程說明<textarea name="description" defaultValue={series.description} className="min-h-24 rounded-2xl border border-[#dbcabd] px-3 py-3 font-normal" /></label>
+                    <label className="grid gap-1 text-xs font-semibold text-[#4e4038]">課程說明<textarea name="description" defaultValue={series.description} className="min-h-16 rounded-xl border border-[#dbcabd] px-2 py-1 font-normal" /></label>
                     <input type="hidden" name="isActive" value={series.isActive ? "true" : "false"} />
-                    <button className="rounded-2xl bg-gradient-to-r from-[#E85F00] to-[#B46F4A] px-4 py-3 text-sm font-bold text-white xl:col-span-2">儲存編輯</button>
+                    <button className="h-9 rounded-xl bg-gradient-to-r from-[#E85F00] to-[#B46F4A] text-xs font-bold text-white">儲存編輯</button>
                   </form>
                 </details>
               </div>
             </article>
           );
         })}
+        {filteredSeries.length === 0 ? (
+          <div className="col-span-full rounded-[28px] border border-dashed border-[#ead8ca] bg-white px-6 py-12 text-center shadow-[0_12px_34px_rgba(90,55,38,0.04)]">
+            <p className="text-lg font-black text-[#1f1712]">目前沒有符合條件的課程主檔</p>
+            <p className="mt-2 text-sm font-semibold text-[#8a7c72]">可以切回全部類別或狀態查看其他課程。</p>
+          </div>
+        ) : null}
       </section>
     </AdminShell>
   );

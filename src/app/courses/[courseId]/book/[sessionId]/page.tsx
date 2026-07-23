@@ -2,14 +2,12 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { BookingForm } from "@/components/booking-form";
 import { StudentShell } from "@/components/page-shell";
-import { getCourseCatalog } from "@/lib/booking-repository";
+import { getBookingPageData } from "@/lib/booking-repository";
 import {
   canChangeReservation,
   formatReservationCutoff,
-  getCourse,
   getCourseModeInfo,
   getRemainingSeats,
-  getSession,
   getWeekday,
   isBookingCourse,
 } from "@/lib/course-utils";
@@ -18,19 +16,41 @@ type PageProps = {
   params: Promise<{ courseId: string; sessionId: string }>;
 };
 
+function isFirestoreQuotaError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /RESOURCE_EXHAUSTED|Quota exceeded/i.test(message);
+}
+
 function isBookableStatus(status?: string) {
   return ["scheduled", "rescheduled", "makeup", undefined, ""].includes(status);
 }
 
 export default async function BookingPage({ params }: PageProps) {
   const { courseId, sessionId } = await params;
-  const { courses } = await getCourseCatalog();
-  const decodedCourseId = decodeURIComponent(courseId);
-  const decodedSessionId = decodeURIComponent(sessionId);
-  const course = getCourse(decodedCourseId, courses);
-  const session = course ? getSession(course, decodedSessionId) ?? getSession(decodedSessionId, courses) : undefined;
+  let bookingPageData = null;
+  try {
+    bookingPageData = await getBookingPageData(courseId, sessionId);
+  } catch (error) {
+    const message = isFirestoreQuotaError(error)
+      ? "目前系統資料暫時忙碌，請稍後再試。"
+      : "目前無法載入預約資料，請稍後再試。";
 
-  if (!course || !session) notFound();
+    return (
+      <StudentShell>
+        <Link href={`/courses/${encodeURIComponent(courseId)}`} className="mb-6 inline-flex rounded-full border border-[#d8bda4] bg-white px-4 py-2 text-sm font-semibold text-[#6f4325] hover:bg-[#fff4e8]">
+          返回課程詳情
+        </Link>
+        <section className="rounded-[1.75rem] border border-amber-200 bg-amber-50 p-6 text-sm leading-7 text-amber-900 shadow-sm">
+          <p className="text-base font-bold">目前無法載入預約頁面</p>
+          <p className="mt-2">{message}</p>
+        </section>
+      </StudentShell>
+    );
+  }
+
+  if (!bookingPageData) notFound();
+
+  const { course, session } = bookingPageData;
 
   const modeInfo = getCourseModeInfo(course);
   const isBookingMode = isBookingCourse(course);

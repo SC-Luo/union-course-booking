@@ -60,7 +60,13 @@ export function StudentDirectoryPage({
       ) : null}
       {error ? (
         <p className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-3 text-sm font-bold text-rose-700">
-          送出失敗，請確認姓名、證件末三碼與手機號碼是否完整。
+          {error === "has_relations"
+            ? "此學員已有預約、名冊或點名紀錄，為避免資料不一致，請先停用或清除關聯資料後再刪除。"
+            : error === "student_not_found"
+            ? "找不到該學員資料。"
+            : error === "invalid"
+            ? "送出失敗，請確認姓名、證件末三碼與手機號碼是否完整。"
+            : decodeURIComponent(error)}
         </p>
       ) : null}
 

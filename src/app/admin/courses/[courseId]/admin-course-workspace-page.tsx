@@ -652,6 +652,39 @@ export default async function AdminCourseWorkspacePage({
                   />
                 </label>
               </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                <label className="grid gap-1 text-xs font-medium text-zinc-600">
+                  預約規則 (bookingPolicy)
+                  <select
+                    name="bookingPolicy"
+                    defaultValue={course.bookingPolicy ?? "per_session"}
+                    className="rounded-md border border-zinc-300 bg-white px-3 py-3 text-sm font-semibold"
+                  >
+                    <option value="per_session">單堂可預約 (預設)</option>
+                    <option value="one_per_course">同課程限預約一次</option>
+                    <option value="one_per_cycle">每週限預約一個時段 (週日到週六)</option>
+                  </select>
+                </label>
+                <label className="grid gap-1 text-xs font-medium text-zinc-600">
+                  預約限制群組 ID (bookingQuotaGroupId)
+                  <input
+                    name="bookingQuotaGroupId"
+                    defaultValue={course.bookingQuotaGroupId ?? ""}
+                    placeholder="留空預設為本課程 ID"
+                    className="rounded-md border border-zinc-300 bg-white px-3 py-3 text-sm"
+                  />
+                </label>
+                <label className="grid gap-1 text-xs font-medium text-zinc-600">
+                  每週期最大預約數
+                  <input
+                    name="maxReservationsPerCycle"
+                    type="number"
+                    min={1}
+                    defaultValue={course.maxReservationsPerCycle ?? 1}
+                    className="rounded-md border border-zinc-300 bg-white px-3 py-3 text-sm"
+                  />
+                </label>
+              </div>
               <textarea
                 name="description"
                 defaultValue={course.description}

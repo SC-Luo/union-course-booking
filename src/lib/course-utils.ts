@@ -56,8 +56,7 @@ export function getCategoryName(
 
 export type NormalizedCourseMode =
   | "booking_flexible"
-  | "fixed_roster"
-  | "subsidy_roster";
+  | "fixed_roster";
 
 export type CourseModeInfo = {
   mode: NormalizedCourseMode;
@@ -97,20 +96,13 @@ export function getNormalizedCourseMode(
 
   if (
     [
+      "fixed_roster",
+      "roster_fixed",
+      "fixed_roster_exam",
       "subsidy_roster",
       "subsidy_fixed_roster",
       "grant_roster",
       "funded_roster",
-    ].includes(mode)
-  ) {
-    return "subsidy_roster";
-  }
-
-  if (
-    [
-      "fixed_roster",
-      "roster_fixed",
-      "fixed_roster_exam",
       "roster",
       "attendance_roster",
     ].includes(mode)
@@ -124,11 +116,7 @@ export function getNormalizedCourseMode(
     return "booking_flexible";
   }
 
-  if (["subsidy", "subsidy_roster", "grant", "funded"].includes(rosterType)) {
-    return "subsidy_roster";
-  }
-
-  if (["fixed", "roster_fixed", "fixed_roster"].includes(rosterType)) {
+  if (["fixed", "roster_fixed", "fixed_roster", "subsidy", "subsidy_roster", "grant", "funded"].includes(rosterType)) {
     return "fixed_roster";
   }
 
@@ -167,36 +155,23 @@ export function getCourseModeInfo(
   if (mode === "booking_flexible") {
     return {
       mode,
-      label: "預約制課程",
+      label: "預約制",
       shortLabel: "預約制",
-      frontTitle: "選擇上課單元與時段",
+      frontTitle: "可預約時段",
       frontDescription:
-        "這類課程可由學員自行選擇可預約時段；名額額滿、鎖定或停課時不可預約。",
+        "學員可從前台選擇開放日期預約，並依名額與預約規則控管。",
       badgeClassName: "border-emerald-200 bg-emerald-50 text-emerald-800",
       isBookingEnabled: true,
     };
   }
 
-  if (mode === "subsidy_roster") {
-    return {
-      mode,
-      label: "補助固定名冊",
-      shortLabel: "補助名冊",
-      frontTitle: "固定課表與出席紀錄",
-      frontDescription:
-        "這類課程以正式名冊為準，不開放自行預約。系統將用於每堂點名、出缺勤累計與補助課程紀錄。",
-      badgeClassName: "border-sky-200 bg-sky-50 text-sky-800",
-      isBookingEnabled: false,
-    };
-  }
-
   return {
     mode,
-    label: "固定名冊課程",
-    shortLabel: "固定名冊",
-    frontTitle: "固定課表與出席紀錄",
+    label: "固定名冊制",
+    shortLabel: "固定名冊制",
+    frontTitle: "固定名冊班級",
     frontDescription:
-      "這類課程以班級名冊為準，不開放自行預約。學員依既定課表出席，系統將用於每堂點名與出缺勤累計。",
+      "此班級以前置名冊與點名為主，不開放前台自行預約。",
     badgeClassName: "border-amber-200 bg-amber-50 text-amber-900",
     isBookingEnabled: false,
   };
@@ -523,3 +498,131 @@ export function getWeekday(date: string) {
   const weekdays = ["日", "一", "二", "三", "四", "五", "六"];
   return `週${weekdays[parsed.getDay()]}`;
 }
+
+export function getBookingCycleRange(dateStr: string) {
+  const normalized = dateStr.trim().split("T")[0];
+  const date = new Date(`${normalized}T12:00:00`);
+  if (Number.isNaN(date.getTime())) {
+    return { sundayStr: "", saturdayStr: "", key: "" };
+  }
+
+  const dayOfWeek = date.getDay();
+
+  const sunday = new Date(date);
+  sunday.setDate(date.getDate() - dayOfWeek);
+
+  const saturday = new Date(sunday);
+  saturday.setDate(sunday.getDate() + 6);
+
+  const formatDate = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const r = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${r}`;
+  };
+
+  const sundayStr = formatDate(sunday);
+  const saturdayStr = formatDate(saturday);
+
+  return {
+    sundayStr,
+    saturdayStr,
+    key: `${sundayStr}~${saturdayStr}`
+  };
+}
+
+export function getBookingCycleKey(dateStr: string): string {
+  return getBookingCycleRange(dateStr).key;
+}
+
+export function resolveEffectiveBookingPolicy({
+  course,
+  offering,
+  series,
+}: {
+  course?: Partial<Course> | null;
+  offering?: Partial<CourseOffering> | null;
+  series?: Partial<CourseSeries> | null;
+}) {
+  // 1. Resolve bookingPolicy
+  let bookingPolicy = course?.bookingPolicy || offering?.bookingPolicy || series?.bookingPolicy;
+
+  const courseMode = course?.courseMode || offering?.courseMode || series?.defaultCourseMode;
+  const rosterType = course?.rosterType || offering?.rosterType;
+  const isBooking = getNormalizedCourseMode({ courseMode, rosterType }) === "booking_flexible";
+
+  if (!bookingPolicy) {
+    if (isBooking) {
+      bookingPolicy = "per_session";
+    } else {
+      bookingPolicy = "none";
+    }
+  }
+
+  // fixed_roster 不套用 one_per_cycle
+  if (!isBooking && bookingPolicy === "one_per_cycle") {
+    bookingPolicy = "none";
+  }
+
+  // 2. Resolve bookingQuotaGroupId
+  let bookingQuotaGroupId = course?.bookingQuotaGroupId || offering?.bookingQuotaGroupId || series?.bookingQuotaGroupId;
+  if (!bookingQuotaGroupId) {
+    bookingQuotaGroupId = course?.offeringId || offering?.id || course?.id || "";
+  }
+
+  // 3. Resolve maxReservationsPerCycle
+  let maxReservationsPerCycle = course?.maxReservationsPerCycle ?? offering?.maxReservationsPerCycle ?? series?.maxReservationsPerCycle;
+  if (maxReservationsPerCycle == null) {
+    if (bookingPolicy === "one_per_cycle") {
+      maxReservationsPerCycle = 1;
+    }
+  }
+
+  return {
+    bookingPolicy,
+    bookingQuotaGroupId,
+    maxReservationsPerCycle,
+  };
+}
+
+export type PublicBookingBadge = "full" | "closed" | "fixed_roster" | "one_per_cycle" | "bookable";
+
+export function getPublicBookingBadge(
+  course: Pick<Course, "courseMode" | "rosterType" | "bookingOpen" | "bookingPolicy" | "isActive">,
+  session: Pick<CourseSession, "capacity" | "bookedCount" | "date" | "bookingDeadline" | "isActive" | "status" | "sessionStatus">
+): { status: PublicBookingBadge; label: string } {
+  // 1. 額滿
+  const remainingSeats = Math.max(session.capacity - session.bookedCount, 0);
+  if (remainingSeats <= 0) {
+    return { status: "full", label: "額滿" };
+  }
+
+  // 2. 報名截止 (或是停課、已取消等)
+  const isSessionActive = session.isActive !== false;
+  const sessionStatus = String(session.sessionStatus ?? session.status ?? "scheduled").trim() || "scheduled";
+  const isBookableByStatus = isSessionActive && sessionStatus !== "cancelled" && sessionStatus !== "suspended" && sessionStatus !== "rescheduled";
+  const hasEnded = (() => {
+    const cutoff = getReservationCutoff(session);
+    return new Date() > cutoff;
+  })();
+
+  if (!course.isActive || !isBookableByStatus || hasEnded) {
+    return { status: "closed", label: "報名截止" };
+  }
+
+  // 3. 固定名冊
+  const isFixed = isFixedRosterCourse(course);
+  if (isFixed) {
+    return { status: "fixed_roster", label: "固定名冊" };
+  }
+
+  // 4. 一週一次
+  if (course.bookingPolicy === "one_per_cycle") {
+    return { status: "one_per_cycle", label: "預約" };
+  }
+
+  // 5. 可預約
+  return { status: "bookable", label: "可預約" };
+}
+
+

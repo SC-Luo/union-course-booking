@@ -115,16 +115,18 @@ function FloatingModal({
   onClose,
   footerLeft,
   footerRight,
+  visible = true,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   footerLeft?: ReactNode;
   footerRight?: ReactNode;
+  visible?: boolean;
 }) {
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4 py-8"
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4 py-8 ${visible ? "" : "hidden"}`}
       role="dialog"
       aria-modal="true"
     >
@@ -255,11 +257,11 @@ export function StudentForm({
     note: false,
   });
   const [confirmedSections, setConfirmedSections] = useState<Record<SectionId, boolean>>({
-    basic: false,
-    contact: false,
-    background: false,
-    business: false,
-    note: false,
+    basic: student?.basicConfirmed ?? false,
+    contact: student?.contactConfirmed ?? false,
+    background: student?.backgroundConfirmed ?? false,
+    business: student?.businessConfirmed ?? false,
+    note: student?.noteConfirmed ?? false,
   });
 
   const initialName = splitChineseName(student?.name ?? "");
@@ -274,6 +276,14 @@ export function StudentForm({
     student?.idNumberLast3 ?? "",
   );
   const [phone, setPhone] = useState(student?.phone ?? "");
+  const [birthday, setBirthday] = useState(student?.birthday ?? "");
+  const [mailingAddress, setMailingAddress] = useState(student?.mailingAddress ?? student?.address ?? "");
+  const [plannedBusinessCategories, setPlannedBusinessCategories] = useState<string[]>(
+    student?.plannedBusinessCategories ?? [],
+  );
+  const [plannedBusinessCategoryOther, setPlannedBusinessCategoryOther] = useState(
+    student?.plannedBusinessCategoryOther ?? "",
+  );
 
   const combinedName = lastName + firstName;
   const combinedEnglishName =
@@ -283,13 +293,12 @@ export function StudentForm({
   const categoriesText = (student?.businessCategories ?? []).join("、");
 
   const derivedLast3 = nationalId ? extractLastThreeDigits(nationalId) : "";
-  const hasIdLast3 = idNumberLast3.length === 3;
-  const hasDerivedId = derivedLast3.length === 3;
   const basicRequiredOk =
     lastName.trim() !== "" &&
     firstName.trim() !== "" &&
-    (hasIdLast3 || hasDerivedId);
-  const contactRequiredOk = phone.trim() !== "";
+    nationalId.trim() !== "" &&
+    birthday.trim() !== "";
+  const contactRequiredOk = phone.trim() !== "" && mailingAddress.trim() !== "";
 
   function getSectionStatus(id: SectionId): SectionStatus {
     if (confirmedSections[id]) return "confirmed";
@@ -310,11 +319,15 @@ export function StudentForm({
       const missing: string[] = [];
       if (lastName.trim() === "") missing.push("姓氏");
       if (firstName.trim() === "") missing.push("名字");
-      if (!hasIdLast3 && !hasDerivedId) missing.push("證件末三碼");
+      if (nationalId.trim() === "") missing.push("證件字號");
+      if (birthday.trim() === "") missing.push("生日");
       return missing.length > 0 ? `缺少：${missing.join("、")}` : undefined;
     }
     if (id === "contact") {
-      if (phone.trim() === "") return "缺少：手機";
+      const missing: string[] = [];
+      if (phone.trim() === "") missing.push("手機");
+      if (mailingAddress.trim() === "") missing.push("通訊地址");
+      return missing.length > 0 ? `缺少：${missing.join("、")}` : undefined;
     }
     return undefined;
   }
@@ -357,6 +370,15 @@ export function StudentForm({
       <input type="hidden" name="nationalId" value={nationalId} />
       <input type="hidden" name="idNumberLast3" value={idNumberLast3 || derivedLast3} />
       <input type="hidden" name="phone" value={phone} />
+      <input type="hidden" name="memberNo" value={student?.memberNo || "系統自動編碼"} />
+      <input type="hidden" name="basicConfirmed" value={confirmedSections.basic ? "true" : "false"} />
+      <input type="hidden" name="contactConfirmed" value={confirmedSections.contact ? "true" : "false"} />
+      <input type="hidden" name="backgroundConfirmed" value={confirmedSections.background ? "true" : "false"} />
+      <input type="hidden" name="businessConfirmed" value={confirmedSections.business ? "true" : "false"} />
+      <input type="hidden" name="noteConfirmed" value={confirmedSections.note ? "true" : "false"} />
+      {plannedBusinessCategories.map((cat) => (
+        <input type="hidden" key={cat} name="plannedBusinessCategories" value={cat} />
+      ))}
 
       {/* progress row */}
       <div className="flex items-center gap-3 rounded-2xl border border-[#ead7c6] bg-white/80 px-5 py-3 text-sm shadow-sm">
@@ -426,10 +448,10 @@ export function StudentForm({
       </div>
 
       {/* SECTION: basic */}
-      {openSection === "basic" && (
-        <FloatingModal
-          title="基本資料"
-          onClose={handleCloseWithoutConfirm}
+      <FloatingModal
+        title="基本資料"
+        visible={openSection === "basic"}
+        onClose={handleCloseWithoutConfirm}
           footerLeft={
             basicRequiredOk ? (
               <span className="text-sm text-zinc-500">此區塊可以確認</span>
@@ -507,11 +529,14 @@ export function StudentForm({
 
             <FieldGroup
               title="證件與個人資訊"
-              description="身分證字號與證件末三碼擇一；系統會以末三碼作為快速識別。"
+              description="完整身分證字號與生日為必填項目；末三碼將由系統自完整身分證字號自動提取。"
             >
               <label className="text-sm font-bold text-zinc-700">
-                身分證字號<span className="ml-1 text-xs text-zinc-400">（與末三碼擇一）</span>
+                身分證字號
+                <RequiredMark />
                 <input
+                  required
+                  name="nationalId"
                   value={nationalId}
                   onChange={(e) => {
                     setNationalId(e.target.value);
@@ -521,7 +546,7 @@ export function StudentForm({
                 />
                 {numericThirdDigits.length >= 3 ? (
                   <HelperText>
-                    將使用末三碼：
+                    自動生成末三碼：
                     <span className="font-bold text-[#b85c1a]">
                       {extractLastThreeDigits(nationalId)}
                     </span>
@@ -529,9 +554,10 @@ export function StudentForm({
                 ) : null}
               </label>
               <label className="text-sm font-bold text-zinc-700">
-                證件末三碼<span className="ml-1 text-xs text-zinc-400">（與身分證字號擇一）</span>
+                證件末三碼<span className="ml-1 text-xs text-zinc-400">（由完整證件號自動生成，或手動覆蓋）</span>
                 <input
-                  value={idNumberLast3}
+                  name="idNumberLast3"
+                  value={idNumberLast3 || (nationalId ? extractLastThreeDigits(nationalId) : "")}
                   onChange={(e) => {
                     setIdNumberLast3(e.target.value.replace(/\D/g, "").slice(0, 3));
                     if (confirmedSections.basic) setConfirmedSections((prev) => ({ ...prev, basic: false }));
@@ -540,16 +566,19 @@ export function StudentForm({
                   inputMode="numeric"
                   className={fieldClassName()}
                 />
-                <HelperText>
-                  身分證字號或證件末三碼擇一；系統會以末三碼作為快速識別。
-                </HelperText>
               </label>
               <label className="text-sm font-bold text-zinc-700">
                 生日
+                <RequiredMark />
                 <input
+                  required
                   name="birthday"
-                  defaultValue={student?.birthday ?? ""}
-                  placeholder="YYYY-MM-DD"
+                  type="date"
+                  value={birthday}
+                  onChange={(e) => {
+                    setBirthday(e.target.value);
+                    if (confirmedSections.basic) setConfirmedSections((prev) => ({ ...prev, basic: false }));
+                  }}
                   className={fieldClassName()}
                 />
               </label>
@@ -578,8 +607,9 @@ export function StudentForm({
                 會員編號
                 <input
                   name="memberNo"
-                  defaultValue={student?.memberNo ?? ""}
-                  className={fieldClassName()}
+                  value={student?.memberNo || "系統自動編碼"}
+                  disabled
+                  className="h-11 rounded-2xl border border-zinc-200 bg-zinc-50 px-3 font-normal text-zinc-500 outline-none cursor-not-allowed w-full mt-1.5"
                 />
               </label>
               <label className="text-sm font-bold text-zinc-700">
@@ -603,13 +633,12 @@ export function StudentForm({
             </FieldGroup>
           </div>
         </FloatingModal>
-      )}
 
       {/* SECTION: contact */}
-      {openSection === "contact" && (
-        <FloatingModal
-          title="聯絡資料"
-          onClose={handleCloseWithoutConfirm}
+      <FloatingModal
+        title="聯絡資料"
+        visible={openSection === "contact"}
+        onClose={handleCloseWithoutConfirm}
           footerLeft={
             contactRequiredOk ? (
               <span className="text-sm text-zinc-500">此區塊可以確認</span>
@@ -682,9 +711,15 @@ export function StudentForm({
             <FieldGroup title="地址資訊">
               <label className="text-sm font-bold text-zinc-700 md:col-span-2">
                 通訊地址
+                <RequiredMark />
                 <input
                   name="mailingAddress"
-                  defaultValue={student?.mailingAddress ?? student?.address ?? ""}
+                  value={mailingAddress}
+                  onChange={(e) => {
+                    setMailingAddress(e.target.value);
+                    if (confirmedSections.contact) setConfirmedSections((prev) => ({ ...prev, contact: false }));
+                  }}
+                  required
                   className={fieldClassName()}
                 />
               </label>
@@ -718,13 +753,12 @@ export function StudentForm({
             </FieldGroup>
           </div>
         </FloatingModal>
-      )}
 
       {/* SECTION: background */}
-      {openSection === "background" && (
-        <FloatingModal
-          title="背景資料"
-          onClose={handleCloseWithoutConfirm}
+      <FloatingModal
+        title="背景資料"
+        visible={openSection === "background"}
+        onClose={handleCloseWithoutConfirm}
           footerLeft={
             <span className="text-sm text-zinc-500">此區塊可以確認，未來可再補資料</span>
           }
@@ -866,13 +900,12 @@ export function StudentForm({
             </FieldGroup>
           </div>
         </FloatingModal>
-      )}
 
       {/* SECTION: business */}
-      {openSection === "business" && (
-        <FloatingModal
-          title="創業與營業資料"
-          onClose={handleCloseWithoutConfirm}
+      <FloatingModal
+        title="創業與營業資料"
+        visible={openSection === "business"}
+        onClose={handleCloseWithoutConfirm}
           footerLeft={
             <span className="text-sm text-zinc-500">此區塊可以確認，未來可再補資料</span>
           }
@@ -966,6 +999,46 @@ export function StudentForm({
                   className={fieldClassName()}
                 />
               </label>
+            </FieldGroup>
+
+            <FieldGroup title="預計營業類別 (選填)">
+              <div className="md:col-span-2 flex flex-wrap gap-x-6 gap-y-2 mt-1.5">
+                {["美容", "美體", "美甲", "美睫", "熱蠟", "皮膚管理", "其他"].map((cat) => {
+                  const isChecked = plannedBusinessCategories.includes(cat);
+                  return (
+                    <label key={cat} className="flex items-center gap-2 cursor-pointer text-sm text-zinc-700">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={(e) => {
+                          const next = e.target.checked
+                            ? [...plannedBusinessCategories, cat]
+                            : plannedBusinessCategories.filter((x) => x !== cat);
+                          setPlannedBusinessCategories(next);
+                          if (confirmedSections.business) setConfirmedSections((prev) => ({ ...prev, business: false }));
+                        }}
+                        className="h-4 w-4 rounded border-zinc-300 text-[#6b3b25] focus:ring-[#6b3b25]/40"
+                      />
+                      {cat}
+                    </label>
+                  );
+                })}
+              </div>
+              {plannedBusinessCategories.includes("其他") && (
+                <label className="text-sm font-bold text-zinc-700 md:col-span-2">
+                  其他預計營業類別說明
+                  <input
+                    name="plannedBusinessCategoryOther"
+                    value={plannedBusinessCategoryOther}
+                    onChange={(e) => {
+                      setPlannedBusinessCategoryOther(e.target.value);
+                      if (confirmedSections.business) setConfirmedSections((prev) => ({ ...prev, business: false }));
+                    }}
+                    placeholder="請填寫其他預計營業類別"
+                    className={fieldClassName()}
+                  />
+                </label>
+              )}
             </FieldGroup>
 
             <FieldGroup title="營運內容">
@@ -1101,13 +1174,12 @@ export function StudentForm({
             </FieldGroup>
           </div>
         </FloatingModal>
-      )}
 
       {/* SECTION: note */}
-      {openSection === "note" && (
-        <FloatingModal
-          title="備註與來源"
-          onClose={handleCloseWithoutConfirm}
+      <FloatingModal
+        title="備註與來源"
+        visible={openSection === "note"}
+        onClose={handleCloseWithoutConfirm}
           footerLeft={
             <span className="text-sm text-zinc-500">此區塊可以確認，未來可再補資料</span>
           }
@@ -1154,7 +1226,6 @@ export function StudentForm({
             </FieldGroup>
           </div>
         </FloatingModal>
-      )}
 
       {/* bottom actions */}
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-[1.75rem] border border-[#ead7c6] bg-white p-5 shadow-sm">

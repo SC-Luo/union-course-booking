@@ -12,7 +12,10 @@ import {
 } from "@/app/admin/actions";
 import { AdminShell } from "@/components/page-shell";
 import { RosterFlowNav } from "@/components/roster-flow-nav";
-import { getBookingData } from "@/lib/booking-repository";
+import {
+  getBookingData,
+  getStudentEligibilityPageData,
+} from "@/lib/booking-repository";
 import type {
   CourseOffering,
   CourseSeries,
@@ -21,6 +24,7 @@ import type {
   StudentCourseRecord,
 } from "@/lib/types";
 import { StudentDirectoryPage } from "./student-directory-page";
+import { WithdrawStudentButton } from "./WithdrawStudentButton";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -41,6 +45,7 @@ type PageProps = {
     linked?: string;
     enrolled?: string;
     filter?: string;
+    message?: string;
   }>;
 };
 
@@ -292,7 +297,9 @@ function getYearOptions(
 function buildHref(params: Record<string, string | undefined>) {
   const query = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
-    if (value && value !== "all") query.set(key, value);
+    if (!value) return;
+    if (value === "all" && key !== "filter" && key !== "status") return;
+    query.set(key, value);
   });
   const qs = query.toString();
   return `/admin/students${qs ? `?${qs}` : ""}`;
@@ -429,10 +436,15 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
     linked,
     enrolled,
     filter: queryFilter,
+    message,
   } = await searchParams;
+  const currentMode = MODES.some(([key]) => key === mode) ? mode : "students";
   let bookingData;
   try {
-    bookingData = await getBookingData();
+    bookingData =
+      currentMode === "eligibility"
+        ? await getStudentEligibilityPageData(queryOfferingId)
+        : await getBookingData();
   } catch (error) {
     console.error("[admin/students] failed to load booking data", {
       message: error instanceof Error ? error.message : String(error),
@@ -466,7 +478,6 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
     categories = [],
   } = bookingData;
 
-  const currentMode = MODES.some(([key]) => key === mode) ? mode : "students";
   const instructorSpecialtyCategories = categories
     .filter((category) => category.isActive !== false)
     .sort((a, b) => Number(a.sortOrder ?? 0) - Number(b.sortOrder ?? 0));
@@ -541,9 +552,17 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
   const records = studentCourseRecords.filter((record) =>
     recordMatches(record, selectedSeriesId, selectedYear),
   );
-  const recordByStudentId = new Map(
-    records.map((record) => [record.studentId, record]),
-  );
+  const recordByStudentId = new Map<string, (typeof records)[number]>();
+  records.forEach((record) => {
+    const existing = recordByStudentId.get(record.studentId);
+    if (
+      !existing ||
+      (selectedOfferingId && record.offeringId === selectedOfferingId) ||
+      (!existing.offeringId && Boolean(record.offeringId))
+    ) {
+      recordByStudentId.set(record.studentId, record);
+    }
+  });
   const seriesById = new Map(courseSeries.map((item) => [item.id, item]));
   const offeringById = new Map(courseOfferings.map((item) => [item.id, item]));
 
@@ -827,7 +846,8 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
   const eligibilityEnrollments = eligibilityOfferingId
     ? enrollments.filter(
         (e) =>
-          e.offeringId === eligibilityOfferingId &&
+          (e.offeringId === eligibilityOfferingId ||
+            e.courseOfferingId === eligibilityOfferingId) &&
           !["withdrawn", "cancelled", "inactive"].includes(text(e.status)),
       )
     : [];
@@ -835,7 +855,12 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
     eligibilityEnrollments.map((e) => [e.studentId, text(e.status || "active")]),
   );
 
-  const currentFilter = currentMode === "eligibility" ? (queryFilter || "available") : "all";
+  const currentFilter =
+    currentMode === "eligibility"
+      ? ["available", "enrolled", "all"].includes(queryFilter ?? "")
+        ? (queryFilter as "available" | "enrolled" | "all")
+        : "available"
+      : "all";
   const enrolledStudentIds = new Set(eligibilityEnrollments.map((e) => e.studentId));
   const availableStudents = filteredStudents.filter((s) => !enrolledStudentIds.has(s.id));
   const enrolledStudentRows = students
@@ -867,15 +892,18 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
 
       {saved ? (
         <p className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-bold text-emerald-800">
-          已更新資料{imported ? `，本次處理 ${imported} 筆` : ""}
-          {linked ? `，建立 / 更新 ${linked} 筆課程狀態` : ""}
-          {enrolled ? `，加入 ${enrolled} 筆班級名單` : ""}
-          {skipped ? `，略過 ${skipped} 筆疑似錯位或資料不足的資料` : ""}。
+          {saved === "student-removed"
+            ? "已將學員退出班級。"
+            : `已更新資料${imported ? `，本次處理 ${imported} 筆` : ""}${linked ? `，建立 / 更新 ${linked} 筆課程狀態` : ""}${enrolled ? `，加入 ${enrolled} 筆班級名單` : ""}${skipped ? `，略過 ${skipped} 筆疑似錯位或資料不足的資料` : ""}。`}
         </p>
       ) : null}
       {error ? (
         <p className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-3 text-sm font-bold text-rose-800">
-          資料不足，請確認必填欄位、課程目錄、年度與勾選學員。
+          {error === "has-records" && message
+            ? decodeURIComponent(message)
+            : error === "failed" && message
+              ? `操作失敗：${decodeURIComponent(message)}`
+              : "資料不足，請確認必填欄位、課程目錄、年度與勾選學員。"}
         </p>
       ) : null}
 
@@ -1680,10 +1708,16 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
                               </span>
                             ) : null}
                           </div>
-                          <div className="text-right">
+                          <div className="text-right flex items-center justify-end gap-1.5 md:flex-row flex-col">
                             <span className="inline-block rounded-full bg-[#fff7ed] px-3 py-1 text-xs font-bold text-[#a65f3b]">
                               已加入
                             </span>
+                            <span className="hidden md:inline text-zinc-300">|</span>
+                            <WithdrawStudentButton
+                              studentId={student.id}
+                              offeringId={eligibilityOfferingId}
+                              redirectTo={buildHref({ mode: "eligibility", offeringId: eligibilityOfferingId, filter: currentFilter, q })}
+                            />
                           </div>
                         </div>
                       );
@@ -1812,10 +1846,16 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
                                   </span>
                                 ) : null}
                               </div>
-                              <div className="text-right">
+                              <div className="text-right flex items-center justify-end gap-1.5 md:flex-row flex-col">
                                 <span className="inline-block rounded-full bg-[#fff7ed] px-3 py-1 text-xs font-bold text-[#a65f3b]">
                                   已加入
                                 </span>
+                                <span className="hidden md:inline text-zinc-300">|</span>
+                                <WithdrawStudentButton
+                                  studentId={student.id}
+                                  offeringId={eligibilityOfferingId}
+                                  redirectTo={buildHref({ mode: "eligibility", offeringId: eligibilityOfferingId, filter: currentFilter, q })}
+                                />
                               </div>
                             </div>
                           );

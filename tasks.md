@@ -25,7 +25,14 @@ related:
 - [ ] 驗收授課工作台 `/teaching` 與 `/teaching/sessions/[sessionId]`：桌機入口、手機版摘要 / 點名 / 紀錄分頁、課堂設定 Modal、課堂紀錄 Modal、點名流程。
 - [ ] 驗收秘書處後台 `/admin`：首頁定位、角色切換、左側導覽分組是否需要再收斂。
 - [ ] 驗收年度課程頁 `/admin/course-offerings`：課程類別 + 課程狀態兩階段篩選、狀態切換、封存與恢復流程、管理 Modal。
-- [ ] 驗收課堂日誌頁 `/admin/course-sessions`：已封存課程是否完全退出選擇器、課程卡片與排課流程。
+- [ ] 實作「週期預約限制」機制：
+  - [ ] 擴充 `Course` 與 `CourseOffering` 資料模型，新增 `bookingPolicy` 與 `bookingQuotaGroupId` 欄位並設定預設 fallback 值。
+  - [ ] 於 `src/lib/booking-repository.ts` 之 `createReservation` 與 `createReservationInJson` 交易中，實作 `bookingCycleKey` 的週日到週六轉換，並加入限額判斷。
+  - [ ] 修改前台 `src/app/courses/[courseId]/page.tsx` 及 `src/components/course-full-calendar.tsx` 等月曆與詳情，非同步獲取學員之當週預約狀態，顯示 `「本週已預約」` 並禁用其他天按鈕。
+- [ ] 實作「學員資料完整度新制」判定與防呆：
+  - [ ] 在 `src/app/admin/students/student-profile-utils.ts` 中，將 `birthday` (生日) 及 `nationalId` (完整證件號) 加入 `getStudentCompleteness` 強制檢核，作為「待補資料」之標準。
+  - [ ] 在學員詳細頁及編輯頁面，統一對齊「待補資料」、「待行政確認」、「資料完整」三大主狀態之文字與顯示。
+  - [ ] 新增「完整建檔」判定（五個區塊均為已確認 true），並於學員詳細頁加註顯示。
 - [ ] 規劃批次課堂管理：依年度課程篩選課堂、勾選多堂、批次停課 / 已取消 / 改日期 / 重新排課。
 - [ ] 將目前大型工作區變更分成可審查任務包：文件、資料、後台頁面、學生資格/名冊、清理腳本。
 - [ ] 核對 9 筆 `needsReview` 名冊資料。
@@ -37,6 +44,7 @@ related:
 
 ## 已完成
 
+- [x] 2026-07-06 建立 Firestore 診斷與 schema 檢查工具（新增 `STRICT_FIRESTORE` 模式、唯讀 schema 檢查工具，保留測試用驗收腳本並加強防呆，下一步仍需資料 normalizer 與初始資料導入評估）。
 - [x] 2026-06-30 建立正式上線後開發流程指南與資料庫保護機制（安全分流與鐵則限制、三層確認鎖及節流限速寫入、自動快照備份防護、以及 git 排除真實個資 JSON 追蹤）。
 - [x] 2026-06-29 將前台學員預約與預約查詢改回「姓名 + 身分證後三碼」（支援預約資格多重過濾與 mismatch 理由回顯，取消預約資格加鎖）。
 - [x] 2026-06-29 實現學員前台使用者記憶機制與預約自動查詢（支援新生自填、預約成功後記憶姓名，自動帶入 `/booking/search`，並提供清除按鈕）。

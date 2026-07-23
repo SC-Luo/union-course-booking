@@ -11,7 +11,7 @@ import { getBookingData } from "@/lib/booking-repository";
 export const dynamic = "force-dynamic";
 
 type PageProps = {
-  searchParams: Promise<{ saved?: string; error?: string; categoryId?: string; status?: string }>;
+  searchParams: Promise<{ saved?: string; error?: string; categoryId?: string; status?: string; q?: string }>;
 };
 
 const fallbackColors: Record<string, string> = {
@@ -28,7 +28,11 @@ const fallbackColors: Record<string, string> = {
   R: "#f59e0b",
 };
 
-const courseModeOptions = [
+const courseModeOptions: Array<{
+  value?: string;
+  label: string;
+  description: string;
+}> = [
   {
     value: "fixed_roster",
     label: "固定名冊制",
@@ -40,7 +44,6 @@ const courseModeOptions = [
     description: "自費或彈性上課；學員可自行選擇開放時段並受名額與鎖定時間限制。",
   },
   {
-    value: "subsidy_roster",
     label: "補助固定名冊",
     description: "職訓、產投或補助班級；固定名冊並需特別重視出缺勤、作業與結訓紀錄。",
   },
@@ -49,7 +52,6 @@ const courseModeOptions = [
 function normalizeCourseModeValue(value: unknown) {
   const raw = String(value ?? "").trim();
   if (raw === "booking_flexible") return "booking_flexible";
-  if (raw === "subsidy_roster") return "subsidy_roster";
   return "fixed_roster";
 }
 
@@ -63,16 +65,12 @@ function CourseModePill({ value }: { value?: string }) {
   const className =
     normalized === "booking_flexible"
       ? "rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700"
-      : normalized === "subsidy_roster"
-        ? "rounded-full bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700"
-        : "rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700";
+      : "rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700";
 
   return <span className={className}>{getCourseModeLabel(normalized)}</span>;
 }
 
-function getSeriesTitle(seriesId: string | undefined, allSeries: Array<{ id: string; title: string }>) {
-  return allSeries.find((series) => series.id === seriesId)?.title ?? "未指定目錄";
-}
+
 
 function getSeries(seriesId: string | undefined, allSeries: any[]) {
   return allSeries.find((series) => series.id === seriesId);
@@ -140,14 +138,7 @@ function StatusPill({ status, active }: { status?: string; active?: boolean }) {
   return <span className={meta.className}>{meta.label}</span>;
 }
 
-function CompactMetric({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="min-w-0 rounded-2xl border border-[#f1e2d6] bg-[#fffaf5] px-4 py-3">
-      <span className="block text-xs font-semibold text-[#8a7c72]">{label}</span>
-      <span className="mt-1 block truncate text-sm font-black text-[#1f1712]">{value}</span>
-    </div>
-  );
-}
+
 
 function formatDateRange(start?: string, end?: string) {
   if (!start && !end) return "尚未設定";
@@ -525,7 +516,13 @@ function CourseOfferingDetailsFields({
           <p className="text-sm font-black text-[#1f1712]">課程運作模式</p>
         </div>
         <div className="grid gap-3 lg:grid-cols-3">
-          {courseModeOptions.map((option) => (
+          {courseModeOptions
+            .filter(
+              (option) =>
+                option.value === "booking_flexible" ||
+                option.value === "fixed_roster",
+            )
+            .map((option) => (
             <label
               key={option.value}
               className="cursor-pointer rounded-[22px] border border-[#ead8ca] bg-white p-4 transition hover:border-[#E7892B] hover:bg-[#fffaf5] has-[:checked]:border-[#E85F00] has-[:checked]:bg-[#fff1e7] has-[:checked]:shadow-[0_10px_28px_rgba(232,95,0,0.12)]"
@@ -581,7 +578,7 @@ function CourseOfferingDetailsFields({
 }
 
 export default async function CourseOfferingsPage({ searchParams }: PageProps) {
-  const { saved, error, categoryId, status } = await searchParams;
+  const { saved, error, categoryId, status, q } = await searchParams;
   const statusFilter = ["all", "daily", "open", "closed", "draft", "archived"].includes(status ?? "") ? (status ?? "daily") : "daily";
   const { categories, courseSeries, courseOfferings, courses, enrollments, reservations, students, courseSessions, attendanceRecords, instructors = [] } = await getBookingData();
   const activeSeries = courseSeries.filter((series) => series.isActive !== false);
@@ -611,8 +608,31 @@ export default async function CourseOfferingsPage({ searchParams }: PageProps) {
     return getOfferingCategoryId(offering) === targetCategoryId;
   };
   const categoryFilteredOfferings = courseOfferings.filter((offering) => offeringMatchesCategoryFilter(offering));
+  
+  const filterQuery = String(q ?? "").trim().toLowerCase();
   const sortedOfferings = categoryFilteredOfferings
     .filter((offering) => offeringMatchesStatusFilter(offering))
+    .filter((offering) => {
+      if (!filterQuery) return true;
+      const legacyCourse = courses.find((course) => course.id === offering.legacyCourseId || course.offeringId === offering.id);
+      const series = courseSeries.find((series) => series.id === offering.seriesId);
+      const title = offering.title || legacyCourse?.title || series?.title || "";
+      const code = offering.code || offering.classIdentifier || "";
+      const location = offering.location || legacyCourse?.defaultLocation || series?.defaultLocation || "";
+      const instructorId = offering.primaryInstructorId || legacyCourse?.primaryInstructorId || series?.defaultInstructorId || "";
+      const instructorName = instructorId ? (instructors.find((ins: any) => ins.id === instructorId)?.name || "") : "";
+      const termLabel = offering.termLabel || offering.term || "";
+      const year = String(offering.year ?? "");
+      
+      return [
+        title,
+        code,
+        location,
+        instructorName,
+        termLabel,
+        year
+      ].some(val => String(val).toLowerCase().includes(filterQuery));
+    })
     .slice()
     .sort((a, b) => `${b.year ?? 0}-${b.term ?? ""}`.localeCompare(`${a.year ?? 0}-${a.term ?? ""}`));
   const statusTabs = [
@@ -646,6 +666,7 @@ export default async function CourseOfferingsPage({ searchParams }: PageProps) {
     const params = new URLSearchParams();
     if (nextCategoryId !== "all") params.set("categoryId", nextCategoryId);
     if (nextStatus !== "daily") params.set("status", nextStatus);
+    if (q) params.set("q", q);
     const query = params.toString();
     return query ? `/admin/course-offerings?${query}` : "/admin/course-offerings";
   };
@@ -755,26 +776,55 @@ export default async function CourseOfferingsPage({ searchParams }: PageProps) {
         </div>
       </section>
 
-      {saved ? <p className="mb-4 rounded-2xl border border-[#d8b69f] bg-[#fff6ed] px-4 py-3 text-sm text-[#8B5035]">已儲存年度課程。</p> : null}
-      {error ? <p className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">無法完成操作，請確認欄位或關聯資料。</p> : null}
+      {saved === "cleared" ? (
+        <p className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 font-bold">
+          年度課程已清除，相關課堂、預約、點名與名冊關聯已移除。
+        </p>
+      ) : saved ? (
+        <p className="mb-4 rounded-2xl border border-[#d8b69f] bg-[#fff6ed] px-4 py-3 text-sm text-[#8B5035] font-bold">
+          已儲存年度課程。
+        </p>
+      ) : null}
+      {error ? (
+        <p className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 font-bold">
+          無法完成操作，請確認欄位或關聯資料。
+        </p>
+      ) : null}
 
-      <div className="mb-6 rounded-[28px] border border-[#ead8ca] bg-white p-5 shadow-[0_10px_28px_rgba(90,55,38,0.05)]">
-        <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+      <section className="mb-6 rounded-[30px] border border-[#ead8ca] bg-[#fffdf9] p-5 shadow-[0_16px_45px_rgba(90,55,38,0.07)] sm:p-6">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <p className="text-sm font-black text-[#5A3726]">兩階段篩選</p>
-            <p className="mt-1 text-sm font-semibold text-[#8a7c72]">
-              目前顯示：{currentCategoryLabel}｜{currentStatusLabel}｜{sortedOfferings.length} 個年度班級
+            <p className="text-sm font-bold text-[#B46F4A]">課程篩選</p>
+            <h2 className="mt-1 text-xl font-black text-[#1f1712]">篩選年度課程</h2>
+            <p className="mt-1 text-sm leading-6 text-[#8a7c72]">
+              先選課程類別，再依狀態查看年度班級。目前顯示：{currentCategoryLabel} ｜ {currentStatusLabel} ｜ 共 {sortedOfferings.length} 個年度班級
             </p>
           </div>
         </div>
 
-        <div className="mt-5 grid gap-4">
-          <section>
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-[#B46F4A]">課程類別</p>
-              <p className="text-xs font-bold text-[#9a877a]">先選課程所屬的大類</p>
-            </div>
-            <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        <div className="mt-5 space-y-4">
+          <form className="flex gap-2">
+            {selectedCategoryFilter !== "all" && <input type="hidden" name="categoryId" value={selectedCategoryFilter} />}
+            {statusFilter !== "daily" && <input type="hidden" name="status" value={statusFilter} />}
+            <input
+              name="q"
+              defaultValue={q}
+              placeholder="搜尋課程名稱、年度、期別、課程代碼、地點、講師..."
+              className="h-11 flex-1 rounded-2xl border border-[#ead8ca] bg-white px-4 text-sm text-[#5A3726] shadow-sm outline-none focus:border-[#ef6c00] focus:ring-2 focus:ring-[#f7c58d]/40"
+            />
+            <button className="rounded-2xl bg-[#5A3726] px-5 py-2 text-sm font-bold text-white shadow-sm hover:brightness-105">
+              搜尋
+            </button>
+            {q && (
+              <Link href={`/admin/course-offerings?categoryId=${encodeURIComponent(selectedCategoryFilter)}&status=${encodeURIComponent(statusFilter)}`} className="rounded-2xl border border-[#ead8ca] bg-white px-4 py-2.5 text-sm font-bold text-[#5A3726] hover:bg-[#fff6ed]">
+                清除
+              </Link>
+            )}
+          </form>
+
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#B46F4A] mb-2">課程類別</p>
+            <div className="flex flex-wrap gap-2">
               {categoryTabs.map((tab) => {
                 const isActive = selectedCategoryFilter === tab.id;
                 return (
@@ -783,26 +833,23 @@ export default async function CourseOfferingsPage({ searchParams }: PageProps) {
                     href={buildCourseOfferingsHref({ nextCategoryId: tab.id })}
                     className={
                       isActive
-                        ? "inline-flex shrink-0 items-center gap-2 rounded-2xl border border-[#E85F00] bg-[#E85F00] px-4 py-3 text-sm font-black text-white shadow-sm"
-                        : "inline-flex shrink-0 items-center gap-2 rounded-2xl border border-[#ead8ca] bg-[#fffaf5] px-4 py-3 text-sm font-black text-[#5A3726] transition hover:bg-[#fff6ed]"
+                        ? "rounded-2xl bg-[#E85F00] px-4 py-2 text-sm font-black text-white shadow-sm"
+                        : "rounded-2xl border border-[#ead8ca] bg-white px-4 py-2 text-sm font-black text-[#5A3726] hover:bg-[#fff6ed]"
                     }
                   >
-                    <span className="max-w-[260px] truncate">{tab.title}</span>
-                    <span className={isActive ? "rounded-full bg-white/20 px-2 py-0.5 text-xs" : "rounded-full bg-white px-2 py-0.5 text-xs text-[#8B5035]"}>
+                    {tab.title}
+                    <span className={isActive ? "ml-1.5 rounded-full bg-white/20 px-1.5 py-0.5 text-xs" : "ml-1.5 rounded-full bg-[#fff6ed] px-1.5 py-0.5 text-xs text-[#8B5035]"}>
                       {tab.count}
                     </span>
                   </Link>
                 );
               })}
             </div>
-          </section>
+          </div>
 
-          <section>
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-[#B46F4A]">課程狀態</p>
-              <p className="text-xs font-bold text-[#9a877a]">再看這門課目前處在哪個階段</p>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#B46F4A] mb-2">課程狀態</p>
+            <div className="flex flex-wrap gap-2">
               {statusTabs.map((tab) => {
                 const isActive = statusFilter === tab.id;
                 return (
@@ -811,195 +858,244 @@ export default async function CourseOfferingsPage({ searchParams }: PageProps) {
                     href={buildCourseOfferingsHref({ nextStatus: tab.id })}
                     className={
                       isActive
-                        ? "rounded-2xl border border-[#E85F00] bg-[#E85F00] px-4 py-3 text-white shadow-sm"
-                        : "rounded-2xl border border-[#ead8ca] bg-[#fffaf5] px-4 py-3 text-[#5A3726] transition hover:bg-[#fff6ed]"
+                        ? "rounded-2xl bg-[#5A3726] px-4 py-2 text-sm font-black text-white shadow-sm"
+                        : "rounded-2xl border border-[#ead8ca] bg-white px-4 py-2 text-sm font-black text-[#5A3726] hover:bg-[#fff6ed]"
                     }
                   >
-                    <span className="block text-sm font-black">{tab.label}（{statusCounts[tab.id]}）</span>
+                    {tab.label}
+                    <span className={isActive ? "ml-1.5 rounded-full bg-white/20 px-1.5 py-0.5 text-xs" : "ml-1.5 rounded-full bg-[#fff6ed] px-1.5 py-0.5 text-xs text-[#8B5035]"}>
+                      {statusCounts[tab.id]}
+                    </span>
                   </Link>
                 );
               })}
             </div>
-          </section>
+          </div>
         </div>
-      </div>
+      </section>
 
 
-      <section className="grid gap-4">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {sortedOfferings.map((offering) => {
           const legacyCourse = courses.find((course) => course.id === offering.legacyCourseId || course.offeringId === offering.id);
           const series = getSeries(offering.seriesId, courseSeries);
           const linkedCourseId = legacyCourse?.id ?? offering.legacyCourseId ?? "";
-          const offeringStudents = students.filter((item) => item.offeringId === offering.id || item.classId === linkedCourseId);
-          const enrollmentCount = enrollments.filter((item) => item.offeringId === offering.id || item.courseOfferingId === offering.id || item.courseId === linkedCourseId).length;
+          const offeringEnrollments = enrollments.filter(
+            (item) =>
+              item.offeringId === offering.id ||
+              item.courseOfferingId === offering.id ||
+              item.courseId === linkedCourseId,
+          );
+          const offeringStudentIds = new Set(offeringEnrollments.map((item) => item.studentId));
+          const offeringStudents = students.filter((item) => offeringStudentIds.has(item.id));
+          const enrollmentCount = offeringEnrollments.length;
           const reservationCount = reservations.filter((item) => item.offeringId === offering.id || item.courseId === linkedCourseId).length;
           const legacySessionCount = legacyCourse?.sessions.length ?? 0;
           const courseSessionCount = courseSessions.filter((item) => item.offeringId === offering.id || item.legacyCourseId === linkedCourseId).length;
           const sessionCount = Math.max(legacySessionCount, courseSessionCount);
           const attendanceCount = attendanceRecords.filter((item) => item.offeringId === offering.id).length;
-          const hasRelations = enrollmentCount > 0 || reservationCount > 0 || sessionCount > 0 || offeringStudents.length > 0 || attendanceCount > 0;
+          const hasRelations = enrollmentCount > 0 || reservationCount > 0 || sessionCount > 0 || offeringStudentIds.size > 0 || attendanceCount > 0;
           const color = offering.color ?? series?.color ?? fallbackColors[offering.categoryId ?? series?.categoryId] ?? "#B46F4A";
           const primaryInstructorName = offering.primaryInstructorId
             ? instructors.find((instructor: any) => instructor.id === offering.primaryInstructorId)?.name
             : undefined;
           const capacity = offering.capacity ?? legacyCourse?.totalCapacity ?? "-";
-          const reserved = offeringStudents.length || enrollmentCount || reservationCount;
+          const reserved = offeringStudentIds.size;
           const rosterHref = `/admin/students?mode=eligibility&view=rosterOnly&classId=${encodeURIComponent(linkedCourseId)}&seriesId=${encodeURIComponent(offering.seriesId ?? "")}&year=${encodeURIComponent(String(offering.year ?? ""))}&offeringId=${encodeURIComponent(offering.id)}&term=${encodeURIComponent(String(offering.termLabel ?? offering.term ?? ""))}`;
           const lifecycle = getOfferingLifecycleMeta(offering.status, offering.isActive);
           const isArchived = lifecycle.id === "archived";
+          const title = offering.classDisplayName ?? offering.displayTitle ?? offering.title;
 
           return (
-            <article key={offering.id} className="overflow-hidden rounded-[28px] border border-[#ead8ca] bg-white shadow-[0_12px_34px_rgba(90,55,38,0.055)]">
-              <div className="h-1.5 w-full" style={{ backgroundColor: color }} />
-
-              <div className="p-5">
-                <div className="grid gap-4 xl:grid-cols-[1fr_auto] xl:items-start">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-full bg-[#fff6ed] px-3 py-1 text-xs font-bold text-[#8B5035]">{offering.code ?? offering.classIdentifier ?? offering.id}</span>
+            <article key={offering.id} className="overflow-hidden rounded-[24px] border border-[#ead8ca] bg-white shadow-[0_8px_24px_rgba(90,55,38,0.04)] flex flex-col justify-between">
+              <div>
+                <div className="h-1 w-full" style={{ backgroundColor: color }} />
+                <div className="p-4">
+                  {/* Top row with tags */}
+                  <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+                    <span className="text-[11px] font-black uppercase text-[#B46F4A] tracking-wider">
+                      {offering.code ?? offering.classIdentifier ?? offering.id}
+                    </span>
+                    <div className="flex items-center gap-1.5">
                       <StatusPill status={offering.status} active={offering.isActive} />
                       <CourseModePill value={offering.courseMode ?? series?.defaultCourseMode} />
                     </div>
+                  </div>
 
-                    <h2 className="mt-3 truncate text-2xl font-black leading-tight text-[#1f1712]">
-                      {offering.classDisplayName ?? offering.displayTitle ?? offering.title}
-                    </h2>
-                    <p className="mt-2 text-sm leading-6 text-[#66584f]">
-                      {getSeriesTitle(offering.seriesId, courseSeries)}｜{offering.year ?? "未設年度"} 年｜{offering.termLabel ?? `第 ${offering.term ?? "?"} 期`}｜{formatDateRange(offering.startDate, offering.endDate)}
+                  {/* Title and Term */}
+                  <div>
+                    <h3 className="text-base font-black text-zinc-950 line-clamp-2 min-h-[2.5rem] leading-tight" title={title}>
+                      {title}
+                    </h3>
+                    <p className="mt-1 text-[11px] font-bold text-[#E85F00] bg-[#fff6ed] inline-block px-2.5 py-0.5 rounded-full">
+                      {offering.year ? `${offering.year}年 ｜ ` : ""}{offering.termLabel || offering.term || "年度課程"}
                     </p>
                   </div>
 
-                  <div className="flex flex-wrap gap-2 xl:justify-end">
-                    <Link href={rosterHref} className={isArchived ? "rounded-2xl border border-zinc-200 bg-zinc-100 px-4 py-2 text-sm font-black text-zinc-600" : "rounded-2xl bg-[#E85F00] px-4 py-2 text-sm font-black text-white shadow-sm hover:brightness-105"}>
-                      {isArchived ? "查看名冊" : "名冊"}
-                    </Link>
-                    {legacyCourse ? (
-                      <Link href={`/admin/courses/${legacyCourse.id}/sessions`} className={isArchived ? "rounded-2xl border border-zinc-200 bg-zinc-100 px-4 py-2 text-sm font-bold text-zinc-600" : "rounded-2xl bg-[#5A3726] px-4 py-2 text-sm font-bold text-white hover:brightness-105"}>
-                        {isArchived ? "查看課堂" : "課堂日誌"}
-                      </Link>
-                    ) : null}
-
-                    <SessionInfoModalCard
-                      title="年度課程管理"
-                      triggerLabel="管理"
-                      eyebrow="年度課程"
-                      closeLabel="關閉"
-                      description=""
-                      triggerClassName="inline-flex h-10 items-center justify-center rounded-2xl border border-[#dbcabd] bg-white px-4 text-sm font-black text-[#5A3726] shadow-sm transition hover:-translate-y-0.5 hover:bg-[#fff6ed] hover:shadow-md"
-                      panelClassName="max-h-[88vh] w-full max-w-5xl overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden rounded-[28px] border border-[#ead8ca] bg-white p-6 shadow-2xl"
-                    >
-                      <div className="grid gap-5">
-                        {isArchived ? (
-                          <section className="rounded-[26px] border border-zinc-200 bg-zinc-50 p-5 text-sm leading-6 text-zinc-700">
-                            <p className="font-black text-zinc-900">此年度課程目前為已封存。</p>
-                          </section>
-                        ) : null}
-
-                        <form action={saveCourseOfferingAction} className="grid gap-5">
-                            <input type="hidden" name="id" value={offering.id} />
-                            <input type="hidden" name="legacyCourseId" value={legacyCourse?.id ?? offering.legacyCourseId ?? ""} />
-                            <section className="rounded-[26px] border border-[#ead8ca] bg-[#fffdf9] p-4 shadow-inner shadow-[#ead8ca]/20">
-                              <div className="mb-4 flex flex-col gap-1 border-b border-[#ead8ca] pb-3">
-                                <p className="text-sm font-black text-[#1f1712]">課程目錄</p>
-                              </div>
-                              <label className="grid gap-1 text-sm font-semibold text-[#4e4038]">
-                                課程目錄
-                                <select name="seriesId" defaultValue={offering.seriesId} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none transition focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10">
-                                  {activeSeries.map((series) => <option key={series.id} value={series.id}>{series.title}</option>)}
-                                </select>
-                              </label>
-                            </section>
-
-                            <CourseOfferingDetailsFields
-                              series={getSeries(offering.seriesId, courseSeries)}
-                              categories={categories}
-                              instructors={instructors}
-                              initialYear={offering.year}
-                              initialTerm={offering.term}
-                              initialClassDisplayName={offering.classDisplayName ?? offering.displayTitle}
-                              initialCapacity={offering.capacity ?? legacyCourse?.totalCapacity}
-                              initialBookingStatus={offering.bookingStatus ?? offering.status ?? "open"}
-                              showBookingStatusField={false}
-                              initialCourseMode={offering.courseMode ?? series?.defaultCourseMode}
-                              initialStartDate={offering.startDate}
-                              initialEndDate={offering.endDate}
-                              initialPrimaryInstructorId={offering.primaryInstructorId}
-                              initialAssistantInstructorIds={offering.assistantInstructorIds ?? []}
-                              initialLocation={offering.location ?? legacyCourse?.defaultLocation}
-                              initialNotes={offering.notes}
-                            />
-
-
-                            <CourseStatusControlPanel
-                              status={offering.status}
-                              active={offering.isActive}
-                              courseMode={offering.courseMode ?? series?.defaultCourseMode}
-                              fieldIdPrefix={`course-lifecycle-${offering.id}`}
-                            />
-
-                            <div className="flex flex-col-reverse gap-3 border-t border-[#f1e2d6] pt-5 sm:flex-row sm:justify-end">
-                              <Link href={currentListHref} className="inline-flex h-12 items-center justify-center rounded-2xl border border-[#dbcabd] bg-white px-5 text-sm font-black text-[#5A3726] hover:bg-[#fff6ed]">
-                                取消
-                              </Link>
-                              <button className="inline-flex h-12 items-center justify-center rounded-2xl bg-gradient-to-r from-[#E85F00] to-[#B46F4A] px-6 text-sm font-black text-white shadow-sm hover:brightness-105">
-                                儲存課程設定
-                              </button>
-                            </div>
-                          </form>
-
-                        <section className="rounded-[26px] border border-rose-100 bg-rose-50/50 p-5">
-                          <div className="mb-4 border-b border-rose-100 pb-3">
-                            <p className="text-sm font-black text-rose-700">危險操作</p>
-                          </div>
-                          <div className="grid gap-4 xl:grid-cols-[minmax(220px,0.65fr)_1fr] xl:items-start">
-                            <form action={deleteCourseOfferingAction}>
-                              <input type="hidden" name="id" value={offering.id} />
-                              <input type="hidden" name="legacyCourseId" value={legacyCourse?.id ?? offering.legacyCourseId ?? ""} />
-                              <button
-                                disabled={hasRelations || isArchived}
-                                className="inline-flex h-11 w-full items-center justify-center rounded-2xl border border-rose-200 bg-white px-4 text-sm font-bold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40 xl:w-auto"
-                                title={hasRelations ? "已有課堂、名冊或預約時，請使用清除功能。" : undefined}
-                              >
-                                刪除空課程
-                              </button>
-                            </form>
-
-                            <form action={clearCourseOfferingCascadeAction} className="grid gap-3 rounded-[22px] border border-rose-100 bg-white p-4 lg:grid-cols-[1fr_minmax(220px,0.7fr)_auto] lg:items-end">
-                              <input type="hidden" name="offeringId" value={offering.id} />
-                              <input type="hidden" name="legacyCourseId" value={linkedCourseId} />
-                              <div>
-                                <p className="text-sm font-black text-rose-700">清除本年度資料</p>
-                                <p className="mt-1 text-xs leading-5 text-rose-700">
-                                  會清除：約 {sessionCount} 堂課、{offeringStudents.length} 位學員、{enrollmentCount} 筆名冊關聯、{reservationCount} 筆預約、{attendanceCount} 筆點名紀錄。
-                                </p>
-                              </div>
-                              <label className="grid gap-1 text-sm font-semibold text-rose-800">
-                                請輸入「確認清除」
-                                <input name="confirmation" required className="h-11 rounded-2xl border border-rose-200 bg-white px-3 font-normal outline-none transition focus:border-rose-400 focus:ring-4 focus:ring-rose-100" placeholder="確認清除" />
-                              </label>
-                              <button disabled={isArchived} className="h-11 rounded-2xl bg-rose-600 px-4 text-sm font-black text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-40">
-                                清除
-                              </button>
-                            </form>
-                          </div>
-                        </section>
-                      </div>
-                    </SessionInfoModalCard>
+                  {/* Metadata Grid */}
+                  <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-zinc-600 bg-[#fffdfa] p-3 rounded-2xl border border-[#f0dfd2]">
+                    <div>
+                      <p className="text-[10px] font-bold text-zinc-400">主要講師 / 地點</p>
+                      <p className="font-black text-zinc-800 truncate mt-0.5" title={primaryInstructorName || "未指定"}>
+                        {primaryInstructorName || "未指定"} ｜ {offering.location ?? legacyCourse?.defaultLocation ?? "未設"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-zinc-400">課堂數</p>
+                      <p className="font-black text-zinc-800 mt-0.5">
+                        {sessionCount > 0 ? `${sessionCount} 堂` : "尚未排課"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-zinc-400">名冊人數</p>
+                      <p className="font-black text-zinc-800 mt-0.5">
+                        {reserved} / {capacity} 人
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-zinc-400">開課期間</p>
+                      <p className="font-black text-zinc-800 truncate mt-0.5" title={formatDateRange(offering.startDate, offering.endDate)}>
+                        {formatDateRange(offering.startDate, offering.endDate)}
+                      </p>
+                    </div>
                   </div>
                 </div>
+              </div>
 
-                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                  <CompactMetric label="名冊 / 報名" value={`${reserved}/${capacity}`} />
-                  <CompactMetric label="課堂日誌" value={sessionCount > 0 ? `${sessionCount} 堂` : "尚未排課"} />
-                  <CompactMetric label="地點" value={offering.location ?? legacyCourse?.defaultLocation ?? "未設"} />
-                  <CompactMetric label="主要講師" value={primaryInstructorName ?? offering.primaryInstructorName ?? "未設"} />
-                </div>
+              {/* Bottom Actions */}
+              <div className="border-t border-[#f3ede8] bg-[#fffdfa] p-3 flex gap-2 items-center">
+                <Link
+                  href={rosterHref}
+                  className={
+                    isArchived
+                      ? "flex-1 text-center py-2 rounded-xl border border-zinc-200 bg-zinc-100 text-xs font-black text-zinc-600"
+                      : "flex-1 text-center py-2 rounded-xl bg-[#E85F00] text-xs font-black text-white shadow-sm hover:brightness-105"
+                  }
+                >
+                  {isArchived ? "查看名冊" : `名冊 (${reserved})`}
+                </Link>
+                <Link
+                  href={`/admin/course-sessions?offeringId=${encodeURIComponent(offering.id)}`}
+                  className={
+                    isArchived
+                      ? "flex-1 text-center py-2 rounded-xl border border-zinc-200 bg-zinc-100 text-xs font-bold text-zinc-600"
+                      : "flex-1 text-center py-2 rounded-xl bg-[#5A3726] text-xs font-bold text-white hover:brightness-105"
+                  }
+                >
+                  {isArchived ? "查看課堂" : "課堂"}
+                </Link>
+
+                <SessionInfoModalCard
+                  title="年度課程管理"
+                  triggerLabel="管理"
+                  eyebrow="年度課程"
+                  closeLabel="關閉"
+                  description=""
+                  triggerClassName="flex-1 text-center py-2 rounded-xl border border-[#dbcabd] bg-white text-xs font-black text-[#5A3726] shadow-sm hover:bg-[#fff6ed]"
+                  panelClassName="max-h-[88vh] w-full max-w-5xl overflow-y-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden rounded-[28px] border border-[#ead8ca] bg-white p-6 shadow-2xl"
+                >
+                  <div className="grid gap-5">
+                    {isArchived ? (
+                      <section className="rounded-[26px] border border-zinc-200 bg-zinc-50 p-5 text-sm leading-6 text-zinc-700">
+                        <p className="font-black text-zinc-900">此年度課程目前為已封存。</p>
+                      </section>
+                    ) : null}
+
+                    <form action={saveCourseOfferingAction} className="grid gap-5">
+                      <input type="hidden" name="id" value={offering.id} />
+                      <input type="hidden" name="legacyCourseId" value={legacyCourse?.id ?? offering.legacyCourseId ?? ""} />
+                      <section className="rounded-[26px] border border-[#ead8ca] bg-[#fffdf9] p-4 shadow-inner shadow-[#ead8ca]/20">
+                        <div className="mb-4 flex flex-col gap-1 border-b border-[#ead8ca] pb-3">
+                          <p className="text-sm font-black text-[#1f1712]">課程目錄</p>
+                        </div>
+                        <label className="grid gap-1 text-sm font-semibold text-[#4e4038]">
+                          課程目錄
+                          <select name="seriesId" defaultValue={offering.seriesId} className="h-12 rounded-2xl border border-[#dbcabd] bg-white px-3 font-normal outline-none transition focus:border-[#E7892B] focus:ring-4 focus:ring-[#E7892B]/10">
+                            {activeSeries.map((series) => <option key={series.id} value={series.id}>{series.title}</option>)}
+                          </select>
+                        </label>
+                      </section>
+
+                      <CourseOfferingDetailsFields
+                        series={getSeries(offering.seriesId, courseSeries)}
+                        categories={categories}
+                        instructors={instructors}
+                        initialYear={offering.year}
+                        initialTerm={offering.term}
+                        initialClassDisplayName={offering.classDisplayName ?? offering.displayTitle}
+                        initialCapacity={offering.capacity ?? legacyCourse?.totalCapacity}
+                        initialBookingStatus={offering.bookingStatus ?? offering.status ?? "open"}
+                        showBookingStatusField={false}
+                        initialCourseMode={offering.courseMode ?? series?.defaultCourseMode}
+                        initialStartDate={offering.startDate}
+                        initialEndDate={offering.endDate}
+                        initialPrimaryInstructorId={offering.primaryInstructorId}
+                        initialAssistantInstructorIds={offering.assistantInstructorIds ?? []}
+                        initialLocation={offering.location ?? legacyCourse?.defaultLocation}
+                        initialNotes={offering.notes}
+                      />
+
+                      <CourseStatusControlPanel
+                        status={offering.status}
+                        active={offering.isActive}
+                        courseMode={offering.courseMode ?? series?.defaultCourseMode}
+                        fieldIdPrefix={`course-lifecycle-${offering.id}`}
+                      />
+
+                      <div className="flex flex-col-reverse gap-3 border-t border-[#f1e2d6] pt-5 sm:flex-row sm:justify-end">
+                        <Link href={currentListHref} className="inline-flex h-12 items-center justify-center rounded-2xl border border-[#dbcabd] bg-white px-5 text-sm font-black text-[#5A3726] hover:bg-[#fff6ed]">
+                          取消
+                        </Link>
+                        <button className="inline-flex h-12 items-center justify-center rounded-2xl bg-gradient-to-r from-[#E85F00] to-[#B46F4A] px-6 text-sm font-black text-white shadow-sm hover:brightness-105">
+                          儲存課程設定
+                        </button>
+                      </div>
+                    </form>
+
+                    <section className="rounded-[26px] border border-rose-100 bg-rose-50/50 p-5">
+                      <div className="mb-4 border-b border-rose-100 pb-3">
+                        <p className="text-sm font-black text-rose-700">危險操作</p>
+                      </div>
+                      <div className="grid gap-4 xl:grid-cols-[minmax(220px,0.65fr)_1fr] xl:items-start">
+                        <form action={deleteCourseOfferingAction}>
+                          <input type="hidden" name="id" value={offering.id} />
+                          <input type="hidden" name="legacyCourseId" value={legacyCourse?.id ?? offering.legacyCourseId ?? ""} />
+                          <button
+                            disabled={hasRelations || isArchived}
+                            className="inline-flex h-11 w-full items-center justify-center rounded-2xl border border-rose-200 bg-white px-4 text-sm font-bold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40 xl:w-auto"
+                            title={hasRelations ? "已有課堂、名冊或預約時，請使用清除功能。" : undefined}
+                          >
+                            刪除空課程
+                          </button>
+                        </form>
+
+                        <form action={clearCourseOfferingCascadeAction} className="grid gap-3 rounded-[22px] border border-rose-100 bg-white p-4 lg:grid-cols-[1fr_minmax(220px,0.7fr)_auto] lg:items-end">
+                          <input type="hidden" name="offeringId" value={offering.id} />
+                          <input type="hidden" name="legacyCourseId" value={linkedCourseId} />
+                          <div>
+                            <p className="text-sm font-black text-rose-700">清除本年度資料</p>
+                            <p className="mt-1 text-xs leading-5 text-rose-700">
+                              會清除：約 {sessionCount} 堂課、{offeringStudents.length} 位學員、{enrollmentCount} 筆名冊關聯、{reservationCount} 筆預約、{attendanceCount} 筆點名紀錄。
+                            </p>
+                          </div>
+                          <label className="grid gap-1 text-sm font-semibold text-rose-800">
+                            請輸入「確認清除」
+                            <input name="confirmation" required className="h-11 rounded-2xl border border-rose-200 bg-white px-3 font-normal outline-none transition focus:border-rose-400 focus:ring-4 focus:ring-rose-100" placeholder="確認清除" />
+                          </label>
+                          <button disabled={isArchived} className="h-11 rounded-2xl bg-rose-600 px-4 text-sm font-black text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-40">
+                            清除
+                          </button>
+                        </form>
+                      </div>
+                    </section>
+                  </div>
+                </SessionInfoModalCard>
               </div>
             </article>
           );
         })}
         {sortedOfferings.length === 0 ? (
-          <div className="rounded-[28px] border border-dashed border-[#ead8ca] bg-white px-6 py-12 text-center shadow-[0_12px_34px_rgba(90,55,38,0.04)]">
+          <div className="col-span-full rounded-[28px] border border-dashed border-[#ead8ca] bg-white px-6 py-12 text-center shadow-[0_12px_34px_rgba(90,55,38,0.04)]">
             <p className="text-lg font-black text-[#1f1712]">目前沒有符合條件的年度班級</p>
             <p className="mt-2 text-sm font-semibold text-[#8a7c72]">可以切回全部課程或全部狀態查看其他班級。</p>
           </div>

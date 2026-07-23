@@ -120,11 +120,12 @@ export default async function NewStudentPage({ searchParams }: PageProps) {
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <div className="flex flex-col gap-1.5 sm:col-span-2">
                 <label className="text-sm font-bold text-[#4a2a1a]">
-                  通訊地址 <span className="text-zinc-500 text-xs">(選填)</span>
+                  通訊地址 <span className="text-red-500">*</span>
                 </label>
                 <input
                   name="mailingAddress"
                   type="text"
+                  required
                   placeholder="請填寫可收信的完整通訊地址"
                   className="h-12 rounded-xl border border-[#ead7c6] bg-white px-4 text-sm text-[#4a2a1a] shadow-sm outline-none transition placeholder:text-zinc-400 focus:border-[#ef6c00] focus:ring-2 focus:ring-[#f7c58d]/40"
                 />
@@ -185,6 +186,33 @@ export default async function NewStudentPage({ searchParams }: PageProps) {
                     />
                     否，我是初學者 / 想轉行
                   </label>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label className="text-sm font-bold text-[#4a2a1a]">
+                  預計營業類別 <span className="text-zinc-500 text-xs">(選填，可複選)</span>
+                </label>
+                <div className="flex flex-wrap gap-x-6 gap-y-2 mt-1">
+                  {["美容", "美體", "美甲", "美睫", "熱蠟", "皮膚管理", "其他"].map((cat) => (
+                    <label key={cat} className="flex items-center gap-2 cursor-pointer text-sm text-[#4a2a1a]">
+                      <input
+                        type="checkbox"
+                        name="plannedBusinessCategories"
+                        value={cat}
+                        className="h-4 w-4 rounded border-[#ead7c6] text-[#ef6c00] focus:ring-[#f7c58d]/40"
+                      />
+                      {cat}
+                    </label>
+                  ))}
+                </div>
+                <div className="mt-2">
+                  <input
+                    type="text"
+                    name="plannedBusinessCategoryOther"
+                    placeholder="若選「其他」，請在此填寫文字"
+                    className="h-10 w-full rounded-xl border border-[#ead7c6] bg-white px-3 text-sm text-[#4a2a1a] shadow-sm outline-none transition placeholder:text-zinc-400 focus:border-[#ef6c00] focus:ring-2 focus:ring-[#f7c58d]/40"
+                  />
                 </div>
               </div>
 

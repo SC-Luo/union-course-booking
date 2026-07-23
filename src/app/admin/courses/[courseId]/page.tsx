@@ -351,6 +351,39 @@ export default async function AdminCourseWorkspacePage({ params, searchParams }:
                 備註
                 <textarea name="notes" defaultValue={course.notes ?? ""} rows={2} className="rounded-md border border-zinc-300 px-3 py-3" />
               </label>
+              <div className="grid gap-4 lg:grid-cols-3 border-t border-zinc-100 pt-4">
+                <label className="grid gap-2 text-sm font-medium text-zinc-700">
+                  預約規則 (bookingPolicy)
+                  <select
+                    name="bookingPolicy"
+                    defaultValue={course.bookingPolicy ?? "per_session"}
+                    className="rounded-md border border-zinc-300 px-3 py-3 font-semibold"
+                  >
+                    <option value="per_session">單堂可預約 (預設)</option>
+                    <option value="one_per_course">同課程限預約一次</option>
+                    <option value="one_per_cycle">每週限預約一個時段 (週日到週六)</option>
+                  </select>
+                </label>
+                <label className="grid gap-2 text-sm font-medium text-zinc-700">
+                  預約限制群組 ID (bookingQuotaGroupId)
+                  <input
+                    name="bookingQuotaGroupId"
+                    defaultValue={course.bookingQuotaGroupId ?? ""}
+                    placeholder="留空預設為本課程 ID"
+                    className="rounded-md border border-zinc-300 px-3 py-3"
+                  />
+                </label>
+                <label className="grid gap-2 text-sm font-medium text-zinc-700">
+                  每週期最大預約數
+                  <input
+                    name="maxReservationsPerCycle"
+                    type="number"
+                    min="1"
+                    defaultValue={course.maxReservationsPerCycle ?? 1}
+                    className="rounded-md border border-zinc-300 px-3 py-3"
+                  />
+                </label>
+              </div>
               <button className="rounded-md bg-zinc-900 px-5 py-3 text-sm font-semibold text-white hover:bg-zinc-700">
                 儲存課程基礎設定
               </button>

@@ -1,17 +1,15 @@
 /* eslint-disable @next/next/no-html-link-for-pages */
 import { notFound } from "next/navigation";
 import { StudentShell } from "@/components/page-shell";
-import { getCourseCatalog } from "@/lib/booking-repository";
+import { getCourseDetailById } from "@/lib/booking-repository";
 import {
-  canChangeReservation,
   formatReservationCutoff,
   getCategoryName,
-  getCourse,
   getCourseModeInfo,
   getRemainingSeats,
   getWeekday,
   isBookingCourse,
-  isSessionBookableByStatus,
+  getPublicBookingBadge,
 } from "@/lib/course-utils";
 import type { CourseSession } from "@/lib/types";
 import { getCourseTypeName } from "@/lib/course-coding";
@@ -20,6 +18,11 @@ type PageProps = {
   params: Promise<{ courseId: string }>;
 };
 
+function isFirestoreQuotaError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /RESOURCE_EXHAUSTED|Quota exceeded/i.test(message);
+}
+
 type SessionTone = "available" | "makeup" | "locked" | "full" | "closed";
 type SessionDisplayState = {
   canBook: boolean;
@@ -27,59 +30,33 @@ type SessionDisplayState = {
   tone: SessionTone;
 };
 
-function parseTaiwanDateTime(value?: string) {
-  const normalized = value?.trim();
-  if (!normalized) return null;
-
-  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/);
-  if (!match) {
-    const fallback = new Date(normalized);
-    return Number.isNaN(fallback.getTime()) ? null : fallback;
-  }
-
-  const [, year, month, day, hour = "23", minute = "59"] = match;
-  return new Date(`${year}-${month}-${day}T${hour}:${minute}:00+08:00`);
-}
-
-function hasSessionEnded(session: Pick<CourseSession, "date" | "endTime">) {
-  const classEndTime = parseTaiwanDateTime(`${session.date} ${session.endTime || "23:59"}`);
-  return Boolean(classEndTime && Date.now() > classEndTime.getTime());
-}
-
 function getSessionDisplayState(
   session: CourseSession,
-  courseIsActive: boolean,
+  course: any,
 ): SessionDisplayState {
-  const status = String(session.sessionStatus ?? session.status ?? "scheduled").trim() || "scheduled";
+  const badge = getPublicBookingBadge(course, session);
 
-  if (!courseIsActive || session.isActive === false) {
-    return { canBook: false, label: "未開放", tone: "closed" };
-  }
-
-  if (status === "cancelled") {
-    return { canBook: false, label: "已取消", tone: "closed" };
-  }
-
-  if (status === "suspended") {
-    return { canBook: false, label: "本堂停課", tone: "closed" };
-  }
-
-  if (status === "rescheduled") {
-    return { canBook: false, label: "已調課", tone: "closed" };
-  }
-
-  if (!isSessionBookableByStatus(session)) {
-    return { canBook: false, label: "暫不開放", tone: "closed" };
-  }
-
-  if (getRemainingSeats(session) <= 0) {
+  if (badge.status === "full") {
     return { canBook: false, label: "已額滿", tone: "full" };
   }
 
-  if (!canChangeReservation(session) || hasSessionEnded(session)) {
-    return { canBook: false, label: "報名截止", tone: "locked" };
+  if (badge.status === "closed") {
+    const status = String(session.sessionStatus ?? session.status ?? "scheduled").trim() || "scheduled";
+    if (status === "cancelled") return { canBook: false, label: "已取消", tone: "closed" };
+    if (status === "suspended") return { canBook: false, label: "本堂停課", tone: "closed" };
+    if (status === "rescheduled") return { canBook: false, label: "已調課", tone: "closed" };
+    return { canBook: false, label: "報名截止", tone: "closed" };
   }
 
+  if (badge.status === "fixed_roster") {
+    return { canBook: false, label: "固定名冊", tone: "locked" };
+  }
+
+  if (badge.status === "one_per_cycle") {
+    return { canBook: true, label: "預約", tone: "available" };
+  }
+
+  const status = String(session.sessionStatus ?? session.status ?? "scheduled").trim() || "scheduled";
   if (status === "makeup") {
     return { canBook: true, label: "補課", tone: "makeup" };
   }
@@ -97,12 +74,32 @@ function sessionBadgeClass(tone: SessionTone) {
 
 export default async function CourseDetailPage({ params }: PageProps) {
   const { courseId } = await params;
-  const { categories, courses } = await getCourseCatalog();
-  const course = getCourse(courseId, courses);
+  let courseDetail = null;
+  try {
+    courseDetail = await getCourseDetailById(courseId);
+  } catch (error) {
+    const message = isFirestoreQuotaError(error)
+      ? "目前系統資料暫時忙碌，請稍後再試。"
+      : "目前無法載入課程資料，請稍後再試。";
 
-  if (!course) {
+    return (
+      <StudentShell>
+        <a href="/" className="mb-6 inline-flex text-sm font-medium text-zinc-600 hover:text-zinc-950">
+          返回課程列表
+        </a>
+        <section className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-sm leading-7 text-amber-900">
+          <p className="text-base font-black">目前無法載入課程資料</p>
+          <p className="mt-2">{message}</p>
+        </section>
+      </StudentShell>
+    );
+  }
+  if (!courseDetail) {
     notFound();
   }
+
+  const { course, category } = courseDetail;
+  const categories = category ? [category] : [];
 
   const modeInfo = getCourseModeInfo(course);
   const isBookingMode = isBookingCourse(course);
@@ -135,6 +132,18 @@ export default async function CourseDetailPage({ params }: PageProps) {
           <p className="text-sm text-zinc-500">課程模式</p>
           <p className="mt-1 font-black text-zinc-900">{modeInfo.shortLabel}</p>
           <p className="mt-3 text-sm leading-6 text-zinc-600">{modeInfo.frontDescription}</p>
+          {isBookingMode && course.bookingPolicy && course.bookingPolicy !== "per_session" && (
+            <>
+              <p className="mt-4 text-sm text-zinc-500 font-medium text-rose-800">預約限制</p>
+              <p className="mt-1 font-black text-rose-600 text-sm">
+                {course.bookingPolicy === "one_per_cycle"
+                  ? "⚠️ 此課程每週限預約一個時段"
+                  : course.bookingPolicy === "one_per_course"
+                  ? "⚠️ 此課程限預約一個時段"
+                  : ""}
+              </p>
+            </>
+          )}
           <p className="mt-4 text-sm text-zinc-500">預設地點</p>
           <p className="mt-1 font-medium text-zinc-900">{course.defaultLocation}</p>
           {course.notes ? (
@@ -152,7 +161,13 @@ export default async function CourseDetailPage({ params }: PageProps) {
             <h2 className="text-xl font-semibold text-zinc-950">{modeInfo.frontTitle}</h2>
             <p className="mt-1 text-sm text-zinc-600">
               {isBookingMode
-                ? "先看單元，再選日期。可預約按鈕會以綠色顯示；已過預約截止時間會自動鎖定。"
+                ? `先看單元，再選日期。可預約按鈕會以綠色顯示；已過預約截止時間會自動鎖定。${
+                    course.bookingPolicy === "one_per_cycle"
+                      ? "（每人每週限預約一個時段，跨週可再次預約）"
+                      : course.bookingPolicy === "one_per_course"
+                      ? "（此課程同一位學員限預約一個時段）"
+                      : ""
+                  }`
                 : "此課程依固定名冊與正式課表進行，不開放學員自行預約。後續可銜接個人出缺勤查詢與作業繳交。"}
             </p>
           </div>
@@ -176,7 +191,7 @@ export default async function CourseDetailPage({ params }: PageProps) {
               </div>
               <div className="grid gap-3">
                 {sessions.map((session) => {
-                  const displayState = getSessionDisplayState(session, course.isActive);
+                  const displayState = getSessionDisplayState(session, course);
                   const canBook = isBookingMode && displayState.canBook;
 
                   return (
