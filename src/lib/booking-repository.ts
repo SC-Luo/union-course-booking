@@ -272,6 +272,63 @@ export async function getStudentById(studentId: string): Promise<Student | null>
   }
 }
 
+export async function getAdminStatsData(): Promise<Pick<BookingData, "categories" | "courses" | "reservations">> {
+  const db = getFirestoreDb();
+
+  if (!db) {
+    const data = readBookingData();
+    return {
+      categories: data.categories,
+      courses: data.courses,
+      reservations: data.reservations,
+    };
+  }
+
+  try {
+    const [
+      categorySnapshot,
+      courseSnapshot,
+      sessionSnapshot,
+      reservationSnapshot,
+    ] = await Promise.all([
+      db.collection("categories").orderBy("sortOrder", "asc").get(),
+      db.collection("courses").get(),
+      db.collection("sessions").get(),
+      db.collection("reservations").get(),
+    ]);
+
+    const categories = categorySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CourseCategory);
+    const sessions = sessionSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CourseSession);
+    const reservations = reservationSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Reservation);
+    const courses = courseSnapshot.docs.map((doc) => {
+      const course = { id: doc.id, ...doc.data() } as Omit<Course, "sessions">;
+
+      return {
+        ...course,
+        sessions: sessions.filter((session) => session.courseId === course.id),
+      };
+    });
+
+    const normalized = normalizeBookingData({ categories, courses, reservations, students: [] });
+    return {
+      categories: normalized.categories,
+      courses: normalized.courses,
+      reservations: normalized.reservations,
+    };
+  } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Admin stats data read failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore admin stats data read failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
+    const data = readBookingData();
+    return {
+      categories: data.categories,
+      courses: data.courses,
+      reservations: data.reservations,
+    };
+  }
+}
+
 export async function getCourseCatalog(): Promise<Pick<BookingData, "categories" | "courses">> {
   const db = getFirestoreDb();
 
