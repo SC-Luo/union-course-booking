@@ -9,7 +9,7 @@ tags:
   - project-memory
   - codex
 created: 2026-05-27
-updated: 2026-07-22
+updated: 2026-06-08
 status: active
 summary: 本 repo 的 AI 接手短摘要，記錄目前健康狀態、最新 UI 整理進度、下一步與風險。
 related:
@@ -34,9 +34,6 @@ related:
 
 ## 最近處理
 
-- 2026-07-22 排定明後日任務計畫：
-  - **Firestore 讀取優化**：優先解決統計頁、學員名冊、首頁等全量讀取 Firestore 的性能與額度消耗風險，轉換為窄讀取或分頁載入。
-  - **系統功能測試**：接續驗收前台預約/取消流程與後台名單、名冊之互動測試。
 - 2026-07-06 建立 Firestore 診斷與 schema 檢查工具：
   - **診斷模式**：支援 `STRICT_FIRESTORE=true` 變數以在開發中停用 JSON 備援，便於線上除錯。
   - **Schema 檢查工具**：新增 [`tools/check-firestore-schema.mjs`](file:///c:/Users/User/codex-projects/union-course-booking/tools/check-firestore-schema.mjs) 只讀欄位統計工具。
