@@ -580,9 +580,7 @@ function CourseOfferingDetailsFields({
 export default async function CourseOfferingsPage({ searchParams }: PageProps) {
   const { saved, error, categoryId, status, q } = await searchParams;
   const statusFilter = ["all", "daily", "open", "closed", "draft", "archived"].includes(status ?? "") ? (status ?? "daily") : "daily";
-  const { categories, courseSeries, courseOfferings, courses, enrollments, reservations, students, courseSessions, attendanceRecords, instructors = [] } = await getBookingData({
-    skipStudents: true,
-  });
+  const { categories, courseSeries, courseOfferings, courses, enrollments, reservations, students, courseSessions, attendanceRecords, instructors = [] } = await getBookingData();
   const activeSeries = courseSeries.filter((series) => series.isActive !== false);
   const categoryOptions = Array.from(new Set(activeSeries.map((series) => series.categoryId).filter(Boolean))).map((categoryId) => {
     const category = categories.find((item) => item.id === categoryId);

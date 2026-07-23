@@ -370,12 +370,7 @@ function GlobalCalendar({ sessionRows, monthParam, reservations }: { sessionRows
 
 export default async function CourseSessionsPage({ searchParams }: PageProps) {
   const { saved, error, month, offeringId, categoryId, schedule, bulkUpdated } = await searchParams;
-  const { categories, courses, courseOfferings, courseSeries, instructors = [], reservations = [] } = await getBookingData({
-    skipStudents: true,
-    skipAttendance: true,
-    skipRecords: true,
-    skipEnrollments: true,
-  });
+  const { categories, courses, courseOfferings, courseSeries, instructors = [], reservations = [] } = await getBookingData();
   const allCourses = courses as any[];
   const offerings = courseOfferings as any[];
   const seriesList = courseSeries as any[];

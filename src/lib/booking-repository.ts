@@ -130,46 +130,7 @@ function removeUndefinedFields<T>(value: T): T {
   return value;
 }
 
-interface CacheEntry<T> {
-  data: T;
-  timestamp: number;
-}
-
-let categoriesCache: CacheEntry<CourseCategory[]> | null = null;
-let courseSeriesCache: CacheEntry<CourseSeries[]> | null = null;
-let courseOfferingsCache: CacheEntry<CourseOffering[]> | null = null;
-let coursesCache: CacheEntry<Course[]> | null = null;
-let sessionsCache: CacheEntry<CourseSession[]> | null = null;
-let instructorsCache: CacheEntry<Instructor[]> | null = null;
-
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-
-function getCached<T>(entry: CacheEntry<T> | null): T | null {
-  if (entry && Date.now() - entry.timestamp < CACHE_TTL_MS) {
-    return entry.data;
-  }
-  return null;
-}
-
-export function clearRepositoryCache() {
-  console.info("[CACHE] 🧹 In-Memory Repository Cache Cleared.");
-  categoriesCache = null;
-  courseSeriesCache = null;
-  courseOfferingsCache = null;
-  coursesCache = null;
-  sessionsCache = null;
-  instructorsCache = null;
-}
-
-export interface BookingDataOptions {
-  skipStudents?: boolean;
-  skipReservations?: boolean;
-  skipEnrollments?: boolean;
-  skipAttendance?: boolean;
-  skipRecords?: boolean;
-}
-
-export async function getBookingData(options?: BookingDataOptions): Promise<BookingData> {
+export async function getBookingData(): Promise<BookingData> {
   const db = getFirestoreDb();
 
   if (!db) {
@@ -177,91 +138,57 @@ export async function getBookingData(options?: BookingDataOptions): Promise<Book
   }
 
   try {
-    const cachedCategories = getCached(categoriesCache);
-    const cachedCourses = getCached(coursesCache);
-    const cachedSessions = getCached(sessionsCache);
-    const cachedCourseSeries = getCached(courseSeriesCache);
-    const cachedCourseOfferings = getCached(courseOfferingsCache);
-    const cachedInstructors = getCached(instructorsCache);
-
     const [
-      categories,
-      coursesOnly,
-      sessions,
-      courseSeries,
-      courseOfferings,
-      instructors,
-      reservations,
-      students,
-      courseSessions,
-      studentCourseRecords,
-      enrollments,
-      attendanceRecords,
+      categorySnapshot,
+      courseSnapshot,
+      sessionSnapshot,
+      reservationSnapshot,
+      studentSnapshot,
+      courseSeriesSnapshot,
+      courseOfferingSnapshot,
+      courseSessionSnapshot,
+      studentCourseRecordSnapshot,
+      enrollmentSnapshot,
+      attendanceRecordSnapshot,
+      instructorSnapshot,
     ] = await Promise.all([
-      // 1. Categories
-      cachedCategories 
-        ? Promise.resolve(cachedCategories) 
-        : db.collection("categories").orderBy("sortOrder", "asc").get().then(snap => snap.docs.map(doc => ({ id: doc.id, ...doc.data() }) as CourseCategory)),
-      // 2. Courses
-      cachedCourses 
-        ? Promise.resolve(cachedCourses) 
-        : db.collection("courses").get().then(snap => snap.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Omit<Course, "sessions">)),
-      // 3. Sessions
-      cachedSessions 
-        ? Promise.resolve(cachedSessions) 
-        : db.collection("sessions").get().then(snap => snap.docs.map(doc => ({ id: doc.id, ...doc.data() }) as CourseSession)),
-      // 4. CourseSeries
-      cachedCourseSeries 
-        ? Promise.resolve(cachedCourseSeries) 
-        : db.collection("courseSeries").get().then(snap => snap.docs.map(doc => ({ id: doc.id, ...doc.data() }) as CourseSeries)),
-      // 5. CourseOfferings
-      cachedCourseOfferings 
-        ? Promise.resolve(cachedCourseOfferings) 
-        : db.collection("courseOfferings").get().then(snap => snap.docs.map(doc => ({ id: doc.id, ...doc.data() }) as CourseOffering)),
-      // 6. Instructors
-      cachedInstructors 
-        ? Promise.resolve(cachedInstructors) 
-        : db.collection("instructors").get().then(snap => snap.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Instructor)),
-      
-      // 7. Reservations (optional)
-      options?.skipReservations 
-        ? Promise.resolve([]) 
-        : db.collection("reservations").get().then(snap => snap.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Reservation)),
-      // 8. Students (optional)
-      options?.skipStudents 
-        ? Promise.resolve([]) 
-        : db.collection("students").get().then(snap => snap.docs.map(doc => normalizeFirestoreStudent(doc.id, doc.data() as FirestoreStudentDocument)).sort(compareStudentsForRoster)),
-      // 9. CourseSessions (using sessions collection as proxy metadata cache)
-      cachedSessions 
-        ? Promise.resolve(cachedSessions as any[]) 
-        : db.collection("courseSessions").get().then(snap => snap.docs.map(doc => ({ id: doc.id, ...doc.data() }) as any)),
-      // 10. StudentCourseRecords (optional)
-      options?.skipRecords 
-        ? Promise.resolve([]) 
-        : db.collection("studentCourseRecords").get().then(snap => snap.docs.map(doc => ({ id: doc.id, ...doc.data() }) as StudentCourseRecord)),
-      // 11. Enrollments (optional)
-      options?.skipEnrollments 
-        ? Promise.resolve([]) 
-        : db.collection("enrollments").get().then(snap => snap.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Enrollment)),
-      // 12. AttendanceRecords (optional)
-      options?.skipAttendance 
-        ? Promise.resolve([]) 
-        : db.collection("attendanceRecords").get().then(snap => snap.docs.map(doc => ({ id: doc.id, ...doc.data() }) as any)),
+      db.collection("categories").orderBy("sortOrder", "asc").get(),
+      db.collection("courses").get(),
+      db.collection("sessions").get(),
+      db.collection("reservations").get(),
+      db.collection("students").get(),
+      db.collection("courseSeries").get(),
+      db.collection("courseOfferings").get(),
+      db.collection("courseSessions").get(),
+      db.collection("studentCourseRecords").get(),
+      db.collection("enrollments").get(),
+      db.collection("attendanceRecords").get(),
+      db.collection("instructors").get(),
     ]);
 
-    // Update in-memory cache
-    const now = Date.now();
-    if (!cachedCategories) categoriesCache = { data: categories, timestamp: now };
-    if (!cachedCourses) coursesCache = { data: coursesOnly as any[], timestamp: now };
-    if (!cachedSessions) sessionsCache = { data: sessions, timestamp: now };
-    if (!cachedCourseSeries) courseSeriesCache = { data: courseSeries, timestamp: now };
-    if (!cachedCourseOfferings) courseOfferingsCache = { data: courseOfferings, timestamp: now };
-    if (!cachedInstructors) instructorsCache = { data: instructors, timestamp: now };
+    const categories = categorySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CourseCategory);
+    const sessions = sessionSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CourseSession);
+    const reservations = reservationSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Reservation);
+    const students = studentSnapshot.docs
+      .map((doc) =>
+        normalizeFirestoreStudent(doc.id, doc.data() as FirestoreStudentDocument),
+      )
+      .sort(compareStudentsForRoster);
+    const courseSeries = courseSeriesSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CourseSeries);
+    const courseOfferings = courseOfferingSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CourseOffering);
+    const courseSessions = courseSessionSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as BookingData["courseSessions"][number]);
+    const studentCourseRecords = studentCourseRecordSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as StudentCourseRecord);
+    const enrollments = enrollmentSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Enrollment);
+    const attendanceRecords = attendanceRecordSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as BookingData["attendanceRecords"][number]);
+    const instructors = instructorSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Instructor);
+    const courses = courseSnapshot.docs.map((doc) => {
+      const course = { id: doc.id, ...doc.data() } as Omit<Course, "sessions">;
 
-    const courses = (coursesOnly as any[]).map((course) => ({
-      ...course,
-      sessions: sessions.filter((session) => session.courseId === course.id),
-    }));
+      return {
+        ...course,
+        sessions: sessions.filter((session) => session.courseId === course.id),
+      };
+    });
 
     return normalizeBookingData({
       categories,
@@ -356,17 +283,6 @@ export async function getCourseCatalog(): Promise<Pick<BookingData, "categories"
     };
   }
 
-  // Try cache first
-  const cachedCategories = getCached(categoriesCache);
-  const cachedCourses = getCached(coursesCache);
-
-  if (cachedCategories && cachedCourses) {
-    return {
-      categories: cachedCategories,
-      courses: cachedCourses.filter((course) => course.status !== "archived" && course.isActive !== false),
-    };
-  }
-
   try {
     const [categorySnapshot, courseSnapshot, sessionSnapshot] = await Promise.all([
       db.collection("categories").orderBy("sortOrder", "asc").get(),
@@ -386,13 +302,6 @@ export async function getCourseCatalog(): Promise<Pick<BookingData, "categories"
     });
 
     const normalized = normalizeBookingData({ categories, courses, reservations: [], students: [] });
-    
-    // Populate cache
-    const now = Date.now();
-    categoriesCache = { data: categories, timestamp: now };
-    coursesCache = { data: courses, timestamp: now };
-    sessionsCache = { data: sessions, timestamp: now };
-
     return {
       categories: normalized.categories,
       courses: normalized.courses.filter((course) => course.status !== "archived" && course.isActive !== false),
@@ -790,7 +699,6 @@ export function getBookingQuotaGroupId(course?: Partial<Course> | null, courseId
 }
 
 export async function createReservation(input: CreateReservationInput) {
-  clearRepositoryCache();
   const db = getFirestoreDb();
 
   if (!db) {
@@ -1494,7 +1402,6 @@ export async function ensureSessionRosterReservation(studentId: string, courseId
 }
 
 export async function cancelReservation(reservationId: string, studentName: string, phoneLastThree: string) {
-  clearRepositoryCache();
   const db = getFirestoreDb();
 
   if (!db) {
@@ -1549,7 +1456,6 @@ export async function cancelReservation(reservationId: string, studentName: stri
 }
 
 export async function cancelReservationByStaff(reservationId: string) {
-  clearRepositoryCache();
   const db = getFirestoreDb();
 
   if (!db) {
@@ -1782,7 +1688,6 @@ function cancelReservationInJson(reservationId: string, studentName: string, pho
 }
 
 export async function upsertCategory(category: CourseCategory) {
-  clearRepositoryCache();
   const db = getFirestoreDb();
   if (!db) {
     const data = readBookingData();
@@ -1809,7 +1714,6 @@ export async function upsertCategory(category: CourseCategory) {
 }
 
 export async function upsertCourse(course: Omit<Course, "sessions">) {
-  clearRepositoryCache();
   const db = getFirestoreDb();
   if (!db) {
     const data = readBookingData();
@@ -1837,7 +1741,6 @@ export async function upsertCourse(course: Omit<Course, "sessions">) {
 
 
 export async function deleteSessionsByIds(sessionIds: string[]) {
-  clearRepositoryCache();
   const uniqueSessionIds = Array.from(new Set(sessionIds.filter(Boolean)));
   if (uniqueSessionIds.length === 0) return;
 
@@ -1892,7 +1795,6 @@ export async function deleteSessionsByIds(sessionIds: string[]) {
 }
 
 export async function upsertSession(session: CourseSession) {
-  clearRepositoryCache();
   const db = getFirestoreDb();
   if (!db) {
     const data = readBookingData();
@@ -1927,7 +1829,6 @@ export async function upsertSession(session: CourseSession) {
 }
 
 export async function upsertCourseSeries(series: CourseSeries) {
-  clearRepositoryCache();
   const db = getFirestoreDb();
   if (!db) {
     const data = readBookingData();
@@ -1956,7 +1857,6 @@ export async function upsertCourseSeries(series: CourseSeries) {
 }
 
 export async function upsertCourseOffering(offering: CourseOffering) {
-  clearRepositoryCache();
   const db = getFirestoreDb();
   if (!db) {
     const data = readBookingData();
@@ -2510,7 +2410,6 @@ export async function setDocumentActive(
   id: string,
   isActive: boolean,
 ) {
-  clearRepositoryCache();
   const applyLocal = () => {
     const data = readBookingData();
     if (collection === "categories") {
@@ -2575,7 +2474,6 @@ export async function setDocumentActive(
 }
 
 export async function deleteManagedDocument(collection: "categories" | "courses" | "courseSeries" | "courseOfferings", id: string) {
-  clearRepositoryCache();
   const applyLocal = () => {
     const data = readBookingData();
     if (collection === "categories") data.categories = data.categories.filter((item) => item.id !== id);
@@ -2606,7 +2504,6 @@ export async function deleteManagedDocument(collection: "categories" | "courses"
 }
 
 export async function deleteSessionAndReservations(sessionId: string) {
-  clearRepositoryCache();
   const db = getFirestoreDb();
 
   if (!db) {
@@ -2665,7 +2562,6 @@ export async function deleteSessionAndReservations(sessionId: string) {
 }
 
 export async function deleteCourseSessionsAndReservations(courseId: string) {
-  clearRepositoryCache();
   const db = getFirestoreDb();
 
   if (!db) {
@@ -2781,7 +2677,6 @@ function getCourseOfferingCascadeTargets(data: BookingData, offeringId: string) 
 }
 
 export async function deleteCourseOfferingCascade(offeringId: string): Promise<CourseOfferingCascadeDeleteResult> {
-  clearRepositoryCache();
   const applyLocal = () => {
     const data = readBookingData();
     const { legacyCourseIds, courseSessionIds } = getCourseOfferingCascadeTargets(data, offeringId);
@@ -3019,7 +2914,6 @@ function buildTimestamp() {
 
 
 export async function upsertInstructor(instructor: Instructor) {
-  clearRepositoryCache();
   const db = getFirestoreDb();
   if (!db) {
     const data = readBookingData();
@@ -3048,7 +2942,6 @@ export async function upsertInstructor(instructor: Instructor) {
 }
 
 export async function deleteInstructorIdentityDocument(instructorId: string) {
-  clearRepositoryCache();
   const now = new Date().toISOString();
 
   const applyLocal = () => {
