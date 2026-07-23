@@ -79,7 +79,12 @@ function isWithinRange(date: string, start: string, end: string) {
 
 export default async function AdminStatsPage({ searchParams }: PageProps) {
   const { courseId, report } = await searchParams;
-  const { categories, courses, reservations } = await getBookingData();
+  const { categories, courses, reservations } = await getBookingData({
+    skipStudents: true,
+    skipEnrollments: true,
+    skipAttendance: true,
+    skipRecords: true,
+  });
   const activeCourses = courses.filter((course) => course.isActive);
   const selectedCourse =
     courses.find((course) => course.id === courseId) ??
