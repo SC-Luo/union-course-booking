@@ -130,3 +130,12 @@ npm.cmd run build
 ## 2026-06-11
 
 - 已新增 `specs/system-architecture.md`，可優先用來理解系統組成、前端 / 後端分工、資料流、Firestore 串接、JSON fallback 與批次同步方式。
+
+## 2026-08-05 Production 清除年度資料錯誤修復
+
+- 使用者在 `/admin/course-offerings` 的「清除本年度資料」輸入 `確認清除` 後，production 出現黑底 server error，digest 為 `2286968051`。
+- Vercel logs 指向 `deleteCourseOfferingCascade()`：Firestore cascade delete 仍依賴 `readBookingData()` 推算關聯，且成功後呼叫 `applyLocal()` 嘗試同步本機 JSON；production 已禁止 JSON fallback，因此流程中斷。
+- 已修正 `src/lib/booking-repository.ts`：Firestore 模式下直接從 Firestore 查年度課程、legacy course、sessions / courseSessions、students、enrollments、reservations、attendanceRecords、studentCourseRecords、entitlements 並批次刪除；只有非 production 才同步 JSON。
+- 相鄰刪除流程已補 production guard，避免 Firestore 失敗後再落到本機 JSON fallback。
+- 已更新 `notes/踩坑過程.md` 與 `tasks.md`；本次未在 production 重按「清除」，因為該操作會刪除正式資料。
+- 驗證：`npm.cmd run lint` 通過；`npm.cmd run build` 通過。乾淨 production worktree 因沒有 `data/booking-data.json` 仍會顯示已知本機建置警告，正式 Firestore 部署不受影響。

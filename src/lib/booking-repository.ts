@@ -1267,6 +1267,9 @@ export async function deleteSessionsByIds(sessionIds: string[]) {
       await batch.commit();
     }
   } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Session delete failed.", error);
+    }
     console.warn("Firestore session delete failed, falling back to local booking data.", error);
     const data = readBookingData();
     const idSet = new Set(uniqueSessionIds);
@@ -1517,6 +1520,9 @@ export async function removeStudentCourseEligibility(studentId: string, seriesId
       await batch.commit();
     }
   } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Student course eligibility delete failed.", error);
+    }
     console.warn("Firestore student course eligibility delete failed, falling back to local booking data.", error);
     applyLocal();
   }
@@ -1714,6 +1720,9 @@ export async function deleteManagedDocument(collection: "categories" | "courses"
   try {
     await db.collection(collection).doc(id).delete();
   } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Managed document delete failed.", error);
+    }
     console.warn("Firestore managed document delete failed, falling back to local booking data.", error);
     applyLocal();
   }
@@ -1759,6 +1768,9 @@ export async function deleteSessionAndReservations(sessionId: string) {
       await batch.commit();
     }
   } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Session delete failed.", error);
+    }
     console.warn("Firestore session delete failed, falling back to local booking data.", error);
     const data = readBookingData();
 
@@ -1822,6 +1834,9 @@ export async function deleteCourseSessionsAndReservations(courseId: string) {
       await batch.commit();
     }
   } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Course sessions delete failed.", error);
+    }
     console.warn("Firestore course sessions delete failed, falling back to local booking data.", error);
     const data = readBookingData();
     const course = data.courses.find((item) => item.id === courseId);
@@ -1926,19 +1941,45 @@ export async function deleteCourseOfferingCascade(offeringId: string): Promise<C
   if (!db) return applyLocal();
 
   try {
-    const localData = readBookingData();
-    const { legacyCourseIds, courseSessionIds, studentIds } = getCourseOfferingCascadeTargets(localData, offeringId);
     const refs = new Map<string, any>();
+    const legacyCourseIds = new Set<string>();
+    const courseSessionIds = new Set<string>();
+    const studentIds = new Set<string>();
 
-    const collect = async (collection: string, field: string, value: string) => {
-      const snapshot = await db.collection(collection).where(field, "==", value).get();
-      snapshot.docs.forEach((doc) => refs.set(doc.ref.path, doc.ref));
+    const addRef = (ref: any) => {
+      refs.set(ref.path, ref);
     };
 
-    refs.set(`courseOfferings/${offeringId}`, db.collection("courseOfferings").doc(offeringId));
-    await collect("courses", "offeringId", offeringId);
-    await collect("courseSessions", "offeringId", offeringId);
-    await collect("students", "offeringId", offeringId);
+    const collect = async (
+      collection: string,
+      field: string,
+      value: string,
+      onData?: (id: string, data: Record<string, unknown>) => void,
+    ) => {
+      const snapshot = await db.collection(collection).where(field, "==", value).get();
+      snapshot.docs.forEach((doc) => {
+        addRef(doc.ref);
+        onData?.(doc.id, doc.data() as Record<string, unknown>);
+      });
+    };
+
+    const offeringRef = db.collection("courseOfferings").doc(offeringId);
+    const offeringDoc = await offeringRef.get();
+    addRef(offeringRef);
+    if (offeringDoc.exists) {
+      const offering = offeringDoc.data() as Partial<CourseOffering>;
+      if (offering.legacyCourseId) legacyCourseIds.add(offering.legacyCourseId);
+    }
+
+    await collect("courses", "offeringId", offeringId, (id, data) => {
+      legacyCourseIds.add(String(data.id ?? id));
+    });
+    await collect("courseSessions", "offeringId", offeringId, (id, data) => {
+      courseSessionIds.add(String(data.id ?? id));
+    });
+    await collect("students", "offeringId", offeringId, (id, data) => {
+      studentIds.add(String(data.id ?? id));
+    });
     await collect("enrollments", "offeringId", offeringId);
     await collect("enrollments", "courseOfferingId", offeringId);
     await collect("reservations", "offeringId", offeringId);
@@ -1947,21 +1988,30 @@ export async function deleteCourseOfferingCascade(offeringId: string): Promise<C
     await collect("entitlements", "offeringId", offeringId);
 
     for (const legacyCourseId of legacyCourseIds) {
-      refs.set(`courses/${legacyCourseId}`, db.collection("courses").doc(legacyCourseId));
-      await collect("students", "classId", legacyCourseId);
+      addRef(db.collection("courses").doc(legacyCourseId));
+      await collect("sessions", "courseId", legacyCourseId, (id, data) => {
+        courseSessionIds.add(String(data.id ?? id));
+      });
+      await collect("courseSessions", "legacyCourseId", legacyCourseId, (id, data) => {
+        courseSessionIds.add(String(data.id ?? id));
+      });
+      await collect("students", "classId", legacyCourseId, (id, data) => {
+        studentIds.add(String(data.id ?? id));
+      });
       await collect("enrollments", "courseId", legacyCourseId);
       await collect("reservations", "courseId", legacyCourseId);
       await collect("studentCourseRecords", "courseId", legacyCourseId);
     }
 
     for (const sessionId of courseSessionIds) {
-      refs.set(`courseSessions/${sessionId}`, db.collection("courseSessions").doc(sessionId));
+      addRef(db.collection("sessions").doc(sessionId));
+      addRef(db.collection("courseSessions").doc(sessionId));
       await collect("reservations", "sessionId", sessionId);
       await collect("attendanceRecords", "sessionId", sessionId);
     }
 
     for (const studentId of studentIds) {
-      refs.set(`students/${studentId}`, db.collection("students").doc(studentId));
+      addRef(db.collection("students").doc(studentId));
       await collect("enrollments", "studentId", studentId);
       await collect("attendanceRecords", "studentId", studentId);
       await collect("studentCourseRecords", "studentId", studentId);
@@ -1975,8 +2025,36 @@ export async function deleteCourseOfferingCascade(offeringId: string): Promise<C
       await batch.commit();
     }
 
-    return applyLocal();
+    const deleted = {
+      courseOfferings: 0,
+      courses: 0,
+      courseSessions: 0,
+      students: 0,
+      enrollments: 0,
+      reservations: 0,
+      attendanceRecords: 0,
+      studentCourseRecords: 0,
+      entitlements: 0,
+    };
+
+    refs.forEach((_ref, path) => {
+      const collection = String(path).split("/")[0] as keyof typeof deleted;
+      if (collection in deleted) deleted[collection] += 1;
+    });
+
+    const result = { ok: true as const, offeringId, legacyCourseIds: Array.from(legacyCourseIds), deleted };
+    if (shouldFallbackToJson()) {
+      try {
+        return applyLocal();
+      } catch (localError) {
+        console.warn("Local booking data sync after Firestore cascade delete failed.", localError);
+      }
+    }
+    return result;
   } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Course offering cascade delete failed.", error);
+    }
     console.warn("Firestore course offering cascade delete failed, falling back to local booking data.", error);
     return applyLocal();
   }
@@ -2014,6 +2092,9 @@ export async function deleteStudentIdentityDocument(studentId: string) {
   try {
     await db.collection("students").doc(studentId).delete();
   } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Student delete failed.", error);
+    }
     console.warn("Firestore student delete failed, falling back to local booking data.", error);
     applyLocal();
   }

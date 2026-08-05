@@ -8,7 +8,7 @@ tags:
   - ai-changelog
   - project-memory
 created: 2026-05-27
-updated: 2026-06-08
+updated: 2026-08-05
 status: active
 summary: 影響後續 AI 接手、產品方向、技術架構、資料結構或開發流程的重要變更。
 related:
@@ -29,6 +29,7 @@ related:
 - **Logo 納入 production**：新增 `public/brand/union-logo-full.png` 與 `public/brand/union-logo-mark.png`，並建立 `src/lib/brand.ts` 作為品牌設定單一來源。學生端外殼、後台外殼與後台登入頁都改為顯示工會 logo 與「課程管理系統」。
 - **頁首文案調整**：學生端頁首移除副標「預約、名冊與出席管理」，手機版頁首改為顯示組織全名與「課程管理系統」。
 - **課程調整 server error 修復**：修正 Firestore 不接受 `undefined` 欄位造成 `/admin/course-offerings` 與 `/admin/course-masters` POST 後出現 server error 的問題。資料寫入層統一在 Firestore `.set()` 前移除 `undefined` 欄位，production 寫入失敗時不再嘗試 JSON fallback。
+- **清除本年度資料 server error 修復**：修正 `/admin/course-offerings` 的 cascade delete 在 production 仍依賴本機 JSON 的問題。Firestore 模式下改由 Firestore 直接查找並批次刪除年度課程、legacy course、課堂、名冊、預約、出席與資格關聯資料；本機 JSON 只保留為非 production 備援。
 - **AI 追溯與防錯流程**：新增 `docs/AI_PROJECT_PLAN.md` 與 `notes/踩坑過程.md`，記錄 logo 先前只存在於未提交工作區、未進 `main`，導致 production 最小部署後消失的原因與避免規則。
 
 ## 2026-06-30
