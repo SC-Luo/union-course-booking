@@ -30,6 +30,7 @@ related:
 | `context.md` | 專案背景與協作限制 |
 | `GPT_CODEX_WORKFLOW.md` | GPT 任務包與 Codex 接手格式 |
 | `CHANGELOG_AI.md` | 影響 AI 接手的重要變更 |
+| `docs/AI_PROJECT_PLAN.md` | AI 專案規劃、品牌資產、追溯與部署規則 |
 | `README.md` | 人類入口 |
 | `AGENTS.md` | Codex / agent 指令 |
 
@@ -97,6 +98,7 @@ related:
 | `src/lib/booking-repository.ts` | Firestore / JSON 資料存取 |
 | `src/lib/data-store.ts` | 本機 JSON 正規化與讀寫 |
 | `src/lib/firebase-admin.ts` | Firebase Admin 初始化 |
+| `src/lib/brand.ts` | APP 名稱、工會名稱、logo 路徑與 metadata 品牌設定 |
 | `src/lib/course-utils.ts` | 課程工具函式 |
 | `src/lib/course-coding.ts` | 課程編碼與分類 |
 | `src/lib/member-excel-importer.ts` | 會員 Excel 匯入 |
@@ -108,6 +110,8 @@ related:
 | 路徑 | 用途 |
 |---|---|
 | `data/booking-data.json` | 本機 JSON 備援資料，可能含真實資料 |
+| `public/brand/union-logo-full.png` | 工會完整 logo |
+| `public/brand/union-logo-mark.png` | 工會圖標 logo / favicon |
 | `tools/sync-to-cloud.ps1` | 同步原始碼到雲端備份 |
 | `tools/sync-from-cloud.ps1` | 從雲端備份同步回本機 |
 | `tools/sync-firestore-from-booking-data.mjs` | 從 JSON 同步 Firestore |

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { APP_TITLE, BRAND } from "@/lib/brand";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -13,8 +14,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "課程管理系統",
-  description: "課程建置、預約、名冊與出席管理系統",
+  title: APP_TITLE,
+  description: BRAND.description,
+  icons: {
+    icon: BRAND.logoMarkSrc,
+    apple: BRAND.logoMarkSrc,
+  },
 };
 
 export default function RootLayout({

@@ -1,5 +1,7 @@
 /* eslint-disable @next/next/no-html-link-for-pages */
+import Image from "next/image";
 import type { ReactNode } from "react";
+import { BRAND } from "@/lib/brand";
 
 type IconName =
   | "home"
@@ -362,20 +364,35 @@ export function StudentShell({ children }: { children: ReactNode }) {
         <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <a
             href="/"
-            className="inline-flex items-center gap-3 rounded-2xl px-2 py-1 text-[#3a2a20] transition hover:bg-white/70"
+            className="inline-flex min-w-0 items-center gap-3 rounded-2xl px-2 py-1 text-[#3a2a20] transition hover:bg-white/70"
+            aria-label={`${BRAND.nameZh} ${BRAND.appName}`}
           >
-            <span
-              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#E85F00] via-[#E7892B] to-[#B46F4A] text-white shadow-sm ring-1 ring-white/70"
-              aria-hidden="true"
-            >
-              <LineIcon name="course" className="h-6 w-6" />
+            <span className="relative hidden h-14 w-[238px] shrink-0 overflow-hidden sm:block">
+              <Image
+                src={BRAND.logoFullSrc}
+                alt={BRAND.nameZh}
+                fill
+                priority
+                sizes="238px"
+                className="object-contain object-left"
+              />
+            </span>
+            <span className="relative h-12 w-10 shrink-0 sm:hidden">
+              <Image
+                src={BRAND.logoMarkSrc}
+                alt=""
+                fill
+                priority
+                sizes="40px"
+                className="object-contain"
+              />
             </span>
             <span className="min-w-0">
               <span className="block text-base font-black leading-tight tracking-tight sm:text-lg">
-                學員中心
+                {BRAND.appName}
               </span>
               <span className="mt-0.5 block text-sm font-bold leading-tight text-[#8B5035]">
-                課程預約、查詢與取消
+                預約、名冊與出席管理
               </span>
             </span>
           </a>
@@ -549,17 +566,24 @@ export function AdminShell({
           <a
             href="/admin"
             className="mb-5 flex items-center gap-3 rounded-[24px] border border-[#E7892B]/25 bg-gradient-to-br from-white to-[#fff1e0] px-3 py-3 shadow-sm"
-            title="工會課程後台"
+            title={`${BRAND.nameZh} ${BRAND.appName}`}
           >
-            <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#E85F00] via-[#E7892B] to-[#B46F4A] text-white shadow-sm">
-              <LineIcon name="course" className="h-7 w-7" />
+            <span className="relative h-14 w-11 shrink-0">
+              <Image
+                src={BRAND.logoMarkSrc}
+                alt=""
+                fill
+                priority
+                sizes="44px"
+                className="object-contain"
+              />
             </span>
             <span className="min-w-0">
-              <span className="block text-2xl font-black tracking-tight text-zinc-950">
-                秘書處後台
+              <span className="block text-lg font-black leading-6 tracking-tight text-zinc-950">
+                {BRAND.nameZh}
               </span>
-              <span className="mt-1 block text-sm leading-5 text-zinc-500">
-                課程建制、名冊與統計管理
+              <span className="mt-1 block text-sm font-bold leading-5 text-[#8B1E6D]">
+                {BRAND.appName}
               </span>
             </span>
           </a>
@@ -621,12 +645,20 @@ export function AdminShell({
           <header className="border-b border-[#E7892B]/20 bg-white/80 px-4 py-3 backdrop-blur lg:hidden">
             <a
               href="/admin"
-              className="inline-flex items-center gap-2 text-base font-semibold text-zinc-900"
+              className="inline-flex min-w-0 items-center gap-2 text-base font-semibold text-zinc-900"
+              aria-label={`${BRAND.nameZh} ${BRAND.appName}`}
             >
-              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-[#E85F00] via-[#E7892B] to-[#B46F4A] text-white">
-                <LineIcon name="course" className="h-4.5 w-4.5" />
+              <span className="relative h-10 w-8 shrink-0">
+                <Image
+                  src={BRAND.logoMarkSrc}
+                  alt=""
+                  fill
+                  priority
+                  sizes="32px"
+                  className="object-contain"
+                />
               </span>
-              <span>秘書處後台</span>
+              <span className="truncate">{BRAND.appName}</span>
             </a>
           </header>
 

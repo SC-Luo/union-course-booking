@@ -41,9 +41,10 @@ related:
 5. `context.md`
 6. `GPT_CODEX_WORKFLOW.md`
 7. `filemap.md`
-8. `specs/product-spec.md`
-9. `specs/user-flow.md`
-10. `specs/tech-context.md`
+8. `docs/AI_PROJECT_PLAN.md`
+9. `specs/product-spec.md`
+10. `specs/user-flow.md`
+11. `specs/tech-context.md`
 
 不要一開始讀完整 `notes/`、`archive/`、secondbrain vault、完整聊天紀錄或大型備份資料。
 

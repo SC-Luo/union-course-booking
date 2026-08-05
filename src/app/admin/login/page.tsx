@@ -1,4 +1,6 @@
+import Image from "next/image";
 import Link from "next/link";
+import { BRAND } from "@/lib/brand";
 import { adminLoginAction } from "./actions";
 
 type PageProps = {
@@ -14,7 +16,18 @@ export default async function AdminLoginPage({ searchParams }: PageProps) {
         <Link href="/" className="mb-5 inline-flex text-sm font-medium text-zinc-600 hover:text-zinc-950">
           返回學生端
         </Link>
-        <p className="mb-2 text-sm font-medium text-emerald-700">工作人員後台</p>
+        <div className="mb-6">
+          <Image
+            src={BRAND.logoFullSrc}
+            alt={BRAND.nameZh}
+            width={2481}
+            height={844}
+            priority
+            sizes="(max-width: 640px) 90vw, 380px"
+            className="h-auto w-full max-w-[380px]"
+          />
+        </div>
+        <p className="mb-2 text-sm font-medium text-[#8B1E6D]">{BRAND.appName}</p>
         <h1 className="text-2xl font-semibold text-zinc-950">登入管理系統</h1>
         {error ? <p className="mt-4 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">密碼不正確，請重新輸入。</p> : null}
         <form action={adminLoginAction} className="mt-6 grid gap-4">

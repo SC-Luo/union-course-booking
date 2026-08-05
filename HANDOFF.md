@@ -29,12 +29,13 @@ related:
 - 學生端已可瀏覽課程、預約、查詢與截止前取消。
 - 後台已可管理分類、課程主檔、年度課程、課堂日誌、名冊、預約名單、出席、取消與匯出。
 - 資料來源可使用 Firestore，並保留本機 JSON 作為開發與異常備援。
+- Production APP 顯示名稱為「課程管理系統」，品牌設定集中在 `src/lib/brand.ts`，logo 資產在 `public/brand/`。
 - 2026-06-08 已完成一輪較大的 UI / UX 架構整理，開始把系統收斂成三角色入口：學員中心、授課工作台、秘書處後台。
 - 2026-06-08 已實際重跑 `npm.cmd run lint` 與 `npm.cmd run build`，目前通過。
 
 ## 最近處理
 
-- 2026-08-05 production APP 顯示名稱改為「課程管理系統」，同步更新全站 metadata description。
+- 2026-08-05 production APP 顯示名稱與 logo 補齊：新增品牌設定 `src/lib/brand.ts`、logo 資產 `public/brand/`，並讓學生端、後台側欄、手機後台 header 與後台登入頁都顯示工會 logo 與「課程管理系統」。同時新增 `docs/AI_PROJECT_PLAN.md` 與 `notes/踩坑過程.md`，記錄 logo 消失原因與後續 AI 防錯規則。
 - 2026-06-30 正式上線安全防禦與開發流建立：撰寫了 [`docs/POST_LAUNCH_WORKFLOW.md`](file:///C:/Users/User/codex-projects/union-course-booking/docs/POST_LAUNCH_WORKFLOW.md)。重寫同步腳本，加入三層確認鎖、強制生產資料庫快照備份、以及 100 筆分批節流限速。執行 git cached 移除了 `data/booking-data.json` 追蹤防範個資洩漏，並建立去識別化範本檔案。
 - 2026-06-29 將前台學員預約與預約查詢改回「姓名 + 身分證後三碼」：修改了 [`booking-form.tsx`](file:///C:/Users/User/codex-projects/union-course-booking/src/components/booking-form.tsx)、[`search/page.tsx`](file:///C:/Users/User/codex-projects/union-course-booking/src/app/booking/search/page.tsx)、[`actions.ts`](file:///C:/Users/User/codex-projects/union-course-booking/src/app/actions.ts) 與 [`booking-repository.ts`](file:///C:/Users/User/codex-projects/union-course-booking/src/lib/booking-repository.ts)。預約資格過濾及查詢均強制同時比對姓名與後三碼，以防止同名同姓誤判。同時更新前台 `localStorage` 記憶與頁面提示。
 - 2026-06-29 實現學員前台使用者記憶機制：在新生資料填寫成功（`/new-student/success`）或預約成功時，在 client-side 將姓名儲存至 `localStorage` 的 `union_booking_student_profile`。當進入 `/booking/search` 且 URL 中沒有 query 時，自動導向並執行預約查詢；查詢頁面頂部支援「改用其他姓名查詢」按鈕以清除記憶。
