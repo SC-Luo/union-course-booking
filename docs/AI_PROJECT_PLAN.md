@@ -21,12 +21,13 @@
 ## 2026-08-05 已完成
 
 - 將全站 metadata title 從單純 `課程管理系統` 改為 `台南市美髮及美容美體業產業工會｜課程管理系統`。
-- 將 metadata description 統一為 `課程建置、預約、名冊與出席管理系統`。
+- 將 metadata description 統一為 `課程管理系統`。
 - 新增 `src/lib/brand.ts` 作為品牌單一來源。
 - 新增 `public/brand/union-logo-full.png` 與 `public/brand/union-logo-mark.png`，並納入 Git。
 - 學員端外殼 `StudentShell` 顯示 logo 與 `課程管理系統`。
 - 後台外殼 `AdminShell` 桌機側欄與手機 header 顯示 logo 與 `課程管理系統`。
 - 後台登入頁顯示完整 logo 與 `課程管理系統`。
+- 學員端頁首已移除副標 `預約、名冊與出席管理`；手機版頁首必須顯示組織全名 `台南市美髮及美容美體業產業工會`。
 - 更新本文件、`HANDOFF.md`、`CHANGELOG_AI.md`、`tasks.md`、`filemap.md` 與 `notes/踩坑過程.md`，讓事件可追溯。
 
 ## 2026-08-05 沒做

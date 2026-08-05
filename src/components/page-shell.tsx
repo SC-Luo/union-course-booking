@@ -388,11 +388,11 @@ export function StudentShell({ children }: { children: ReactNode }) {
               />
             </span>
             <span className="min-w-0">
+              <span className="block text-xs font-black leading-tight text-[#8B1E6D] sm:hidden">
+                {BRAND.nameZh}
+              </span>
               <span className="block text-base font-black leading-tight tracking-tight sm:text-lg">
                 {BRAND.appName}
-              </span>
-              <span className="mt-0.5 block text-sm font-bold leading-tight text-[#8B5035]">
-                預約、名冊與出席管理
               </span>
             </span>
           </a>
@@ -658,7 +658,14 @@ export function AdminShell({
                   className="object-contain"
                 />
               </span>
-              <span className="truncate">{BRAND.appName}</span>
+              <span className="min-w-0">
+                <span className="block truncate text-xs font-black leading-tight text-[#8B1E6D]">
+                  {BRAND.nameZh}
+                </span>
+                <span className="block truncate text-base font-black leading-tight">
+                  {BRAND.appName}
+                </span>
+              </span>
             </a>
           </header>
 
