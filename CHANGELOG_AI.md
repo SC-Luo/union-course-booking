@@ -28,6 +28,7 @@ related:
 - **正式 APP 名稱與品牌補齊**：production 顯示名稱為「課程管理系統」，全站 metadata title 為「台南市美髮及美容美體業產業工會｜課程管理系統」，description 為「課程管理系統」。
 - **Logo 納入 production**：新增 `public/brand/union-logo-full.png` 與 `public/brand/union-logo-mark.png`，並建立 `src/lib/brand.ts` 作為品牌設定單一來源。學生端外殼、後台外殼與後台登入頁都改為顯示工會 logo 與「課程管理系統」。
 - **頁首文案調整**：學生端頁首移除副標「預約、名冊與出席管理」，手機版頁首改為顯示組織全名與「課程管理系統」。
+- **課程調整 server error 修復**：修正 Firestore 不接受 `undefined` 欄位造成 `/admin/course-offerings` 與 `/admin/course-masters` POST 後出現 server error 的問題。資料寫入層統一在 Firestore `.set()` 前移除 `undefined` 欄位，production 寫入失敗時不再嘗試 JSON fallback。
 - **AI 追溯與防錯流程**：新增 `docs/AI_PROJECT_PLAN.md` 與 `notes/踩坑過程.md`，記錄 logo 先前只存在於未提交工作區、未進 `main`，導致 production 最小部署後消失的原因與避免規則。
 
 ## 2026-06-30

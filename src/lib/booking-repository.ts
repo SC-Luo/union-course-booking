@@ -809,8 +809,11 @@ export async function markSessionReservationsAttended(sessionId: string) {
       .where("status", "==", "booked")
       .get();
 
-    await Promise.all(snapshot.docs.map((doc) => doc.ref.set(payload, { merge: true })));
+    await Promise.all(snapshot.docs.map((doc) => doc.ref.set(removeUndefinedFields(payload), { merge: true })));
   } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Batch attendance update failed.", error);
+    }
     console.warn("Firestore batch attendance update failed, falling back to local booking data.", error);
     applyLocalFallback();
   }
@@ -947,15 +950,18 @@ export async function ensureSessionRosterReservation(studentId: string, courseId
     const data = await getBookingData();
     const result = buildFromData(data);
     if (result.ok && "shouldCreate" in result) {
-      await db.collection("reservations").doc(result.reservation.id).set(result.reservation, { merge: true });
+      await db.collection("reservations").doc(result.reservation.id).set(removeUndefinedFields(result.reservation), { merge: true });
       try {
-        await db.collection("sessions").doc(sessionId).set({ updatedAt: now }, { merge: true });
+        await db.collection("sessions").doc(sessionId).set(removeUndefinedFields({ updatedAt: now }), { merge: true });
       } catch {
         // 部分專案版本沒有獨立 sessions collection；點名紀錄已成功建立即可。
       }
     }
     return result;
   } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Roster reservation ensure failed.", error);
+    }
     console.warn("Firestore roster reservation ensure failed, falling back to local booking data.", error);
     const data = readBookingData();
     const result = buildFromData(data);
@@ -1187,8 +1193,11 @@ export async function upsertCategory(category: CourseCategory) {
   }
 
   try {
-    await db.collection("categories").doc(category.id).set(category, { merge: true });
+    await db.collection("categories").doc(category.id).set(removeUndefinedFields(category), { merge: true });
   } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Category write failed.", error);
+    }
     console.warn("Firestore category write failed, falling back to local booking data.", error);
     const data = readBookingData();
     const index = data.categories.findIndex((item) => item.id === category.id);
@@ -1210,8 +1219,11 @@ export async function upsertCourse(course: Omit<Course, "sessions">) {
   }
 
   try {
-    await db.collection("courses").doc(course.id).set(course, { merge: true });
+    await db.collection("courses").doc(course.id).set(removeUndefinedFields(course), { merge: true });
   } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Course write failed.", error);
+    }
     console.warn("Firestore course write failed, falling back to local booking data.", error);
     const data = readBookingData();
     const index = data.courses.findIndex((item) => item.id === course.id);
@@ -1289,8 +1301,11 @@ export async function upsertSession(session: CourseSession) {
   }
 
   try {
-    await db.collection("sessions").doc(session.id).set(session, { merge: true });
+    await db.collection("sessions").doc(session.id).set(removeUndefinedFields(session), { merge: true });
   } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Session write failed.", error);
+    }
     console.warn("Firestore session write failed, falling back to local booking data.", error);
     const data = readBookingData();
     const course = data.courses.find((item) => item.id === session.courseId);
@@ -1317,8 +1332,11 @@ export async function upsertCourseSeries(series: CourseSeries) {
   }
 
   try {
-    await db.collection("courseSeries").doc(series.id).set(series, { merge: true });
+    await db.collection("courseSeries").doc(series.id).set(removeUndefinedFields(series), { merge: true });
   } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Course series write failed.", error);
+    }
     console.warn("Firestore course series write failed, falling back to local booking data.", error);
     const data = readBookingData();
     const courseSeries = data.courseSeries ?? [];
@@ -1342,8 +1360,11 @@ export async function upsertCourseOffering(offering: CourseOffering) {
   }
 
   try {
-    await db.collection("courseOfferings").doc(offering.id).set(offering, { merge: true });
+    await db.collection("courseOfferings").doc(offering.id).set(removeUndefinedFields(offering), { merge: true });
   } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Course offering write failed.", error);
+    }
     console.warn("Firestore course offering write failed, falling back to local booking data.", error);
     const data = readBookingData();
     const courseOfferings = data.courseOfferings ?? [];
@@ -1398,8 +1419,11 @@ export async function upsertEnrollment(enrollment: Enrollment) {
   }
 
   try {
-    await db.collection("enrollments").doc(enrollment.id).set(enrollment, { merge: true });
+    await db.collection("enrollments").doc(enrollment.id).set(removeUndefinedFields(enrollment), { merge: true });
   } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Enrollment write failed.", error);
+    }
     console.warn("Firestore enrollment write failed, falling back to local booking data.", error);
     const data = readBookingData();
     const enrollments = data.enrollments ?? [];
@@ -1424,8 +1448,11 @@ export async function upsertStudentCourseRecord(record: StudentCourseRecord) {
   }
 
   try {
-    await db.collection("studentCourseRecords").doc(record.id).set(record, { merge: true });
+    await db.collection("studentCourseRecords").doc(record.id).set(removeUndefinedFields(record), { merge: true });
   } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Student course record write failed.", error);
+    }
     console.warn("Firestore student course record write failed, falling back to local booking data.", error);
     const data = readBookingData();
     const records = data.studentCourseRecords ?? [];
@@ -1655,8 +1682,11 @@ export async function setDocumentActive(
       payload.bookingOpen = isActive;
       payload.status = isActive ? "open" : "closed";
     }
-    await db.collection(collection).doc(id).set(payload, { merge: true });
+    await db.collection(collection).doc(id).set(removeUndefinedFields(payload), { merge: true });
   } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Active-state write failed.", error);
+    }
     console.warn("Firestore active-state write failed, falling back to local booking data.", error);
     applyLocal();
   }
@@ -2022,8 +2052,11 @@ export async function upsertInstructor(instructor: Instructor) {
   }
 
   try {
-    await db.collection("instructors").doc(instructor.id).set(instructor, { merge: true });
+    await db.collection("instructors").doc(instructor.id).set(removeUndefinedFields(instructor), { merge: true });
   } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Instructor write failed.", error);
+    }
     console.warn("Firestore instructor write failed, falling back to local booking data.", error);
     const data = readBookingData();
     const instructors = data.instructors ?? [];
@@ -2055,13 +2088,16 @@ export async function deleteInstructorIdentityDocument(instructorId: string) {
 
   try {
     await db.collection("instructors").doc(instructorId).set(
-      {
+      removeUndefinedFields({
         isActive: false,
         updatedAt: now,
-      },
+      }),
       { merge: true },
     );
   } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Instructor delete failed.", error);
+    }
     console.warn("Firestore instructor delete failed, falling back to local booking data.", error);
     applyLocal();
   }

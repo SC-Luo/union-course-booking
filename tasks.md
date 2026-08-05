@@ -39,6 +39,7 @@ related:
 
 - [x] 2026-08-05 將 production APP 品牌補齊：畫面顯示工會 logo 與「課程管理系統」，品牌設定集中到 `src/lib/brand.ts`，logo 資產納入 `public/brand` 並推到 production。
 - [x] 2026-08-05 建立 AI 專案規劃與追溯文件：新增 `docs/AI_PROJECT_PLAN.md` 與 `notes/踩坑過程.md`，記錄 logo 消失原因、解法與後續避免規則。
+- [x] 2026-08-05 修復後台課程調整送出後 production server error：Firestore 寫入前統一移除 `undefined` 欄位，避免年度課程 `code` 與課程主檔 `defaultCourseMode` 等空值欄位造成寫入失敗。
 - [x] 2026-06-30 建立正式上線後開發流程指南與資料庫保護機制（安全分流與鐵則限制、三層確認鎖及節流限速寫入、自動快照備份防護、以及 git 排除真實個資 JSON 追蹤）。
 - [x] 2026-06-29 將前台學員預約與預約查詢改回「姓名 + 身分證後三碼」（支援預約資格多重過濾與 mismatch 理由回顯，取消預約資格加鎖）。
 - [x] 2026-06-29 實現學員前台使用者記憶機制與預約自動查詢（支援新生自填、預約成功後記憶姓名，自動帶入 `/booking/search`，並提供清除按鈕）。
