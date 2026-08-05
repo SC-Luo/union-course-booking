@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "工會課程預約系統",
-  description: "課程時段預約與出席管理系統",
+  title: "課程管理系統",
+  description: "課程建置、預約、名冊與出席管理系統",
 };
 
 export default function RootLayout({
