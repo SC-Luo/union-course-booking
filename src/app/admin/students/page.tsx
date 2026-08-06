@@ -1209,6 +1209,11 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
                 action={saveStudentIdentityAction}
                 className="mt-5 grid gap-3 border-t border-[#ead7c6] pt-5"
               >
+                <input
+                  type="hidden"
+                  name="redirectTo"
+                  value="/admin/students/:studentId/edit"
+                />
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="grid gap-2 text-sm font-bold text-zinc-700">
                     姓名

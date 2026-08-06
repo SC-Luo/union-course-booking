@@ -21,7 +21,7 @@ export default function NewStudentPage() {
         <StudentForm
           action={saveStudentIdentityAction}
           cancelHref="/admin/students"
-          redirectTo="/admin/students"
+          redirectTo="/admin/students/:studentId/edit"
           submitLabel="建立學員"
         />
       </div>

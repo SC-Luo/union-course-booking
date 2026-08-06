@@ -50,6 +50,111 @@ function getFirestoreDb() {
   }
 }
 
+type FirestoreReadContext = {
+  source: string;
+  route?: string;
+  requestId: string;
+};
+
+type StudentImportLookupInput = {
+  identities: Array<{ name: string; idNumberLast3: string }>;
+  memberNos?: string[];
+  needsEligibility?: boolean;
+  needsEnrollment?: boolean;
+  seriesId?: string;
+  year?: string | number;
+  targetOfferingId?: string;
+  source?: string;
+  route?: string;
+  requestId?: string;
+};
+
+type StudentImportWriteBatch = {
+  students: Student[];
+  studentCourseRecords?: StudentCourseRecord[];
+  enrollments?: Enrollment[];
+};
+
+function isFirestoreReadDebugEnabled() {
+  return process.env.BOOKING_FIRESTORE_READ_DEBUG === "true";
+}
+
+function createReadContext(input: {
+  source: string;
+  route?: string;
+  requestId?: string;
+}): FirestoreReadContext {
+  return {
+    source: input.source,
+    route: input.route,
+    requestId: input.requestId ?? randomUUID(),
+  };
+}
+
+async function withReadDiagnostics<T extends { docs: unknown[]; size: number }>(
+  collection: string,
+  context: FirestoreReadContext,
+  read: Promise<T>,
+): Promise<T> {
+  const start = performance.now();
+  const snapshot = await read;
+
+  if (isFirestoreReadDebugEnabled()) {
+    console.info("[firestore-read]", {
+      collection,
+      source: context.source,
+      route: context.route,
+      requestId: context.requestId,
+      at: new Date().toISOString(),
+      docs: snapshot.size ?? snapshot.docs.length,
+      durationMs: Math.round(performance.now() - start),
+    });
+  }
+
+  return snapshot;
+}
+
+async function withDocumentReadDiagnostics<T extends { exists: boolean }>(
+  collection: string,
+  context: FirestoreReadContext,
+  read: Promise<T>,
+): Promise<T> {
+  const start = performance.now();
+  const snapshot = await read;
+
+  if (isFirestoreReadDebugEnabled()) {
+    console.info("[firestore-read]", {
+      collection,
+      source: context.source,
+      route: context.route,
+      requestId: context.requestId,
+      at: new Date().toISOString(),
+      docs: snapshot.exists ? 1 : 0,
+      durationMs: Math.round(performance.now() - start),
+    });
+  }
+
+  return snapshot;
+}
+
+function uniqueNonEmpty(values: Array<unknown>) {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => String(value ?? "").trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function chunkList<T>(items: T[], chunkSize: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += chunkSize) {
+    chunks.push(items.slice(index, index + chunkSize));
+  }
+  return chunks;
+}
+
 type FirestoreStudentDocument = Partial<Student> & {
   memberNumber?: string;
   phoneLastThree?: string;
@@ -188,6 +293,240 @@ export async function getBookingData(): Promise<BookingData> {
     }
     console.warn("Firestore read failed, falling back to local booking data.", error);
     return readBookingData();
+  }
+}
+
+export async function getStudentImportPageData(): Promise<Pick<BookingData, "courseOfferings">> {
+  const db = getFirestoreDb();
+
+  if (!db) {
+    const data = readBookingData();
+    return { courseOfferings: data.courseOfferings };
+  }
+
+  try {
+    const context = createReadContext({
+      source: "getStudentImportPageData",
+      route: "/admin/student-imports",
+    });
+    const snapshot = await withReadDiagnostics(
+      "courseOfferings",
+      context,
+      db.collection("courseOfferings").get(),
+    );
+
+    return {
+      courseOfferings: snapshot.docs.map(
+        (doc) => ({ id: doc.id, ...doc.data() }) as CourseOffering,
+      ),
+    };
+  } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Student import page data read failed.", error);
+    }
+    console.warn("Firestore student import page read failed, falling back to local booking data.", error);
+    const data = readBookingData();
+    return { courseOfferings: data.courseOfferings };
+  }
+}
+
+export async function findStudentIdentityForUpsert(input: {
+  id?: string;
+  name: string;
+  idNumberLast3: string;
+}): Promise<Student | null> {
+  const id = String(input.id ?? "").trim();
+  const name = String(input.name ?? "").trim();
+  const idNumberLast3 = String(input.idNumberLast3 ?? "").trim();
+
+  if (id) return getStudentById(id);
+  if (!name || !idNumberLast3) return null;
+
+  const db = getFirestoreDb();
+  if (!db) {
+    const data = readBookingData();
+    return data.students.find((student) => student.name === name && student.idNumberLast3 === idNumberLast3) ?? null;
+  }
+
+  try {
+    const context = createReadContext({
+      source: "findStudentIdentityForUpsert",
+      route: "/admin/students/new",
+    });
+    const snapshot = await withReadDiagnostics(
+      "students",
+      context,
+      db.collection("students").where("name", "==", name).limit(10).get(),
+    );
+
+    return snapshot.docs
+      .map((doc) => normalizeFirestoreStudent(doc.id, doc.data() as FirestoreStudentDocument))
+      .find((student) => student.idNumberLast3 === idNumberLast3) ?? null;
+  } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Student identity lookup failed.", error);
+    }
+    console.warn("Firestore student identity lookup failed, falling back to local booking data.", error);
+    const data = readBookingData();
+    return data.students.find((student) => student.name === name && student.idNumberLast3 === idNumberLast3) ?? null;
+  }
+}
+
+export async function getStudentImportLookupData(
+  input: StudentImportLookupInput,
+): Promise<Pick<BookingData, "students" | "courseSeries" | "courseOfferings" | "studentCourseRecords" | "enrollments">> {
+  const identityNames = uniqueNonEmpty(input.identities.map((item) => item.name));
+  const identityLast3 = new Set(input.identities.map((item) => String(item.idNumberLast3 ?? "").trim()));
+  const memberNos = uniqueNonEmpty(input.memberNos ?? []);
+  const targetOfferingId = String(input.targetOfferingId ?? "").trim();
+  const seriesId = String(input.seriesId ?? "").trim();
+  const requestedYear = String(input.year ?? "").trim();
+  const db = getFirestoreDb();
+
+  if (!db) {
+    const data = readBookingData();
+    return {
+      students: data.students.filter(
+        (student) =>
+          (identityNames.includes(student.name) && identityLast3.has(String(student.idNumberLast3 ?? "").trim())) ||
+          (student.memberNo ? memberNos.includes(student.memberNo) : false),
+      ),
+      courseSeries: data.courseSeries,
+      courseOfferings: data.courseOfferings,
+      studentCourseRecords: input.needsEligibility ? data.studentCourseRecords : [],
+      enrollments: input.needsEnrollment ? data.enrollments : [],
+    };
+  }
+
+  try {
+    const context = createReadContext({
+      source: input.source ?? "getStudentImportLookupData",
+      route: input.route,
+      requestId: input.requestId,
+    });
+    const studentsById = new Map<string, Student>();
+    const courseOfferingsById = new Map<string, CourseOffering>();
+    const courseSeriesById = new Map<string, CourseSeries>();
+
+    for (const chunk of chunkList(identityNames, 30)) {
+      const snapshot = await withReadDiagnostics(
+        "students",
+        context,
+        db.collection("students").where("name", "in", chunk).get(),
+      );
+      snapshot.docs.forEach((doc) => {
+        const student = normalizeFirestoreStudent(doc.id, doc.data() as FirestoreStudentDocument);
+        if (identityLast3.has(String(student.idNumberLast3 ?? "").trim())) {
+          studentsById.set(student.id, student);
+        }
+      });
+    }
+
+    for (const chunk of chunkList(memberNos, 30)) {
+      const snapshot = await withReadDiagnostics(
+        "students",
+        context,
+        db.collection("students").where("memberNo", "in", chunk).get(),
+      );
+      snapshot.docs.forEach((doc) => {
+        const student = normalizeFirestoreStudent(doc.id, doc.data() as FirestoreStudentDocument);
+        studentsById.set(student.id, student);
+      });
+    }
+
+    if (targetOfferingId) {
+      const offeringDoc = await withDocumentReadDiagnostics(
+        "courseOfferings",
+        context,
+        db.collection("courseOfferings").doc(targetOfferingId).get(),
+      );
+      if (offeringDoc.exists) {
+        courseOfferingsById.set(offeringDoc.id, { id: offeringDoc.id, ...offeringDoc.data() } as CourseOffering);
+      }
+    }
+
+    if (seriesId) {
+      const seriesDoc = await withDocumentReadDiagnostics(
+        "courseSeries",
+        context,
+        db.collection("courseSeries").doc(seriesId).get(),
+      );
+      if (seriesDoc.exists) {
+        courseSeriesById.set(seriesDoc.id, { id: seriesDoc.id, ...seriesDoc.data() } as CourseSeries);
+      }
+    }
+
+    Array.from(courseOfferingsById.values()).forEach((offering) => {
+      const offeringSeriesId = offering.seriesId || offering.courseSeriesId || offering.courseMasterId || "";
+      if (!offeringSeriesId || courseSeriesById.has(offeringSeriesId)) return;
+      courseSeriesById.set(offeringSeriesId, {
+        id: offeringSeriesId,
+        title: offering.title,
+        categoryId: offering.categoryId ?? "",
+        courseType: offering.courseType,
+        color: offering.color,
+        isActive: offering.isActive ?? true,
+      });
+    });
+
+    const students = Array.from(studentsById.values()).sort(compareStudentsForRoster);
+    const studentIds = students.map((student) => student.id);
+    const targetOffering =
+      Array.from(courseOfferingsById.values()).find((item) => item.id === targetOfferingId || item.legacyCourseId === targetOfferingId) ??
+      Array.from(courseOfferingsById.values())[0];
+    const effectiveSeriesId = seriesId || targetOffering?.seriesId || targetOffering?.courseSeriesId || targetOffering?.courseMasterId || "";
+    const effectiveYear = requestedYear || String(targetOffering?.year ?? "");
+    const studentCourseRecords: StudentCourseRecord[] = [];
+    const enrollments: Enrollment[] = [];
+
+    if (input.needsEligibility && studentIds.length > 0) {
+      for (const chunk of chunkList(studentIds, 30)) {
+        const snapshot = await withReadDiagnostics(
+          "studentCourseRecords",
+          context,
+          db.collection("studentCourseRecords").where("studentId", "in", chunk).get(),
+        );
+        snapshot.docs.forEach((doc) => {
+          const record = { id: doc.id, ...doc.data() } as StudentCourseRecord;
+          const matchesOffering = targetOffering?.id ? record.offeringId === targetOffering.id : true;
+          const matchesSeries = effectiveSeriesId ? record.seriesId === effectiveSeriesId || record.courseMasterId === effectiveSeriesId : true;
+          const matchesYear = effectiveYear ? String(record.year ?? record.sourceRocYear ?? "") === effectiveYear : true;
+          if (matchesOffering && matchesSeries && matchesYear) studentCourseRecords.push(record);
+        });
+      }
+    }
+
+    if (input.needsEnrollment && targetOffering?.id && studentIds.length > 0) {
+      for (const studentId of studentIds) {
+        const doc = await withDocumentReadDiagnostics(
+          "enrollments",
+          context,
+          db.collection("enrollments").doc(`enroll-${studentId}-${targetOffering.id}`).get(),
+        );
+        if (doc.exists) enrollments.push({ id: doc.id, ...doc.data() } as Enrollment);
+      }
+    }
+
+    return {
+      students,
+      courseSeries: Array.from(courseSeriesById.values()),
+      courseOfferings: Array.from(courseOfferingsById.values()),
+      studentCourseRecords,
+      enrollments,
+    };
+  } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Student import lookup read failed.", error);
+    }
+    console.warn("Firestore student import lookup failed, falling back to local booking data.", error);
+    const data = readBookingData();
+    return {
+      students: data.students,
+      courseSeries: data.courseSeries,
+      courseOfferings: data.courseOfferings,
+      studentCourseRecords: data.studentCourseRecords,
+      enrollments: data.enrollments,
+    };
   }
 }
 
@@ -1463,6 +1802,98 @@ export async function upsertStudentCourseRecord(record: StudentCourseRecord) {
     if (index >= 0) records[index] = { ...records[index], ...record };
     else records.push(record);
     writeBookingData({ ...data, studentCourseRecords: records });
+  }
+}
+
+export async function commitStudentImportBatch(input: StudentImportWriteBatch) {
+  const students = input.students ?? [];
+  const studentCourseRecords = input.studentCourseRecords ?? [];
+  const enrollments = input.enrollments ?? [];
+  const db = getFirestoreDb();
+
+  if (!db) {
+    const data = readBookingData();
+    const existingStudents = data.students ?? [];
+    const existingRecords = data.studentCourseRecords ?? [];
+    const existingEnrollments = data.enrollments ?? [];
+
+    for (const student of students) {
+      const index = existingStudents.findIndex((item) => item.id === student.id);
+      if (index >= 0) existingStudents[index] = student;
+      else existingStudents.push(student);
+    }
+    for (const record of studentCourseRecords) {
+      const index = existingRecords.findIndex((item) => item.id === record.id);
+      if (index >= 0) existingRecords[index] = { ...existingRecords[index], ...record };
+      else existingRecords.push(record);
+    }
+    for (const enrollment of enrollments) {
+      const index = existingEnrollments.findIndex((item) => item.id === enrollment.id);
+      if (index >= 0) existingEnrollments[index] = { ...existingEnrollments[index], ...enrollment };
+      else existingEnrollments.push(enrollment);
+    }
+
+    writeBookingData({
+      ...data,
+      students: existingStudents,
+      studentCourseRecords: existingRecords,
+      enrollments: existingEnrollments,
+    });
+    return;
+  }
+
+  try {
+    const writes: Array<{
+      collection: "students" | "studentCourseRecords" | "enrollments";
+      id: string;
+      data: Student | StudentCourseRecord | Enrollment;
+    }> = [
+      ...students.map((student) => ({ collection: "students" as const, id: student.id, data: student })),
+      ...studentCourseRecords.map((record) => ({ collection: "studentCourseRecords" as const, id: record.id, data: record })),
+      ...enrollments.map((enrollment) => ({ collection: "enrollments" as const, id: enrollment.id, data: enrollment })),
+    ];
+
+    for (const chunk of chunkList(writes, 450)) {
+      const batch = db.batch();
+      chunk.forEach((write) => {
+        batch.set(
+          db.collection(write.collection).doc(write.id),
+          removeUndefinedFields(write.data),
+          { merge: true },
+        );
+      });
+      await batch.commit();
+    }
+  } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Student import batch write failed.", error);
+    }
+    console.warn("Firestore student import batch write failed, falling back to local booking data.", error);
+    const data = readBookingData();
+    const existingStudents = data.students ?? [];
+    const existingRecords = data.studentCourseRecords ?? [];
+    const existingEnrollments = data.enrollments ?? [];
+    for (const student of students) {
+      const index = existingStudents.findIndex((item) => item.id === student.id);
+      if (index >= 0) existingStudents[index] = student;
+      else existingStudents.push(student);
+    }
+    for (const record of studentCourseRecords) {
+      const index = existingRecords.findIndex((item) => item.id === record.id);
+      if (index >= 0) existingRecords[index] = { ...existingRecords[index], ...record };
+      else existingRecords.push(record);
+    }
+    for (const enrollment of enrollments) {
+      const index = existingEnrollments.findIndex((item) => item.id === enrollment.id);
+      if (index >= 0) existingEnrollments[index] = { ...existingEnrollments[index], ...enrollment };
+      else existingEnrollments.push(enrollment);
+    }
+    writeBookingData({
+      ...data,
+      students: existingStudents,
+      studentCourseRecords: existingRecords,
+      enrollments: existingEnrollments,
+    });
   }
 }
 

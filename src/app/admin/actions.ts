@@ -14,7 +14,9 @@ import {
   deleteSessionsByIds,
   deleteManagedDocument,
   deleteStudentIdentityDocument,
+  findStudentIdentityForUpsert,
   getBookingData,
+  getStudentImportLookupData,
   setDocumentActive,
   updateReservationAttendance,
   updateReservationAttendanceBySessionStudent,
@@ -32,6 +34,7 @@ import {
   deleteInstructorIdentityDocument,
   removeStudentCourseEligibility,
   addStudentToSessionRoster,
+  commitStudentImportBatch,
   ensureSessionRosterReservation,
 } from "@/lib/booking-repository";
 import type {
@@ -41,6 +44,7 @@ import type {
   CourseOffering,
   CourseSeries,
   CourseSession,
+  Enrollment,
   Student,
   StudentCourseRecord,
   Instructor,
@@ -1866,8 +1870,27 @@ async function resolveEligibilityContext(
   seriesId: string,
   yearValue: string,
   targetOfferingId?: string,
+  dataOverride?: Pick<Awaited<ReturnType<typeof getBookingData>>, "courseSeries" | "courseOfferings"> &
+    Partial<Awaited<ReturnType<typeof getBookingData>>>,
 ) {
-  const data = await getBookingData();
+  const data = dataOverride
+    ? ({
+        categories: [],
+        courses: [],
+        reservations: [],
+        students: [],
+        ...dataOverride,
+        courseSeries: dataOverride.courseSeries ?? [],
+        courseOfferings: dataOverride.courseOfferings ?? [],
+        courseSessions: [],
+        studentCourseRecords: dataOverride.studentCourseRecords ?? [],
+        enrollments: dataOverride.enrollments ?? [],
+        attendanceRecords: [],
+        entitlements: [],
+        importBatches: [],
+        instructors: [],
+      } as Awaited<ReturnType<typeof getBookingData>>)
+    : await getBookingData();
   const directSeries = data.courseSeries.find(
     (item) =>
       item.id === seriesId ||
@@ -2186,18 +2209,17 @@ export async function saveStudentIdentityAction(formData: FormData) {
     redirect(appendAdminQuery(redirectTo, "error=invalid"));
   }
 
-  const data = await getBookingData();
   const now = new Date().toISOString();
-  const existing = rawId
-    ? data.students.find((student) => student.id === rawId)
-    : data.students.find(
-        (student) =>
-          student.name === name && student.idNumberLast3 === idNumberLast3,
-      );
+  const existing = await findStudentIdentityForUpsert({
+    id: rawId,
+    name,
+    idNumberLast3,
+  });
+  const studentId = existing?.id ?? `student-${crypto.randomUUID()}`;
 
   await upsertStudent({
     ...(existing ?? {}),
-    id: existing?.id ?? `student-${crypto.randomUUID()}`,
+    id: studentId,
     name,
     englishName:
       String(formData.get("englishName") ?? "").trim() || existing?.englishName,
@@ -2328,9 +2350,15 @@ export async function saveStudentIdentityAction(formData: FormData) {
     updatedAt: now,
   });
 
+  const finalRedirectTo = redirectTo.includes(":studentId")
+    ? redirectTo.replaceAll(":studentId", encodeURIComponent(studentId))
+    : redirectTo;
+
   revalidatePath("/admin/students");
+  revalidatePath(`/admin/students/${studentId}`);
+  revalidatePath(`/admin/students/${studentId}/edit`);
   revalidatePath("/admin/student-imports");
-  redirect(appendAdminQuery(redirectTo, "saved=1"));
+  redirect(appendAdminQuery(finalRedirectTo, "saved=1"));
 }
 
 export async function updateStudentIdentityStatusAction(formData: FormData) {
@@ -2432,7 +2460,6 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
     redirect(appendAdminQuery(redirectTo, "error=invalid"));
   }
 
-  const data = await getBookingData();
   const lines = rosterText
     .split(/\r?\n/g)
     .map((line) => line.trim())
@@ -2478,6 +2505,56 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
     importMode === "withEligibility" || importMode === "withEnrollment";
   const needsEnrollment = importMode === "withEnrollment";
 
+  function cellVal(cells: string[], aliases: string[], defaultIndex: number): string {
+    const idx = cellByAliases(aliases, defaultIndex);
+    return idx >= 0 ? String(cells[idx] ?? "").trim() : "";
+  }
+
+  const parsedRows: Array<{
+    cells: string[];
+    name: string;
+    idNumberLast3: string;
+    existingStudent?: Student;
+  }> = [];
+
+  for (const row of rows) {
+    const cells = splitRosterLine(row);
+    const name = getRosterCell(cells, nameIndex);
+    const idNumberLast3 = normalizeIdLast3(getRosterCell(cells, idIndex));
+    if (!name || idNumberLast3.length !== 3) continue;
+
+    parsedRows.push({ cells, name, idNumberLast3 });
+  }
+
+  if (parsedRows.length === 0) {
+    redirect(appendAdminQuery(redirectTo, "error=invalid"));
+  }
+
+  const lookupData = await getStudentImportLookupData({
+    identities: parsedRows.map((row) => ({
+      name: row.name,
+      idNumberLast3: row.idNumberLast3,
+    })),
+    memberNos: parsedRows
+      .map((row) => getRosterCell(row.cells, memberIndex))
+      .filter(Boolean),
+    needsEligibility,
+    needsEnrollment,
+    seriesId,
+    year: yearValue,
+    targetOfferingId,
+    source: "bulkImportStudentIdentitiesAction",
+    route: redirectTo.split("?")[0] || "/admin/student-imports",
+  });
+  const data = lookupData;
+  parsedRows.forEach((row) => {
+    row.existingStudent = data.students.find(
+      (student) =>
+        student.name === row.name &&
+        student.idNumberLast3 === row.idNumberLast3,
+    );
+  });
+
   if (!seriesId && targetOfferingId) {
     const offering = data.courseOfferings.find(
       (o) => o.id === targetOfferingId || o.legacyCourseId === targetOfferingId,
@@ -2489,7 +2566,12 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
   }
 
   const { series, targetOffering, year } = needsEligibility
-    ? await resolveEligibilityContext(seriesId, yearValue, targetOfferingId)
+    ? await resolveEligibilityContext(
+        seriesId,
+        yearValue,
+        targetOfferingId,
+        lookupData,
+      )
     : { series: undefined, targetOffering: undefined, year: undefined };
 
   if (needsEligibility && (!series || !year)) {
@@ -2503,25 +2585,16 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
   let linkedCount = 0;
   let enrolledCount = 0;
   const now = new Date().toISOString();
+  const studentsToWrite: Student[] = [];
+  const studentCourseRecordsToWrite: StudentCourseRecord[] = [];
+  const enrollmentsToWrite: Enrollment[] = [];
 
-  function cellVal(cells: string[], aliases: string[], defaultIndex: number): string {
-    const idx = cellByAliases(aliases, defaultIndex);
-    return idx >= 0 ? String(cells[idx] ?? "").trim() : "";
-  }
-
-  for (const row of rows) {
-    const cells = splitRosterLine(row);
-    const name = getRosterCell(cells, nameIndex);
-    const idNumberLast3 = normalizeIdLast3(getRosterCell(cells, idIndex));
-    if (!name || idNumberLast3.length !== 3) continue;
-
-    const existing = data.students.find(
-      (student) =>
-        student.name === name && student.idNumberLast3 === idNumberLast3,
-    );
+  for (const item of parsedRows) {
+    const { cells, name, idNumberLast3 } = item;
+    const existing = item.existingStudent;
     const studentId = existing?.id ?? `student-${crypto.randomUUID()}`;
 
-    await upsertStudent({
+    studentsToWrite.push({
       ...(existing ?? {}),
       id: studentId,
       name,
@@ -2598,7 +2671,7 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
             String(record.year ?? record.sourceRocYear ?? "") === String(year)),
       );
 
-      await upsertStudentCourseRecord({
+      studentCourseRecordsToWrite.push({
         ...(existingRecord ?? {}),
         id: existingRecord?.id ?? recordId,
         studentId,
@@ -2630,7 +2703,7 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
       const existingEnrollment = data.enrollments?.find(
         (item) => item.id === enrollmentId,
       );
-      await upsertEnrollment({
+      enrollmentsToWrite.push({
         ...(existingEnrollment ?? {}),
         id: enrollmentId,
         studentId,
@@ -2657,6 +2730,12 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
 
     importedCount += 1;
   }
+
+  await commitStudentImportBatch({
+    students: studentsToWrite,
+    studentCourseRecords: studentCourseRecordsToWrite,
+    enrollments: enrollmentsToWrite,
+  });
 
   revalidatePath("/admin/students");
   revalidatePath("/admin/student-imports");
