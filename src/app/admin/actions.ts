@@ -14,7 +14,9 @@ import {
   deleteSessionsByIds,
   deleteManagedDocument,
   deleteStudentIdentityDocument,
+  findStudentIdentityForUpsert,
   getBookingData,
+  getStudentImportLookupData,
   setDocumentActive,
   updateReservationAttendance,
   updateReservationAttendanceBySessionStudent,
@@ -30,6 +32,7 @@ import {
   getFirestoreDb,
   generateNextStudentNumber,
   generateNextStudentNumbersBlock,
+  syncStudentNumberCounterForMemberNo,
   upsertStudentCourseRecord,
   upsertInstructor,
   deleteInstructorIdentityDocument,
@@ -38,6 +41,7 @@ import {
   ensureSessionRosterReservation,
   checkStudentOfferingRecords,
   removeStudentFromOffering,
+  commitStudentImportBatch,
 } from "@/lib/booking-repository";
 import type {
   AttendanceStatus,
@@ -46,6 +50,7 @@ import type {
   CourseOffering,
   CourseSeries,
   CourseSession,
+  Enrollment,
   Student,
   StudentCourseRecord,
   Instructor,
@@ -1599,6 +1604,50 @@ export async function disableSessionAction(formData: FormData) {
   redirect(appendAdminQuery(redirectTo, "saved=1"));
 }
 
+export async function deleteSessionAction(formData: FormData) {
+  const id = String(formData.get("id") ?? "").trim();
+  const courseId = String(formData.get("courseId") ?? "").trim();
+  const redirectTo = normalizeAdminRedirect(
+    formData.get("redirectTo"),
+    "/admin/course-sessions",
+  );
+
+  if (!id) {
+    redirect(appendAdminQuery(redirectTo, "error=invalid"));
+  }
+
+  const data = await getBookingData();
+  const session = data.courses
+    .flatMap((course) => course.sessions ?? [])
+    .find((item) => item.id === id);
+
+  if (!session || (courseId && session.courseId !== courseId)) {
+    redirect(appendAdminQuery(redirectTo, "error=invalid"));
+  }
+
+  const hasReservations = (data.reservations ?? []).some(
+    (reservation) => reservation.sessionId === id,
+  );
+  const hasAttendanceRecords = (data.attendanceRecords ?? []).some(
+    (record) => record.sessionId === id || record.courseSessionId === id,
+  );
+  const bookedCount = Number(session.bookedCount ?? 0);
+
+  if (bookedCount > 0 || hasReservations || hasAttendanceRecords) {
+    redirect(appendAdminQuery(redirectTo, "error=has-records"));
+  }
+
+  await deleteSessionsByIds([id]);
+  revalidatePath("/");
+  revalidatePath(`/courses/${session.courseId}`);
+  revalidatePath("/admin");
+  revalidatePath("/admin/courses");
+  revalidatePath("/admin/course-sessions");
+  revalidatePath(`/admin/courses/${session.courseId}`);
+  revalidatePath(`/admin/courses/${session.courseId}/sessions`);
+  redirect(appendAdminQuery(redirectTo, "saved=1"));
+}
+
 export async function bulkDisableSessionsAction(formData: FormData) {
   const courseId = String(formData.get("courseId") ?? "").trim();
   const redirectTo = normalizeAdminRedirect(
@@ -2009,8 +2058,27 @@ async function resolveEligibilityContext(
   seriesId: string,
   yearValue: string,
   targetOfferingId?: string,
+  dataOverride?: Pick<Awaited<ReturnType<typeof getBookingData>>, "courseSeries" | "courseOfferings"> &
+    Partial<Awaited<ReturnType<typeof getBookingData>>>,
 ) {
-  const data = await getBookingData();
+  const data = dataOverride
+    ? ({
+        categories: [],
+        courses: [],
+        reservations: [],
+        students: [],
+        ...dataOverride,
+        courseSeries: dataOverride.courseSeries ?? [],
+        courseOfferings: dataOverride.courseOfferings ?? [],
+        courseSessions: [],
+        studentCourseRecords: dataOverride.studentCourseRecords ?? [],
+        enrollments: dataOverride.enrollments ?? [],
+        attendanceRecords: [],
+        entitlements: [],
+        importBatches: [],
+        instructors: [],
+      } as Awaited<ReturnType<typeof getBookingData>>)
+    : await getBookingData();
   const directSeries = data.courseSeries.find(
     (item) =>
       item.id === seriesId ||
@@ -2374,18 +2442,16 @@ export async function saveStudentIdentityAction(formData: FormData) {
     redirect(appendAdminQuery(redirectTo, "error=invalid"));
   }
 
-  const data = await getBookingData();
   const now = new Date().toISOString();
-  const existing = rawId
-    ? data.students.find((student) => student.id === rawId)
-    : data.students.find(
-        (student) =>
-          student.name === name && student.idNumberLast3 === idNumberLast3,
-      );
+  const existing = await findStudentIdentityForUpsert({
+    id: rawId,
+    name,
+    idNumberLast3,
+  });
 
   let memberNo = memberNoInput || existing?.memberNo;
+  const db = getFirestoreDb();
   if (!memberNo || memberNo === "系統自動編碼") {
-    const db = getFirestoreDb();
     memberNo = await generateNextStudentNumber(db);
   }
 
@@ -2531,12 +2597,19 @@ export async function saveStudentIdentityAction(formData: FormData) {
     updatedAt: now,
   });
 
-  revalidatePath("/admin/students", "layout");
+  if (memberNoInput && memberNoInput === memberNo) {
+    await syncStudentNumberCounterForMemberNo(db, memberNoInput);
+  }
+
+  const finalRedirectTo = redirectTo.includes(":studentId")
+    ? redirectTo.replaceAll(":studentId", encodeURIComponent(studentId))
+    : redirectTo;
+
   revalidatePath("/admin/students");
   revalidatePath(`/admin/students/${studentId}`);
   revalidatePath(`/admin/students/${studentId}/edit`);
   revalidatePath("/admin/student-imports");
-  redirect(appendAdminQuery(redirectTo, "saved=1"));
+  redirect(appendAdminQuery(finalRedirectTo, "saved=1"));
 }
 
 export async function updateStudentIdentityStatusAction(formData: FormData) {
@@ -2681,7 +2754,6 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
     redirect(appendAdminQuery(redirectTo, "error=invalid"));
   }
 
-  const data = await getBookingData();
   const lines = rosterText
     .split(/\r?\n/g)
     .map((line) => line.trim())
@@ -2727,27 +2799,6 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
     importMode === "withEligibility" || importMode === "withEnrollment";
   const needsEnrollment = importMode === "withEnrollment";
 
-  if (!seriesId && targetOfferingId) {
-    const offering = data.courseOfferings.find(
-      (o) => o.id === targetOfferingId || o.legacyCourseId === targetOfferingId,
-    );
-    if (offering) {
-      seriesId = offering.courseSeriesId ?? offering.courseMasterId ?? offering.seriesId ?? "";
-      if (!yearValue && offering.year) yearValue = String(offering.year);
-    }
-  }
-
-  const { series, targetOffering, year } = needsEligibility
-    ? await resolveEligibilityContext(seriesId, yearValue, targetOfferingId)
-    : { series: undefined, targetOffering: undefined, year: undefined };
-
-  if (needsEligibility && (!series || !year)) {
-    redirect(appendAdminQuery(redirectTo, "error=invalid"));
-  }
-  if (needsEnrollment && (!series || !year || !targetOffering)) {
-    redirect(appendAdminQuery(redirectTo, "error=invalid"));
-  }
-
   let importedCount = 0;
   let linkedCount = 0;
   let enrolledCount = 0;
@@ -2763,7 +2814,7 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
     cells: string[];
     name: string;
     idNumberLast3: string;
-    existingStudent: any;
+    existingStudent?: Student;
     inputMemberNo: string;
   }> = [];
 
@@ -2773,10 +2824,6 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
     const idNumberLast3 = normalizeIdLast3(getRosterCell(cells, idIndex));
     if (!name || idNumberLast3.length !== 3) continue;
 
-    const existingStudent = data.students.find(
-      (student) =>
-        student.name === name && student.idNumberLast3 === idNumberLast3,
-    );
     const inputMemberNo = getRosterCell(cells, memberIndex).trim();
 
     parsedRows.push({
@@ -2784,13 +2831,56 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
       cells,
       name,
       idNumberLast3,
-      existingStudent,
       inputMemberNo,
     });
   }
 
+  const lookupData = await getStudentImportLookupData({
+    identities: parsedRows.map((item) => ({
+      name: item.name,
+      idNumberLast3: item.idNumberLast3,
+    })),
+    memberNos: parsedRows.map((item) => item.inputMemberNo).filter(Boolean),
+    needsEligibility,
+    needsEnrollment,
+    seriesId,
+    year: yearValue,
+    targetOfferingId,
+    source: "bulkImportStudentIdentitiesAction",
+    route: redirectTo.split("?")[0] || "/admin/student-imports",
+  });
+
+  if (!seriesId && targetOfferingId) {
+    const offering = lookupData.courseOfferings.find(
+      (o) => o.id === targetOfferingId || o.legacyCourseId === targetOfferingId,
+    );
+    if (offering) {
+      seriesId = offering.courseSeriesId ?? offering.courseMasterId ?? offering.seriesId ?? "";
+      if (!yearValue && offering.year) yearValue = String(offering.year);
+    }
+  }
+
+  const { series, targetOffering, year } = needsEligibility
+    ? await resolveEligibilityContext(seriesId, yearValue, targetOfferingId, lookupData)
+    : { series: undefined, targetOffering: undefined, year: undefined };
+
+  if (needsEligibility && (!series || !year)) {
+    redirect(appendAdminQuery(redirectTo, "error=invalid"));
+  }
+  if (needsEnrollment && (!series || !year || !targetOffering)) {
+    redirect(appendAdminQuery(redirectTo, "error=invalid"));
+  }
+
+  for (const item of parsedRows) {
+    item.existingStudent = lookupData.students.find(
+      (student) =>
+        student.name === item.name &&
+        student.idNumberLast3 === item.idNumberLast3,
+    );
+  }
+
   const dbMemberNos = new Set<string>();
-  for (const student of data.students ?? []) {
+  for (const student of lookupData.students ?? []) {
     const mno = (student.memberNo || "").trim();
     if (mno && mno !== "未填" && mno !== "M001") {
       dbMemberNos.add(mno);
@@ -2855,12 +2945,16 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
     rowToFinalMemberNo.set(rowsNeedingNumbers[i], nextNumbers[i]);
   }
 
+  const studentsToWrite: Student[] = [];
+  const studentCourseRecordsToWrite: StudentCourseRecord[] = [];
+  const enrollmentsToWrite: Enrollment[] = [];
+
   for (const item of parsedRows) {
     const { cells, name, idNumberLast3, existingStudent } = item;
     const studentId = existingStudent?.id ?? `student-${crypto.randomUUID()}`;
     const memberNo = rowToFinalMemberNo.get(item) || "";
 
-    await upsertStudent({
+    studentsToWrite.push({
       ...(existingStudent ?? {}),
       id: studentId,
       name,
@@ -2934,14 +3028,14 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
         targetOffering?.id,
       );
       const existingRecord = findEligibilityRecord(
-        data.studentCourseRecords,
+        lookupData.studentCourseRecords,
         studentId,
         series.id,
         year,
         targetOffering?.id,
       );
 
-      await upsertStudentCourseRecord({
+      studentCourseRecordsToWrite.push({
         ...(existingRecord ?? {}),
         id: existingRecord?.id ?? recordId,
         studentId,
@@ -2970,10 +3064,10 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
 
     if (needsEnrollment && series && targetOffering && year) {
       const enrollmentId = `enroll-${studentId}-${targetOffering.id}`;
-      const existingEnrollment = data.enrollments?.find(
+      const existingEnrollment = lookupData.enrollments?.find(
         (item) => item.id === enrollmentId,
       );
-      await upsertEnrollment({
+      enrollmentsToWrite.push({
         ...(existingEnrollment ?? {}),
         id: enrollmentId,
         studentId,
@@ -3000,6 +3094,12 @@ export async function bulkImportStudentIdentitiesAction(formData: FormData) {
 
     importedCount += 1;
   }
+
+  await commitStudentImportBatch({
+    students: studentsToWrite,
+    studentCourseRecords: studentCourseRecordsToWrite,
+    enrollments: enrollmentsToWrite,
+  });
 
   revalidatePath("/admin/students");
   revalidatePath("/admin/student-imports");

@@ -3,7 +3,7 @@ import {
 } from "@/app/admin/actions";
 import { AdminShell } from "@/components/page-shell";
 import { RosterFlowNav } from "@/components/roster-flow-nav";
-import { getBookingData } from "@/lib/booking-repository";
+import { getStudentImportPageData } from "@/lib/booking-repository";
 import { ImportClientForm } from "./import-client-form";
 
 export const dynamic = "force-dynamic";
@@ -20,7 +20,10 @@ type PageProps = {
 
 export default async function StudentImportsPage({ searchParams }: PageProps) {
   const { saved, error, imported, linked, enrolled } = await searchParams;
-  const data = await getBookingData();
+  const data = await getStudentImportPageData({
+    source: "StudentImportsPage",
+    route: "/admin/student-imports",
+  });
   const offerings = data.courseOfferings
     .filter((offering) => offering.isActive !== false)
     .sort((a, b) => {

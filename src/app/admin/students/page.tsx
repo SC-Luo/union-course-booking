@@ -14,6 +14,7 @@ import { AdminShell } from "@/components/page-shell";
 import { RosterFlowNav } from "@/components/roster-flow-nav";
 import {
   getBookingData,
+  getStudentDirectoryData,
   getStudentEligibilityPageData,
 } from "@/lib/booking-repository";
 import type {
@@ -441,10 +442,19 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
   const currentMode = MODES.some(([key]) => key === mode) ? mode : "students";
   let bookingData;
   try {
-    bookingData =
-      currentMode === "eligibility"
-        ? await getStudentEligibilityPageData(queryOfferingId)
-        : await getBookingData();
+    if (currentMode === "students") {
+      bookingData = await getStudentDirectoryData({
+        source: "AdminStudentsPage",
+        route: "/admin/students",
+      });
+    } else if (currentMode === "eligibility") {
+      bookingData = await getStudentEligibilityPageData(queryOfferingId);
+    } else {
+      bookingData = await getBookingData({
+        source: "AdminStudentsPage",
+        route: "/admin/students",
+      });
+    }
   } catch (error) {
     console.error("[admin/students] failed to load booking data", {
       message: error instanceof Error ? error.message : String(error),
@@ -465,6 +475,37 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
     );
   }
 
+  if (currentMode === "students") {
+    const { students = [] } = bookingData;
+    const studentListRows = students
+      .filter((student) => studentMatches(student, q))
+      .filter((student) => {
+        const rosterStatus = getRosterStatus(student).key;
+        if (status === "all") return true;
+        return rosterStatus === status;
+      })
+      .sort(compareStudentsByMemberNo);
+
+    logStudentDirectoryDebug({
+      students,
+      filteredStudents: studentListRows,
+      status,
+      q,
+    });
+
+    return (
+      <StudentDirectoryPage
+        students={studentListRows}
+        q={q}
+        status={status}
+        saved={saved}
+        error={error}
+        imported={imported}
+      />
+    );
+  }
+
+  const fullBookingData = bookingData as Awaited<ReturnType<typeof getBookingData>>;
   const {
     students = [],
     courseSeries = [],
@@ -476,7 +517,7 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
     attendanceRecords = [],
     instructors = [],
     categories = [],
-  } = bookingData;
+  } = fullBookingData;
 
   const instructorSpecialtyCategories = categories
     .filter((category) => category.isActive !== false)
@@ -528,26 +569,6 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
       return rosterStatus === status;
     })
     .sort(compareStudentsByMemberNo);
-
-  logStudentDirectoryDebug({
-    students,
-    filteredStudents: studentListRows,
-    status,
-    q,
-  });
-
-  if (currentMode === "students") {
-    return (
-      <StudentDirectoryPage
-        students={studentListRows}
-        q={q}
-        status={status}
-        saved={saved}
-        error={error}
-        imported={imported}
-      />
-    );
-  }
 
   const records = studentCourseRecords.filter((record) =>
     recordMatches(record, selectedSeriesId, selectedYear),
@@ -1237,6 +1258,7 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
                 action={saveStudentIdentityAction}
                 className="mt-5 grid gap-3 border-t border-[#ead7c6] pt-5"
               >
+                <input type="hidden" name="redirectTo" value="/admin/students/:studentId/edit" />
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="grid gap-2 text-sm font-bold text-zinc-700">
                     姓名

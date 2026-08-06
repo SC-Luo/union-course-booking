@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { unstable_cache } from "next/cache";
 import { normalizeBookingData, readBookingData, writeBookingData } from "./data-store";
 import { getAdminDb } from "./firebase-admin";
 import {
@@ -11,8 +12,189 @@ import {
 } from "./course-utils";
 import type { AttendanceRecord, AttendanceStatus, BookingData, Course, CourseCategory, CourseOffering, CourseSeries, CourseSession, Enrollment, Reservation, Student, StudentCourseRecord, Instructor } from "./types";
 
-function shouldUseFirestore() {
-  return process.env.BOOKING_DATA_SOURCE === "firestore";
+type BookingDataSourceMode = "firestore" | "json" | "unset" | "invalid";
+
+export const BOOKING_STATIC_CACHE_TAG = "booking:static-collections";
+
+type StaticBookingCollections = Pick<
+  BookingData,
+  | "categories"
+  | "courses"
+  | "courseSeries"
+  | "courseOfferings"
+  | "courseSessions"
+  | "instructors"
+>;
+
+type LiveBookingCollections = Pick<
+  BookingData,
+  | "reservations"
+  | "students"
+  | "studentCourseRecords"
+  | "enrollments"
+  | "attendanceRecords"
+>;
+
+type FirestoreReadContext = {
+  source: string;
+  route?: string;
+  requestId: string;
+};
+
+type BookingDataReadOptions = {
+  source?: string;
+  route?: string;
+  requestId?: string;
+};
+
+type StudentImportLookupInput = {
+  identities: Array<{ name: string; idNumberLast3: string }>;
+  memberNos?: string[];
+  needsEligibility?: boolean;
+  needsEnrollment?: boolean;
+  seriesId?: string;
+  year?: string | number;
+  targetOfferingId?: string;
+  source?: string;
+  route?: string;
+  requestId?: string;
+};
+
+type StudentImportWriteBatch = {
+  students: Student[];
+  studentCourseRecords?: StudentCourseRecord[];
+  enrollments?: Enrollment[];
+};
+
+let staticBookingCollectionsPending: Promise<StaticBookingCollections> | null = null;
+let liveBookingCollectionsPending: Promise<LiveBookingCollections> | null = null;
+
+function isFirestoreReadDebugEnabled() {
+  return process.env.BOOKING_FIRESTORE_READ_DEBUG === "true";
+}
+
+function createReadContext(options?: BookingDataReadOptions): FirestoreReadContext {
+  return {
+    source: options?.source ?? "booking-data",
+    route: options?.route,
+    requestId: options?.requestId ?? randomUUID(),
+  };
+}
+
+async function withReadDiagnostics<T extends { docs: unknown[]; size: number }>(
+  collection: string,
+  context: string | FirestoreReadContext,
+  read: Promise<T>,
+): Promise<T> {
+  const start = performance.now();
+  const snapshot = await read;
+
+  if (isFirestoreReadDebugEnabled()) {
+    const details =
+      typeof context === "string"
+        ? {
+            source: context,
+            route: undefined,
+            requestId: randomUUID(),
+          }
+        : context;
+    console.info("[firestore-read]", {
+      collection,
+      source: details.source,
+      route: details.route,
+      requestId: details.requestId,
+      at: new Date().toISOString(),
+      docs: snapshot.size ?? snapshot.docs.length,
+      durationMs: Math.round(performance.now() - start),
+    });
+  }
+
+  return snapshot;
+}
+
+async function withDocumentReadDiagnostics<T extends { exists: boolean }>(
+  collection: string,
+  context: string | FirestoreReadContext,
+  read: Promise<T>,
+): Promise<T> {
+  const start = performance.now();
+  const snapshot = await read;
+
+  if (isFirestoreReadDebugEnabled()) {
+    const details =
+      typeof context === "string"
+        ? {
+            source: context,
+            route: undefined,
+            requestId: randomUUID(),
+          }
+        : context;
+    console.info("[firestore-read]", {
+      collection,
+      source: details.source,
+      route: details.route,
+      requestId: details.requestId,
+      at: new Date().toISOString(),
+      docs: snapshot.exists ? 1 : 0,
+      durationMs: Math.round(performance.now() - start),
+    });
+  }
+
+  return snapshot;
+}
+
+function uniqueNonEmpty(values: Array<unknown>) {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => String(value ?? "").trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function chunkList<T>(items: T[], chunkSize: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += chunkSize) {
+    chunks.push(items.slice(index, index + chunkSize));
+  }
+  return chunks;
+}
+
+async function invalidateStaticBookingCache() {
+  try {
+    const { revalidateTag } = await import("next/cache");
+    revalidateTag(BOOKING_STATIC_CACHE_TAG, "max");
+  } catch (error) {
+    if (isFirestoreReadDebugEnabled()) {
+      console.warn("[firestore-cache] static cache invalidation skipped", {
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+}
+
+function resolveBookingDataSource(): {
+  mode: BookingDataSourceMode;
+  rawValuePresent: boolean;
+  rawModeString: string;
+} {
+  const raw = process.env.BOOKING_DATA_SOURCE;
+  const rawValuePresent = raw !== undefined;
+  const normalized = raw?.trim().toLowerCase() ?? "";
+
+  if (!normalized) {
+    return { mode: "unset", rawValuePresent, rawModeString: "" };
+  }
+  if (normalized === "firestore") {
+    return { mode: "firestore", rawValuePresent, rawModeString: normalized };
+  }
+  if (normalized === "json") {
+    return { mode: "json", rawValuePresent, rawModeString: normalized };
+  }
+
+  const safeDisplay = normalized.slice(0, 20);
+  return { mode: "invalid", rawValuePresent, rawModeString: safeDisplay };
 }
 
 function isProduction() {
@@ -27,7 +209,18 @@ function allowJsonFallback() {
 }
 
 function shouldFallbackToJson() {
-  return !shouldUseFirestore() || allowJsonFallback();
+  if (isProduction()) {
+    return false;
+  }
+  const { mode } = resolveBookingDataSource();
+  if (mode === "invalid" || process.env.STRICT_FIRESTORE === "true") {
+    return false;
+  }
+  return true;
+}
+
+function createDataSourceConfigError(context: string, reason: string): Error {
+  return new Error(`[DATA_SOURCE_CONFIG_ERROR] ${context}: ${reason}`);
 }
 
 function createFirestoreRequiredError(context: string, error?: unknown) {
@@ -41,25 +234,67 @@ function createFirestoreRequiredError(context: string, error?: unknown) {
 }
 
 export function getFirestoreDb() {
-  if (!shouldUseFirestore()) {
-    return null;
+  const { mode, rawModeString } = resolveBookingDataSource();
+  const isStrict = process.env.STRICT_FIRESTORE === "true";
+
+  if (isStrict && mode === "json") {
+    throw createDataSourceConfigError(
+      "Configuration Conflict",
+      "STRICT_FIRESTORE=true cannot be used with BOOKING_DATA_SOURCE=json.",
+    );
+  }
+
+  if (mode === "invalid") {
+    throw createDataSourceConfigError(
+      "Invalid Mode",
+      `BOOKING_DATA_SOURCE value "${rawModeString}" is invalid. Must be "firestore" or "json".`,
+    );
+  }
+
+  if (isProduction()) {
+    if (mode !== "firestore") {
+      throw createDataSourceConfigError(
+        "Production Guard",
+        `BOOKING_DATA_SOURCE must be "firestore" in production/preview environment (currently "${mode}").`,
+      );
+    }
+  } else {
+    if (mode === "unset") {
+      console.warn(
+        "[DATA_SOURCE] ⚠️ BOOKING_DATA_SOURCE is unset; using local JSON in development.",
+      );
+      return null;
+    }
+    if (mode === "json") {
+      return null;
+    }
   }
 
   try {
     const db = getAdminDb();
     if (!db) {
       if (!allowJsonFallback()) {
-        throw new Error("Firebase Admin initialization returned null.");
+        throw createFirestoreRequiredError(
+          "Firebase Admin initialization returned null.",
+        );
       }
-      console.warn("[DATA_SOURCE] ⚠️ Firebase Admin initialization returned null, falling back to local JSON.");
+      console.warn(
+        "[DATA_SOURCE] ⚠️ Firebase Admin initialization returned null, falling back to local JSON.",
+      );
       return null;
     }
     return db;
   } catch (error) {
     if (!allowJsonFallback()) {
-      throw createFirestoreRequiredError("Firebase Admin initialization failed.", error);
+      throw createFirestoreRequiredError(
+        "Firebase Admin initialization failed.",
+        error,
+      );
     }
-    console.warn("[DATA_SOURCE] ⚠️ Firestore initialization failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
+    console.warn(
+      "[DATA_SOURCE] ⚠️ Firestore initialization failed, falling back to local JSON. Error: " +
+        (error instanceof Error ? error.message : String(error)),
+    );
     return null;
   }
 }
@@ -130,7 +365,170 @@ function removeUndefinedFields<T>(value: T): T {
   return value;
 }
 
-export async function getBookingData(): Promise<BookingData> {
+async function readFirestoreStaticBookingCollections(): Promise<StaticBookingCollections> {
+  const db = getFirestoreDb();
+  if (!db) {
+    throw new Error("Firestore static booking collections requested without Firestore.");
+  }
+
+  const [
+    categorySnapshot,
+    courseSnapshot,
+    sessionSnapshot,
+    courseSeriesSnapshot,
+    courseOfferingSnapshot,
+    courseSessionSnapshot,
+    instructorSnapshot,
+  ] = await Promise.all([
+    withReadDiagnostics(
+      "categories",
+      "static-booking-collections",
+      db.collection("categories").orderBy("sortOrder", "asc").get(),
+    ),
+    withReadDiagnostics(
+      "courses",
+      "static-booking-collections",
+      db.collection("courses").get(),
+    ),
+    withReadDiagnostics(
+      "sessions",
+      "static-booking-collections",
+      db.collection("sessions").get(),
+    ),
+    withReadDiagnostics(
+      "courseSeries",
+      "static-booking-collections",
+      db.collection("courseSeries").get(),
+    ),
+    withReadDiagnostics(
+      "courseOfferings",
+      "static-booking-collections",
+      db.collection("courseOfferings").get(),
+    ),
+    withReadDiagnostics(
+      "courseSessions",
+      "static-booking-collections",
+      db.collection("courseSessions").get(),
+    ),
+    withReadDiagnostics(
+      "instructors",
+      "static-booking-collections",
+      db.collection("instructors").get(),
+    ),
+  ]);
+
+  const categories = categorySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CourseCategory);
+  const sessions = sessionSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CourseSession);
+  const courseSeries = courseSeriesSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CourseSeries);
+  const courseOfferings = courseOfferingSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CourseOffering);
+  const courseSessions = courseSessionSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as BookingData["courseSessions"][number]);
+  const instructors = instructorSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Instructor);
+  const courses = courseSnapshot.docs.map((doc) => {
+    const course = { id: doc.id, ...doc.data() } as Omit<Course, "sessions">;
+
+    return {
+      ...course,
+      sessions: sessions.filter((session) => session.courseId === course.id),
+    };
+  });
+
+  const normalized = normalizeBookingData({
+    categories,
+    courses,
+    courseSeries,
+    courseOfferings,
+    courseSessions,
+    instructors,
+  });
+
+  return {
+    categories: normalized.categories,
+    courses: normalized.courses,
+    courseSeries: normalized.courseSeries,
+    courseOfferings: normalized.courseOfferings,
+    courseSessions: normalized.courseSessions,
+    instructors: normalized.instructors,
+  };
+}
+
+const getCachedFirestoreStaticBookingCollections = unstable_cache(
+  readFirestoreStaticBookingCollections,
+  ["firestore-static-booking-collections-v1"],
+  {
+    revalidate: 3600,
+    tags: [BOOKING_STATIC_CACHE_TAG],
+  },
+);
+
+async function getStaticBookingCollections(): Promise<StaticBookingCollections> {
+  const db = getFirestoreDb();
+
+  if (!db) {
+    const data = readBookingData();
+    return {
+      categories: data.categories,
+      courses: data.courses,
+      courseSeries: data.courseSeries,
+      courseOfferings: data.courseOfferings,
+      courseSessions: data.courseSessions,
+      instructors: data.instructors,
+    };
+  }
+
+  if (!staticBookingCollectionsPending) {
+    staticBookingCollectionsPending = getCachedFirestoreStaticBookingCollections().finally(() => {
+      staticBookingCollectionsPending = null;
+    });
+  }
+
+  return staticBookingCollectionsPending;
+}
+
+async function readFirestoreLiveBookingCollections(
+  db: FirebaseFirestore.Firestore,
+  context: FirestoreReadContext,
+): Promise<LiveBookingCollections> {
+  const [
+    reservationSnapshot,
+    studentSnapshot,
+    studentCourseRecordSnapshot,
+    enrollmentSnapshot,
+    attendanceRecordSnapshot,
+  ] = await Promise.all([
+    withReadDiagnostics("reservations", context, db.collection("reservations").get()),
+    withReadDiagnostics("students", context, db.collection("students").get()),
+    withReadDiagnostics("studentCourseRecords", context, db.collection("studentCourseRecords").get()),
+    withReadDiagnostics("enrollments", context, db.collection("enrollments").get()),
+    withReadDiagnostics("attendanceRecords", context, db.collection("attendanceRecords").get()),
+  ]);
+
+  return {
+    reservations: reservationSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Reservation),
+    students: studentSnapshot.docs
+      .map((doc) =>
+        normalizeFirestoreStudent(doc.id, doc.data() as FirestoreStudentDocument),
+      )
+      .sort(compareStudentsForRoster),
+    studentCourseRecords: studentCourseRecordSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as StudentCourseRecord),
+    enrollments: enrollmentSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Enrollment),
+    attendanceRecords: attendanceRecordSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as BookingData["attendanceRecords"][number]),
+  };
+}
+
+async function getLiveBookingCollections(
+  db: FirebaseFirestore.Firestore,
+  context: FirestoreReadContext,
+): Promise<LiveBookingCollections> {
+  if (!liveBookingCollectionsPending) {
+    liveBookingCollectionsPending = readFirestoreLiveBookingCollections(db, context).finally(() => {
+      liveBookingCollectionsPending = null;
+    });
+  }
+
+  return liveBookingCollectionsPending;
+}
+
+export async function getBookingData(options?: BookingDataReadOptions): Promise<BookingData> {
   const db = getFirestoreDb();
 
   if (!db) {
@@ -138,70 +536,19 @@ export async function getBookingData(): Promise<BookingData> {
   }
 
   try {
-    const [
-      categorySnapshot,
-      courseSnapshot,
-      sessionSnapshot,
-      reservationSnapshot,
-      studentSnapshot,
-      courseSeriesSnapshot,
-      courseOfferingSnapshot,
-      courseSessionSnapshot,
-      studentCourseRecordSnapshot,
-      enrollmentSnapshot,
-      attendanceRecordSnapshot,
-      instructorSnapshot,
-    ] = await Promise.all([
-      db.collection("categories").orderBy("sortOrder", "asc").get(),
-      db.collection("courses").get(),
-      db.collection("sessions").get(),
-      db.collection("reservations").get(),
-      db.collection("students").get(),
-      db.collection("courseSeries").get(),
-      db.collection("courseOfferings").get(),
-      db.collection("courseSessions").get(),
-      db.collection("studentCourseRecords").get(),
-      db.collection("enrollments").get(),
-      db.collection("attendanceRecords").get(),
-      db.collection("instructors").get(),
+    const context = createReadContext({
+      source: options?.source ?? "getBookingData",
+      route: options?.route,
+      requestId: options?.requestId,
+    });
+    const [staticCollections, liveCollections] = await Promise.all([
+      getStaticBookingCollections(),
+      getLiveBookingCollections(db, context),
     ]);
 
-    const categories = categorySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CourseCategory);
-    const sessions = sessionSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CourseSession);
-    const reservations = reservationSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Reservation);
-    const students = studentSnapshot.docs
-      .map((doc) =>
-        normalizeFirestoreStudent(doc.id, doc.data() as FirestoreStudentDocument),
-      )
-      .sort(compareStudentsForRoster);
-    const courseSeries = courseSeriesSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CourseSeries);
-    const courseOfferings = courseOfferingSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CourseOffering);
-    const courseSessions = courseSessionSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as BookingData["courseSessions"][number]);
-    const studentCourseRecords = studentCourseRecordSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as StudentCourseRecord);
-    const enrollments = enrollmentSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Enrollment);
-    const attendanceRecords = attendanceRecordSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as BookingData["attendanceRecords"][number]);
-    const instructors = instructorSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Instructor);
-    const courses = courseSnapshot.docs.map((doc) => {
-      const course = { id: doc.id, ...doc.data() } as Omit<Course, "sessions">;
-
-      return {
-        ...course,
-        sessions: sessions.filter((session) => session.courseId === course.id),
-      };
-    });
-
     return normalizeBookingData({
-      categories,
-      courses,
-      reservations,
-      students,
-      courseSeries,
-      courseOfferings,
-      courseSessions,
-      studentCourseRecords,
-      enrollments,
-      attendanceRecords,
-      instructors,
+      ...staticCollections,
+      ...liveCollections,
     });
   } catch (error) {
     if (!shouldFallbackToJson()) {
@@ -209,6 +556,420 @@ export async function getBookingData(): Promise<BookingData> {
     }
     console.warn("[DATA_SOURCE] ⚠️ Firestore read failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     return readBookingData();
+  }
+}
+
+export async function getStudentDirectoryData(
+  options?: BookingDataReadOptions,
+): Promise<Pick<BookingData, "students">> {
+  const db = getFirestoreDb();
+
+  if (!db) {
+    const data = readBookingData();
+    return { students: data.students };
+  }
+
+  try {
+    const context = createReadContext({
+      source: options?.source ?? "getStudentDirectoryData",
+      route: options?.route,
+      requestId: options?.requestId,
+    });
+    const studentSnapshot = await withReadDiagnostics(
+      "students",
+      context,
+      db.collection("students").get(),
+    );
+
+    return {
+      students: studentSnapshot.docs
+        .map((doc) =>
+          normalizeFirestoreStudent(
+            doc.id,
+            doc.data() as FirestoreStudentDocument,
+          ),
+        )
+        .sort(compareStudentsForRoster),
+    };
+  } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Student directory read failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore student directory read failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
+    const data = readBookingData();
+    return { students: data.students };
+  }
+}
+
+export async function getStudentImportPageData(
+  options?: BookingDataReadOptions,
+): Promise<Pick<BookingData, "courseOfferings">> {
+  const db = getFirestoreDb();
+
+  if (!db) {
+    const data = readBookingData();
+    return { courseOfferings: data.courseOfferings };
+  }
+
+  try {
+    const context = createReadContext({
+      source: options?.source ?? "getStudentImportPageData",
+      route: options?.route,
+      requestId: options?.requestId,
+    });
+    const courseOfferingSnapshot = await withReadDiagnostics(
+      "courseOfferings",
+      context,
+      db.collection("courseOfferings").get(),
+    );
+
+    return {
+      courseOfferings: courseOfferingSnapshot.docs.map(
+        (doc) => ({ id: doc.id, ...doc.data() }) as CourseOffering,
+      ),
+    };
+  } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Student import page data read failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore student import page read failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
+    const data = readBookingData();
+    return { courseOfferings: data.courseOfferings };
+  }
+}
+
+export async function getStudentImportLookupData(
+  input: StudentImportLookupInput,
+): Promise<
+  Pick<
+    BookingData,
+    | "students"
+    | "courseSeries"
+    | "courseOfferings"
+    | "studentCourseRecords"
+    | "enrollments"
+  >
+> {
+  const identityNames = uniqueNonEmpty(input.identities.map((item) => item.name));
+  const identityLast3 = new Set(
+    input.identities.map((item) => String(item.idNumberLast3 ?? "").trim()),
+  );
+  const memberNos = uniqueNonEmpty(input.memberNos ?? []);
+  const targetOfferingId = String(input.targetOfferingId ?? "").trim();
+  const seriesId = String(input.seriesId ?? "").trim();
+  const requestedYear = String(input.year ?? "").trim();
+  const db = getFirestoreDb();
+
+  if (!db) {
+    const data = readBookingData();
+    const students = (data.students ?? []).filter(
+      (student) =>
+        (identityNames.includes(student.name) &&
+          identityLast3.has(String(student.idNumberLast3 ?? "").trim())) ||
+        (student.memberNo && memberNos.includes(student.memberNo)),
+    );
+    const targetOffering = targetOfferingId
+      ? data.courseOfferings.find(
+          (item) => item.id === targetOfferingId || item.legacyCourseId === targetOfferingId,
+        )
+      : undefined;
+    const effectiveSeriesId =
+      seriesId ||
+      targetOffering?.seriesId ||
+      targetOffering?.courseSeriesId ||
+      targetOffering?.courseMasterId ||
+      "";
+    const effectiveYear = requestedYear || String(targetOffering?.year ?? "");
+    const studentIds = new Set(students.map((student) => student.id));
+
+    return {
+      students,
+      courseSeries: (data.courseSeries ?? []).filter(
+        (item) => !effectiveSeriesId || item.id === effectiveSeriesId,
+      ),
+      courseOfferings: (data.courseOfferings ?? []).filter(
+        (item) =>
+          (targetOfferingId &&
+            (item.id === targetOfferingId || item.legacyCourseId === targetOfferingId)) ||
+          (effectiveSeriesId &&
+            [item.seriesId, item.courseSeriesId, item.courseMasterId, item.id, item.legacyCourseId]
+              .filter(Boolean)
+              .includes(effectiveSeriesId)),
+      ),
+      studentCourseRecords: input.needsEligibility
+        ? (data.studentCourseRecords ?? []).filter(
+            (record) =>
+              studentIds.has(record.studentId) &&
+              (!targetOffering?.id || record.offeringId === targetOffering.id) &&
+              (!effectiveSeriesId ||
+                record.seriesId === effectiveSeriesId ||
+                record.courseMasterId === effectiveSeriesId) &&
+              (!effectiveYear ||
+                String(record.year ?? record.sourceRocYear ?? "") === effectiveYear),
+          )
+        : [],
+      enrollments: input.needsEnrollment
+        ? (data.enrollments ?? []).filter(
+            (item) =>
+              studentIds.has(item.studentId) &&
+              (!targetOffering?.id ||
+                item.offeringId === targetOffering.id ||
+                item.courseOfferingId === targetOffering.id),
+          )
+        : [],
+    };
+  }
+
+  try {
+    const context = createReadContext({
+      source: input.source ?? "getStudentImportLookupData",
+      route: input.route,
+      requestId: input.requestId,
+    });
+    const studentsById = new Map<string, Student>();
+    const courseOfferingsById = new Map<string, CourseOffering>();
+    const courseSeriesById = new Map<string, CourseSeries>();
+
+    for (const chunk of chunkList(identityNames, 30)) {
+      const snapshot = await withReadDiagnostics(
+        "students",
+        context,
+        db.collection("students").where("name", "in", chunk).get(),
+      );
+      snapshot.docs.forEach((doc) => {
+        const student = normalizeFirestoreStudent(
+          doc.id,
+          doc.data() as FirestoreStudentDocument,
+        );
+        if (identityLast3.has(String(student.idNumberLast3 ?? "").trim())) {
+          studentsById.set(student.id, student);
+        }
+      });
+    }
+
+    for (const chunk of chunkList(memberNos, 30)) {
+      const snapshot = await withReadDiagnostics(
+        "students",
+        context,
+        db.collection("students").where("memberNo", "in", chunk).get(),
+      );
+      snapshot.docs.forEach((doc) => {
+        const student = normalizeFirestoreStudent(
+          doc.id,
+          doc.data() as FirestoreStudentDocument,
+        );
+        studentsById.set(student.id, student);
+      });
+    }
+
+    if (targetOfferingId) {
+      const directOfferingDoc = await withDocumentReadDiagnostics(
+        "courseOfferings",
+        context,
+        db.collection("courseOfferings").doc(targetOfferingId).get(),
+      );
+      if (directOfferingDoc.exists) {
+        courseOfferingsById.set(directOfferingDoc.id, {
+          id: directOfferingDoc.id,
+          ...directOfferingDoc.data(),
+        } as CourseOffering);
+      }
+
+      const legacyOfferingSnapshot = await withReadDiagnostics(
+        "courseOfferings",
+        context,
+        db.collection("courseOfferings").where("legacyCourseId", "==", targetOfferingId).get(),
+      );
+      legacyOfferingSnapshot.docs.forEach((doc) => {
+        courseOfferingsById.set(doc.id, { id: doc.id, ...doc.data() } as CourseOffering);
+      });
+    }
+
+    if (seriesId) {
+      const seriesDoc = await withDocumentReadDiagnostics(
+        "courseSeries",
+        context,
+        db.collection("courseSeries").doc(seriesId).get(),
+      );
+      if (seriesDoc.exists) {
+        courseSeriesById.set(seriesDoc.id, {
+          id: seriesDoc.id,
+          ...seriesDoc.data(),
+        } as CourseSeries);
+      }
+
+      const offeringQueries = [
+        db.collection("courseOfferings").where("seriesId", "==", seriesId).get(),
+        db.collection("courseOfferings").where("courseSeriesId", "==", seriesId).get(),
+        db.collection("courseOfferings").where("courseMasterId", "==", seriesId).get(),
+      ];
+      for (const query of offeringQueries) {
+        const snapshot = await withReadDiagnostics("courseOfferings", context, query);
+        snapshot.docs.forEach((doc) => {
+          courseOfferingsById.set(doc.id, { id: doc.id, ...doc.data() } as CourseOffering);
+        });
+      }
+    }
+
+    Array.from(courseOfferingsById.values()).forEach((offering) => {
+      const offeringSeriesId =
+        offering.seriesId || offering.courseSeriesId || offering.courseMasterId || "";
+      if (!offeringSeriesId || courseSeriesById.has(offeringSeriesId)) return;
+      courseSeriesById.set(offeringSeriesId, {
+        id: offeringSeriesId,
+        title: offering.title,
+        categoryId: offering.categoryId ?? "",
+        courseType: offering.courseType,
+        color: offering.color,
+        isActive: offering.isActive ?? true,
+      });
+    });
+
+    const students = Array.from(studentsById.values()).sort(compareStudentsForRoster);
+    const studentIds = students.map((student) => student.id);
+    const targetOffering =
+      (targetOfferingId
+        ? Array.from(courseOfferingsById.values()).find(
+            (item) => item.id === targetOfferingId || item.legacyCourseId === targetOfferingId,
+          )
+        : undefined) ?? Array.from(courseOfferingsById.values())[0];
+    const effectiveSeriesId =
+      seriesId ||
+      targetOffering?.seriesId ||
+      targetOffering?.courseSeriesId ||
+      targetOffering?.courseMasterId ||
+      "";
+    const effectiveYear = requestedYear || String(targetOffering?.year ?? "");
+    const studentCourseRecords: StudentCourseRecord[] = [];
+    const enrollments: Enrollment[] = [];
+
+    if (input.needsEligibility && studentIds.length > 0) {
+      for (const chunk of chunkList(studentIds, 30)) {
+        const snapshot = await withReadDiagnostics(
+          "studentCourseRecords",
+          context,
+          db.collection("studentCourseRecords").where("studentId", "in", chunk).get(),
+        );
+        snapshot.docs.forEach((doc) => {
+          const record = { id: doc.id, ...doc.data() } as StudentCourseRecord;
+          const matchesOffering = targetOffering?.id
+            ? record.offeringId === targetOffering.id
+            : true;
+          const matchesSeries = effectiveSeriesId
+            ? record.seriesId === effectiveSeriesId ||
+              record.courseMasterId === effectiveSeriesId
+            : true;
+          const matchesYear = effectiveYear
+            ? String(record.year ?? record.sourceRocYear ?? "") === effectiveYear
+            : true;
+          if (matchesOffering && matchesSeries && matchesYear) {
+            studentCourseRecords.push(record);
+          }
+        });
+      }
+    }
+
+    if (input.needsEnrollment && targetOffering?.id && studentIds.length > 0) {
+      const refs = studentIds.map((studentId) =>
+        db.collection("enrollments").doc(`enroll-${studentId}-${targetOffering.id}`),
+      );
+      for (const ref of refs) {
+        const doc = await withDocumentReadDiagnostics(
+          "enrollments",
+          context,
+          ref.get(),
+        );
+        if (doc.exists) {
+          enrollments.push({ id: doc.id, ...doc.data() } as Enrollment);
+        }
+      }
+    }
+
+    return {
+      students,
+      courseSeries: Array.from(courseSeriesById.values()),
+      courseOfferings: Array.from(courseOfferingsById.values()),
+      studentCourseRecords,
+      enrollments,
+    };
+  } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Student import lookup read failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore student import lookup failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
+    const data = readBookingData();
+    return {
+      students: data.students,
+      courseSeries: data.courseSeries,
+      courseOfferings: data.courseOfferings,
+      studentCourseRecords: data.studentCourseRecords,
+      enrollments: data.enrollments,
+    };
+  }
+}
+
+export async function findStudentIdentityForUpsert(input: {
+  id?: string;
+  name: string;
+  idNumberLast3: string;
+}): Promise<Student | null> {
+  const id = String(input.id ?? "").trim();
+  const name = String(input.name ?? "").trim();
+  const idNumberLast3 = String(input.idNumberLast3 ?? "").trim();
+
+  if (id) {
+    return getStudentById(id);
+  }
+
+  if (!name || !idNumberLast3) {
+    return null;
+  }
+
+  const db = getFirestoreDb();
+
+  if (!db) {
+    const data = readBookingData();
+    return (
+      data.students.find(
+        (student) =>
+          student.name === name && student.idNumberLast3 === idNumberLast3,
+      ) ?? null
+    );
+  }
+
+  try {
+    const context = createReadContext({
+      source: "findStudentIdentityForUpsert",
+      route: "/admin/students/new",
+    });
+    const studentSnapshot = await withReadDiagnostics(
+      "students",
+      context,
+      db.collection("students").where("name", "==", name).limit(10).get(),
+    );
+
+    return (
+      studentSnapshot.docs
+        .map((doc) =>
+          normalizeFirestoreStudent(
+            doc.id,
+            doc.data() as FirestoreStudentDocument,
+          ),
+        )
+        .find((student) => student.idNumberLast3 === idNumberLast3) ?? null
+    );
+  } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Student identity lookup failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore student identity lookup failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
+    const data = readBookingData();
+    return (
+      data.students.find(
+        (student) =>
+          student.name === name && student.idNumberLast3 === idNumberLast3,
+      ) ?? null
+    );
   }
 }
 
@@ -285,31 +1046,13 @@ export async function getAdminStatsData(): Promise<Pick<BookingData, "categories
   }
 
   try {
-    const [
-      categorySnapshot,
-      courseSnapshot,
-      sessionSnapshot,
-      reservationSnapshot,
-    ] = await Promise.all([
-      db.collection("categories").orderBy("sortOrder", "asc").get(),
-      db.collection("courses").get(),
-      db.collection("sessions").get(),
-      db.collection("reservations").get(),
+    const [staticCollections, reservationSnapshot] = await Promise.all([
+      getStaticBookingCollections(),
+      withReadDiagnostics("reservations", "admin-stats", db.collection("reservations").get()),
     ]);
 
-    const categories = categorySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CourseCategory);
-    const sessions = sessionSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CourseSession);
     const reservations = reservationSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Reservation);
-    const courses = courseSnapshot.docs.map((doc) => {
-      const course = { id: doc.id, ...doc.data() } as Omit<Course, "sessions">;
-
-      return {
-        ...course,
-        sessions: sessions.filter((session) => session.courseId === course.id),
-      };
-    });
-
-    const normalized = normalizeBookingData({ categories, courses, reservations, students: [] });
+    const normalized = normalizeBookingData({ ...staticCollections, reservations, students: [] });
     return {
       categories: normalized.categories,
       courses: normalized.courses,
@@ -329,6 +1072,130 @@ export async function getAdminStatsData(): Promise<Pick<BookingData, "categories
   }
 }
 
+export async function getCourseSessionManagementData(
+  options?: BookingDataReadOptions,
+): Promise<
+  Pick<
+    BookingData,
+    | "categories"
+    | "courses"
+    | "courseSeries"
+    | "courseOfferings"
+    | "courseSessions"
+    | "instructors"
+    | "reservations"
+  >
+> {
+  const db = getFirestoreDb();
+
+  if (!db) {
+    const data = readBookingData();
+    return {
+      categories: data.categories,
+      courses: data.courses,
+      courseSeries: data.courseSeries,
+      courseOfferings: data.courseOfferings,
+      courseSessions: data.courseSessions,
+      instructors: data.instructors,
+      reservations: data.reservations,
+    };
+  }
+
+  try {
+    const context = createReadContext({
+      source: options?.source ?? "getCourseSessionManagementData",
+      route: options?.route,
+      requestId: options?.requestId,
+    });
+    const [staticCollections, reservationSnapshot] = await Promise.all([
+      getStaticBookingCollections(),
+      withReadDiagnostics("reservations", context, db.collection("reservations").get()),
+    ]);
+    const reservations = reservationSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Reservation);
+    const normalized = normalizeBookingData({
+      ...staticCollections,
+      reservations,
+      students: [],
+    });
+    return {
+      categories: normalized.categories,
+      courses: normalized.courses,
+      courseSeries: normalized.courseSeries,
+      courseOfferings: normalized.courseOfferings,
+      courseSessions: normalized.courseSessions,
+      instructors: normalized.instructors,
+      reservations: normalized.reservations,
+    };
+  } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Course session management data read failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ?? Firestore course session management read failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
+    const data = readBookingData();
+    return {
+      categories: data.categories,
+      courses: data.courses,
+      courseSeries: data.courseSeries,
+      courseOfferings: data.courseOfferings,
+      courseSessions: data.courseSessions,
+      instructors: data.instructors,
+      reservations: data.reservations,
+    };
+  }
+}
+
+export async function getTeachingDashboardData(
+  options?: BookingDataReadOptions,
+): Promise<Pick<BookingData, "categories" | "courses" | "instructors" | "reservations">> {
+  const db = getFirestoreDb();
+
+  if (!db) {
+    const data = readBookingData();
+    return {
+      categories: data.categories,
+      courses: data.courses,
+      instructors: data.instructors,
+      reservations: data.reservations,
+    };
+  }
+
+  try {
+    const context = createReadContext({
+      source: options?.source ?? "getTeachingDashboardData",
+      route: options?.route,
+      requestId: options?.requestId,
+    });
+    const [staticCollections, reservationSnapshot] = await Promise.all([
+      getStaticBookingCollections(),
+      withReadDiagnostics("reservations", context, db.collection("reservations").get()),
+    ]);
+    const reservations = reservationSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Reservation);
+    const normalized = normalizeBookingData({
+      ...staticCollections,
+      reservations,
+      students: [],
+    });
+    return {
+      categories: normalized.categories,
+      courses: normalized.courses,
+      instructors: normalized.instructors,
+      reservations: normalized.reservations,
+    };
+  } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Teaching dashboard data read failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ?? Firestore teaching dashboard read failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
+    const data = readBookingData();
+    return {
+      categories: data.categories,
+      courses: data.courses,
+      instructors: data.instructors,
+      reservations: data.reservations,
+    };
+  }
+}
+
 export async function getCourseCatalog(): Promise<Pick<BookingData, "categories" | "courses">> {
   const db = getFirestoreDb();
 
@@ -341,24 +1208,8 @@ export async function getCourseCatalog(): Promise<Pick<BookingData, "categories"
   }
 
   try {
-    const [categorySnapshot, courseSnapshot, sessionSnapshot] = await Promise.all([
-      db.collection("categories").orderBy("sortOrder", "asc").get(),
-      db.collection("courses").get(),
-      db.collection("sessions").get(),
-    ]);
-
-    const categories = categorySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CourseCategory);
-    const sessions = sessionSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CourseSession);
-    const courses = courseSnapshot.docs.map((doc) => {
-      const course = { id: doc.id, ...doc.data() } as Omit<Course, "sessions">;
-
-      return {
-        ...course,
-        sessions: sessions.filter((session) => session.courseId === course.id),
-      };
-    });
-
-    const normalized = normalizeBookingData({ categories, courses, reservations: [], students: [] });
+    const staticCollections = await getStaticBookingCollections();
+    const normalized = normalizeBookingData({ ...staticCollections, reservations: [], students: [] });
     return {
       categories: normalized.categories,
       courses: normalized.courses.filter((course) => course.status !== "archived" && course.isActive !== false),
@@ -763,7 +1614,7 @@ export async function createReservation(input: CreateReservationInput) {
   }
 
   try {
-    return await db.runTransaction(async (transaction) => {
+    const result = await db.runTransaction(async (transaction) => {
       const courseRef = db.collection("courses").doc(input.courseId);
       const sessionRef = db.collection("sessions").doc(input.sessionId);
       const [courseDoc, sessionDoc] = await Promise.all([transaction.get(courseRef), transaction.get(sessionRef)]);
@@ -962,6 +1813,8 @@ export async function createReservation(input: CreateReservationInput) {
 
       return { ok: true as const, reservation, courseId: course.id, sessionId: session.id };
     });
+    if (result.ok) await invalidateStaticBookingCache();
+    return result;
   } catch (error) {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Reservation write failed.", error);
@@ -1441,6 +2294,7 @@ export async function ensureSessionRosterReservation(studentId: string, courseId
       } catch {
         // 部分專案版本沒有獨立 sessions collection；點名紀錄已成功建立即可。
       }
+      await invalidateStaticBookingCache();
     }
     return result;
   } catch (error) {
@@ -1466,7 +2320,7 @@ export async function cancelReservation(reservationId: string, studentName: stri
   }
 
   try {
-    return await db.runTransaction(async (transaction) => {
+    const result = await db.runTransaction(async (transaction) => {
     const reservationRef = db.collection("reservations").doc(reservationId);
     const reservationDoc = await transaction.get(reservationRef);
 
@@ -1503,6 +2357,8 @@ export async function cancelReservation(reservationId: string, studentName: stri
 
     return { ok: true as const, courseId: reservation.courseId, sessionId: reservation.sessionId };
     });
+    if (result.ok) await invalidateStaticBookingCache();
+    return result;
   } catch (error) {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Reservation cancel failed.", error);
@@ -1532,7 +2388,7 @@ export async function cancelReservationByStaff(reservationId: string) {
   }
 
   try {
-    return await db.runTransaction(async (transaction) => {
+    const result = await db.runTransaction(async (transaction) => {
       const reservationRef = db.collection("reservations").doc(reservationId);
       const reservationDoc = await transaction.get(reservationRef);
 
@@ -1559,6 +2415,8 @@ export async function cancelReservationByStaff(reservationId: string) {
 
       return { ok: true as const, courseId: reservation.courseId, sessionId: reservation.sessionId };
     });
+    if (result.ok) await invalidateStaticBookingCache();
+    return result;
   } catch (error) {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Staff reservation cancel failed.", error);
@@ -1757,6 +2615,7 @@ export async function upsertCategory(category: CourseCategory) {
 
   try {
     await db.collection("categories").doc(category.id).set(removeUndefinedFields(category), { merge: true });
+    await invalidateStaticBookingCache();
   } catch (error) {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Category write failed.", error);
@@ -1783,6 +2642,7 @@ export async function upsertCourse(course: Omit<Course, "sessions">) {
 
   try {
     await db.collection("courses").doc(course.id).set(removeUndefinedFields(course), { merge: true });
+    await invalidateStaticBookingCache();
   } catch (error) {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Course write failed.", error);
@@ -1821,14 +2681,28 @@ export async function deleteSessionsByIds(sessionIds: string[]) {
   }
 
   try {
-    for (let index = 0; index < uniqueSessionIds.length; index += 450) {
+    const refs = new Map<string, FirebaseFirestore.DocumentReference>();
+
+    const collect = async (collection: string, field: string, value: string) => {
+      const snapshot = await db.collection(collection).where(field, "==", value).get();
+      snapshot.docs.forEach((doc) => refs.set(doc.ref.path, doc.ref));
+    };
+
+    for (const sessionId of uniqueSessionIds) {
+      refs.set(`sessions/${sessionId}`, db.collection("sessions").doc(sessionId));
+      refs.set(`courseSessions/${sessionId}`, db.collection("courseSessions").doc(sessionId));
+      await collect("reservations", "sessionId", sessionId);
+      await collect("attendanceRecords", "sessionId", sessionId);
+      await collect("attendanceRecords", "courseSessionId", sessionId);
+    }
+
+    const refList = Array.from(refs.values());
+    for (let index = 0; index < refList.length; index += 450) {
       const batch = db.batch();
-      uniqueSessionIds.slice(index, index + 450).forEach((sessionId) => {
-        batch.delete(db.collection("sessions").doc(sessionId));
-        batch.delete(db.collection("courseSessions").doc(sessionId));
-      });
+      refList.slice(index, index + 450).forEach((ref) => batch.delete(ref));
       await batch.commit();
     }
+    await invalidateStaticBookingCache();
   } catch (error) {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Sessions delete failed.", error);
@@ -1868,6 +2742,7 @@ export async function upsertSession(session: CourseSession) {
 
   try {
     await db.collection("sessions").doc(session.id).set(removeUndefinedFields(session), { merge: true });
+    await invalidateStaticBookingCache();
   } catch (error) {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Session write failed.", error);
@@ -1899,6 +2774,7 @@ export async function upsertCourseSeries(series: CourseSeries) {
 
   try {
     await db.collection("courseSeries").doc(series.id).set(removeUndefinedFields(series), { merge: true });
+    await invalidateStaticBookingCache();
   } catch (error) {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Course series write failed.", error);
@@ -1927,6 +2803,7 @@ export async function upsertCourseOffering(offering: CourseOffering) {
 
   try {
     await db.collection("courseOfferings").doc(offering.id).set(removeUndefinedFields(offering), { merge: true });
+    await invalidateStaticBookingCache();
   } catch (error) {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Course offering write failed.", error);
@@ -2029,6 +2906,112 @@ export async function upsertStudentCourseRecord(record: StudentCourseRecord) {
   }
 }
 
+export async function commitStudentImportBatch(input: StudentImportWriteBatch) {
+  const students = input.students ?? [];
+  const studentCourseRecords = input.studentCourseRecords ?? [];
+  const enrollments = input.enrollments ?? [];
+  const db = getFirestoreDb();
+
+  if (!db) {
+    const data = readBookingData();
+    const existingStudents = data.students ?? [];
+    const existingRecords = data.studentCourseRecords ?? [];
+    const existingEnrollments = data.enrollments ?? [];
+
+    for (const student of students) {
+      const index = existingStudents.findIndex((item) => item.id === student.id);
+      if (index >= 0) existingStudents[index] = student;
+      else existingStudents.push(student);
+    }
+
+    for (const record of studentCourseRecords) {
+      const index = existingRecords.findIndex((item) => item.id === record.id);
+      if (index >= 0) existingRecords[index] = { ...existingRecords[index], ...record };
+      else existingRecords.push(record);
+    }
+
+    for (const enrollment of enrollments) {
+      const index = existingEnrollments.findIndex((item) => item.id === enrollment.id);
+      if (index >= 0) existingEnrollments[index] = { ...existingEnrollments[index], ...enrollment };
+      else existingEnrollments.push(enrollment);
+    }
+
+    writeBookingData({
+      ...data,
+      students: existingStudents,
+      studentCourseRecords: existingRecords,
+      enrollments: existingEnrollments,
+    });
+    return;
+  }
+
+  try {
+    const writes: Array<{
+      collection: "students" | "studentCourseRecords" | "enrollments";
+      id: string;
+      data: Student | StudentCourseRecord | Enrollment;
+    }> = [
+      ...students.map((student) => ({
+        collection: "students" as const,
+        id: student.id,
+        data: student,
+      })),
+      ...studentCourseRecords.map((record) => ({
+        collection: "studentCourseRecords" as const,
+        id: record.id,
+        data: record,
+      })),
+      ...enrollments.map((enrollment) => ({
+        collection: "enrollments" as const,
+        id: enrollment.id,
+        data: enrollment,
+      })),
+    ];
+
+    for (const chunk of chunkList(writes, 450)) {
+      const batch = db.batch();
+      chunk.forEach((write) => {
+        batch.set(
+          db.collection(write.collection).doc(write.id),
+          removeUndefinedFields(write.data),
+          { merge: true },
+        );
+      });
+      await batch.commit();
+    }
+  } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Student import batch write failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore student import batch write failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
+    const data = readBookingData();
+    const existingStudents = data.students ?? [];
+    const existingRecords = data.studentCourseRecords ?? [];
+    const existingEnrollments = data.enrollments ?? [];
+
+    for (const student of students) {
+      const index = existingStudents.findIndex((item) => item.id === student.id);
+      if (index >= 0) existingStudents[index] = student;
+      else existingStudents.push(student);
+    }
+    for (const record of studentCourseRecords) {
+      const index = existingRecords.findIndex((item) => item.id === record.id);
+      if (index >= 0) existingRecords[index] = { ...existingRecords[index], ...record };
+      else existingRecords.push(record);
+    }
+    for (const enrollment of enrollments) {
+      const index = existingEnrollments.findIndex((item) => item.id === enrollment.id);
+      if (index >= 0) existingEnrollments[index] = { ...existingEnrollments[index], ...enrollment };
+      else existingEnrollments.push(enrollment);
+    }
+    writeBookingData({
+      ...data,
+      students: existingStudents,
+      studentCourseRecords: existingRecords,
+      enrollments: existingEnrollments,
+    });
+  }
+}
 
 export async function removeStudentCourseEligibility(studentId: string, seriesId: string, year: string | number) {
   const normalizedYear = String(year ?? "").trim();
@@ -2452,6 +3435,7 @@ export async function addStudentToSessionRoster(studentId: string, courseId: str
     batch.set(db.collection("sessions").doc(session.id), { bookedCount: newBookedCount, updatedAt: now }, { merge: true });
 
     await batch.commit();
+    await invalidateStaticBookingCache();
     return { ok: true as const, reservation, courseId: course.id, sessionId: session.id };
   } catch (error) {
     if (!shouldFallbackToJson()) {
@@ -2521,6 +3505,9 @@ export async function setDocumentActive(
       payload.status = isActive ? "open" : "closed";
     }
     await db.collection(collection).doc(id).set(payload, { merge: true });
+    if (["categories", "courses", "sessions", "courseSeries", "courseOfferings"].includes(collection)) {
+      await invalidateStaticBookingCache();
+    }
   } catch (error) {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Active-state write failed.", error);
@@ -2551,6 +3538,7 @@ export async function deleteManagedDocument(collection: "categories" | "courses"
 
   try {
     await db.collection(collection).doc(id).delete();
+    await invalidateStaticBookingCache();
   } catch (error) {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Managed document delete failed.", error);
@@ -2599,6 +3587,7 @@ export async function deleteSessionAndReservations(sessionId: string) {
       });
       await batch.commit();
     }
+    await invalidateStaticBookingCache();
   } catch (error) {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Session delete failed.", error);
@@ -2665,6 +3654,7 @@ export async function deleteCourseSessionsAndReservations(courseId: string) {
       docs.slice(index, index + 450).forEach((doc) => batch.delete(doc.ref));
       await batch.commit();
     }
+    await invalidateStaticBookingCache();
   } catch (error) {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Course sessions delete failed.", error);
@@ -2869,7 +3859,9 @@ export async function deleteCourseOfferingCascade(offeringId: string): Promise<C
     }
 
     try {
-      return applyLocal();
+      const result = applyLocal();
+      await invalidateStaticBookingCache();
+      return result;
     } catch (localError) {
       console.warn("⚠️ Failed to update local JSON backup during cascade delete:", localError);
       return {
@@ -2984,6 +3976,7 @@ export async function upsertInstructor(instructor: Instructor) {
 
   try {
     await db.collection("instructors").doc(instructor.id).set(removeUndefinedFields(instructor), { merge: true });
+    await invalidateStaticBookingCache();
   } catch (error) {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Instructor write failed.", error);
@@ -3025,6 +4018,7 @@ export async function deleteInstructorIdentityDocument(instructorId: string) {
       },
       { merge: true },
     );
+    await invalidateStaticBookingCache();
   } catch (error) {
     if (!shouldFallbackToJson()) {
       throw createFirestoreRequiredError("Instructor delete failed.", error);
@@ -3034,7 +4028,9 @@ export async function deleteInstructorIdentityDocument(instructorId: string) {
   }
 }
 
-export async function getDataSourceStatus() {
+export async function getDataSourceStatus(
+  dataForCounts?: Pick<BookingData, "courses" | "students" | "reservations" | "enrollments">,
+) {
   const db = getFirestoreDb();
   const runtime = process.env.NODE_ENV || "development";
   const bookingDataSource = process.env.BOOKING_DATA_SOURCE || "local-json";
@@ -3048,7 +4044,7 @@ export async function getDataSourceStatus() {
   };
 
   try {
-    const data = await getBookingData();
+    const data = dataForCounts ?? await getBookingData();
     counts = {
       courses: data.courses?.length || 0,
       students: data.students?.length || 0,
@@ -3068,14 +4064,53 @@ export async function getDataSourceStatus() {
   };
 }
 
+function parseStudentNumber(memberNo: unknown) {
+  const match = String(memberNo ?? "").trim().match(/^(\d{2,3})-(\d+)$/);
+  if (!match) return null;
+
+  const seq = parseInt(match[2] ?? "", 10);
+  if (!Number.isFinite(seq) || seq <= 0) return null;
+
+  return {
+    rocYear: match[1] ?? "",
+    seq,
+  };
+}
+
+export async function syncStudentNumberCounterForMemberNo(
+  db: any,
+  memberNo: string,
+): Promise<void> {
+  const parsed = parseStudentNumber(memberNo);
+  if (!db || !parsed) return;
+
+  const counterRef = db.collection("counters").doc("studentNumber");
+  await db.runTransaction(async (transaction: any) => {
+    const doc = await transaction.get(counterRef);
+    const data = doc.exists ? doc.data() : null;
+    const currentCounter =
+      data && typeof data[parsed.rocYear] === "number"
+        ? data[parsed.rocYear]
+        : 0;
+
+    if (parsed.seq > currentCounter) {
+      transaction.set(
+        counterRef,
+        { [parsed.rocYear]: parsed.seq },
+        { merge: true },
+      );
+    }
+  });
+}
+
 export async function generateNextStudentNumber(db: any): Promise<string> {
   const currentYear = new Date().getFullYear();
   const rocYear = String(currentYear - 1911); // e.g. "115", "116"
+  const prefix = `${rocYear}-`;
 
   if (!db) {
     // Fallback to local JSON mode
     const data = readBookingData();
-    const prefix = `${rocYear}-`;
     let maxSeq = 0;
     for (const student of data.students ?? []) {
       const memberNo = student.memberNo || student.memberId || student.externalMemberNo || "";
@@ -3093,26 +4128,33 @@ export async function generateNextStudentNumber(db: any): Promise<string> {
 
   // Firestore transaction mode
   const counterRef = db.collection("counters").doc("studentNumber");
-  
+
   let nextSeq = 1;
   await db.runTransaction(async (transaction: any) => {
     const doc = await transaction.get(counterRef);
     let currentCounter = 0;
-    
+
     if (doc.exists) {
       const data = doc.data();
       if (data && typeof data[rocYear] === "number") {
         currentCounter = data[rocYear];
       }
     }
-    
-    if (currentCounter === 0) {
-      const prefix = `${rocYear}-`;
-      const snapshot = await db.collection("students")
-        .where("memberNo", ">=", prefix)
-        .where("memberNo", "<", prefix + "\uf8ff")
-        .get();
-        
+
+    if (currentCounter <= 0) {
+      const context = createReadContext({
+        source: "generateNextStudentNumber:initialize-counter",
+        route: "/admin/students/new",
+      });
+      const snapshot = await withReadDiagnostics(
+        "students",
+        context,
+        db.collection("students")
+          .where("memberNo", ">=", prefix)
+          .where("memberNo", "<", prefix + "\uf8ff")
+          .get(),
+      );
+
       let maxSeq = 0;
       snapshot.docs.forEach((studentDoc: any) => {
         const student = studentDoc.data();
@@ -3125,13 +4167,13 @@ export async function generateNextStudentNumber(db: any): Promise<string> {
           }
         }
       });
-      currentCounter = maxSeq;
+      currentCounter = Math.max(currentCounter, maxSeq);
     }
-    
+
     nextSeq = currentCounter + 1;
     transaction.set(counterRef, { [rocYear]: nextSeq }, { merge: true });
   });
-  
+
   return `${rocYear}-${String(nextSeq).padStart(4, "0")}`;
 }
 
@@ -3167,20 +4209,28 @@ export async function generateNextStudentNumbersBlock(db: any, count: number): P
   await db.runTransaction(async (transaction: any) => {
     const doc = await transaction.get(counterRef);
     let currentCounter = 0;
-    
+
     if (doc.exists) {
       const data = doc.data();
       if (data && typeof data[rocYear] === "number") {
         currentCounter = data[rocYear];
       }
     }
-    
-    if (currentCounter === 0) {
-      const snapshot = await db.collection("students")
-        .where("memberNo", ">=", prefix)
-        .where("memberNo", "<", prefix + "\uf8ff")
-        .get();
-        
+
+    if (currentCounter <= 0) {
+      const context = createReadContext({
+        source: "generateNextStudentNumbersBlock:initialize-counter",
+        route: "/admin/students",
+      });
+      const snapshot = await withReadDiagnostics(
+        "students",
+        context,
+        db.collection("students")
+          .where("memberNo", ">=", prefix)
+          .where("memberNo", "<", prefix + "\uf8ff")
+          .get(),
+      );
+
       let maxSeq = 0;
       snapshot.docs.forEach((studentDoc: any) => {
         const student = studentDoc.data();
@@ -3193,9 +4243,9 @@ export async function generateNextStudentNumbersBlock(db: any, count: number): P
           }
         }
       });
-      currentCounter = maxSeq;
+      currentCounter = Math.max(currentCounter, maxSeq);
     }
-    
+
     startSeq = currentCounter + 1;
     transaction.set(counterRef, { [rocYear]: currentCounter + count }, { merge: true });
   });
