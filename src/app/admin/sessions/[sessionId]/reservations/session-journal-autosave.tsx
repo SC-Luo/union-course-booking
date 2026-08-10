@@ -30,6 +30,8 @@ export function SessionJournalAutosave({
   const [isPending, startTransition] = useTransition();
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const composingRef = useRef(false);
+  const latestValueRef = useRef(defaultValue);
+  const pendingValueRef = useRef<string | null>(null);
 
   useEffect(() => {
     return () => {
@@ -38,23 +40,35 @@ export function SessionJournalAutosave({
   }, []);
 
   function save(nextValue: string) {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+
     if (nextValue === savedValue) {
       setState("idle");
       return;
     }
+    if (nextValue === pendingValueRef.current) return;
 
     const formData = new FormData();
     formData.set("sessionId", sessionId);
     formData.set("field", field);
     formData.set("value", nextValue);
 
+    pendingValueRef.current = nextValue;
     setState("saving");
     startTransition(async () => {
       const result = await saveSessionJournalInlineAction(formData);
+      if (pendingValueRef.current === nextValue) {
+        pendingValueRef.current = null;
+      }
       if (result?.ok) {
-        setSavedValue(nextValue);
-        setState("saved");
-        window.setTimeout(() => setState("idle"), 1200);
+        if (latestValueRef.current === nextValue) {
+          setSavedValue(nextValue);
+          setState("saved");
+          window.setTimeout(() => setState("idle"), 1200);
+        }
       } else {
         setState("error");
       }
@@ -88,6 +102,7 @@ export function SessionJournalAutosave({
         rows={rows}
         onChange={(event) => {
           const nextValue = event.target.value;
+          latestValueRef.current = nextValue;
           setValue(nextValue);
           if (!composingRef.current) scheduleSave(nextValue);
         }}
