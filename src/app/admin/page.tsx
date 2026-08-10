@@ -1,7 +1,7 @@
 
 import Link from "next/link";
 import { AdminShell } from "@/components/page-shell";
-import { getBookingData, getDataSourceStatus } from "@/lib/booking-repository";
+import { getAdminDashboardData, getDataSourceStatus } from "@/lib/booking-repository";
 import {
   getEnrollmentOfferingId,
   getOfferingForCourse,
@@ -43,8 +43,14 @@ function getCourseGroupLabel(courseType?: string) {
 }
 
 export default async function AdminHomePage() {
-  const data = await getBookingData();
-  const status = await getDataSourceStatus(data);
+  const today = new Date().toISOString().slice(0, 10);
+  const twoWeeksEnd = addDays(today, 14);
+  const data = await getAdminDashboardData({
+    source: "getAdminDashboardData",
+    route: "/admin",
+    today,
+  });
+  const status = await getDataSourceStatus(undefined, data.statusCounts);
   const {
     categories = [],
     courses,
@@ -54,7 +60,6 @@ export default async function AdminHomePage() {
     enrollments = [],
   } = data;
 
-  const today = new Date().toISOString().slice(0, 10);
   const activeCourses = courses.filter((course) => course.isActive);
 
   const categoryMap = new Map(categories.map((category) => [category.id, category]));
@@ -143,7 +148,6 @@ export default async function AdminHomePage() {
   const unscheduledClasses = courseSummaries.filter((item) => !item.nextSession);
   const emptyRosterClasses = courseSummaries.filter((item) => item.rosterCount === 0);
   const pendingAttendanceSessions = todaySessions.filter((item) => item.bookedCount > item.attendedCount + item.absentCount);
-  const twoWeeksEnd = addDays(today, 14);
   const twoWeeksSessions = courseSummaries
     .flatMap(({ course, series, rosterCount }) =>
       course.sessions
