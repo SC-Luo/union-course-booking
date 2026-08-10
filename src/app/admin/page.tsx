@@ -43,7 +43,8 @@ function getCourseGroupLabel(courseType?: string) {
 }
 
 export default async function AdminHomePage() {
-  const status = await getDataSourceStatus();
+  const data = await getBookingData();
+  const status = await getDataSourceStatus(data);
   const {
     categories = [],
     courses,
@@ -51,7 +52,7 @@ export default async function AdminHomePage() {
     courseSeries = [],
     courseOfferings = [],
     enrollments = [],
-  } = await getBookingData();
+  } = data;
 
   const today = new Date().toISOString().slice(0, 10);
   const activeCourses = courses.filter((course) => course.isActive);

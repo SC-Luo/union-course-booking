@@ -85,6 +85,7 @@ async function withReadDiagnostics<T extends { docs: unknown[]; size: number }>(
   collection: string,
   context: string | FirestoreReadContext,
   read: Promise<T>,
+  queryShape?: string,
 ): Promise<T> {
   const start = performance.now();
   const snapshot = await read;
@@ -104,6 +105,7 @@ async function withReadDiagnostics<T extends { docs: unknown[]; size: number }>(
       route: details.route,
       requestId: details.requestId,
       at: new Date().toISOString(),
+      queryShape,
       docs: snapshot.size ?? snapshot.docs.length,
       durationMs: Math.round(performance.now() - start),
     });
@@ -116,6 +118,7 @@ async function withDocumentReadDiagnostics<T extends { exists: boolean }>(
   collection: string,
   context: string | FirestoreReadContext,
   read: Promise<T>,
+  queryShape?: string,
 ): Promise<T> {
   const start = performance.now();
   const snapshot = await read;
@@ -135,6 +138,7 @@ async function withDocumentReadDiagnostics<T extends { exists: boolean }>(
       route: details.route,
       requestId: details.requestId,
       at: new Date().toISOString(),
+      queryShape,
       docs: snapshot.exists ? 1 : 0,
       durationMs: Math.round(performance.now() - start),
     });
@@ -1347,6 +1351,220 @@ export async function getBookingPageData(courseId: string, sessionId: string): P
   }
 }
 
+function normalizeRouteDocumentId(value: string) {
+  return decodeURIComponent(String(value ?? "").trim())
+    .replace(/~2F/g, "/")
+    .replace(/~5C/g, "\\");
+}
+
+async function readSessionById(
+  db: NonNullable<ReturnType<typeof getFirestoreDb>>,
+  sessionId: string,
+  context: FirestoreReadContext,
+) {
+  const sessionDoc = await withDocumentReadDiagnostics(
+    "sessions",
+    context,
+    db.collection("sessions").doc(sessionId).get(),
+    "doc(sessionId)",
+  );
+
+  if (sessionDoc.exists) {
+    return { id: sessionDoc.id, ...sessionDoc.data() } as CourseSession;
+  }
+
+  const legacySnapshot = await withReadDiagnostics(
+    "sessions",
+    context,
+    db.collection("sessions").where("id", "==", sessionId).limit(1).get(),
+    "where(id == sessionId).limit(1)",
+  );
+  const legacyDoc = legacySnapshot.docs[0] as any;
+  return legacyDoc ? ({ id: legacyDoc.id, ...legacyDoc.data() } as CourseSession) : null;
+}
+
+async function readCourseForSession(
+  db: NonNullable<ReturnType<typeof getFirestoreDb>>,
+  session: CourseSession,
+  context: FirestoreReadContext,
+) {
+  const courseId = String(session.courseId || session.offeringId || "").trim();
+  if (!courseId) return null;
+
+  const courseDoc = await withDocumentReadDiagnostics(
+    "courses",
+    context,
+    db.collection("courses").doc(courseId).get(),
+    "doc(courseId)",
+  );
+
+  if (courseDoc.exists) {
+    const rawCourse = { id: courseDoc.id, ...courseDoc.data() } as Omit<Course, "sessions">;
+    return buildNormalizedCourse(rawCourse, [session]);
+  }
+
+  const offeringSnapshot = await withReadDiagnostics(
+    "courses",
+    context,
+    db.collection("courses").where("offeringId", "==", courseId).limit(1).get(),
+    "where(offeringId == courseId).limit(1)",
+  );
+  const offeringDoc = offeringSnapshot.docs[0] as any;
+  if (!offeringDoc) return null;
+
+  const rawCourse = { id: offeringDoc.id, ...offeringDoc.data() } as Omit<Course, "sessions">;
+  return buildNormalizedCourse(rawCourse, [session]);
+}
+
+export async function getCourseSessionById(
+  sessionId: string,
+  options?: BookingDataReadOptions,
+): Promise<CourseSession | null> {
+  const normalizedSessionId = normalizeRouteDocumentId(sessionId);
+  if (!normalizedSessionId) return null;
+
+  const db = getFirestoreDb();
+  if (!db) {
+    const data = readBookingData();
+    return data.courses
+      .flatMap((course) => course.sessions ?? [])
+      .find((session) => session.id === normalizedSessionId) ?? null;
+  }
+
+  try {
+    const context = createReadContext({
+      source: options?.source ?? "getCourseSessionById",
+      route: options?.route,
+      requestId: options?.requestId,
+    });
+    return await readSessionById(db, normalizedSessionId, context);
+  } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Course session document read failed.", error);
+    }
+    console.warn("[DATA_SOURCE] Firestore session read failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
+    const data = readBookingData();
+    return data.courses
+      .flatMap((course) => course.sessions ?? [])
+      .find((session) => session.id === normalizedSessionId) ?? null;
+  }
+}
+
+export async function getTeachingSessionContext(
+  sessionId: string,
+  options?: BookingDataReadOptions,
+): Promise<{ course: Course; session: CourseSession; instructors: Instructor[] } | null> {
+  const normalizedSessionId = normalizeRouteDocumentId(sessionId);
+  if (!normalizedSessionId) return null;
+
+  const db = getFirestoreDb();
+  if (!db) {
+    const data = readBookingData();
+    const course = data.courses.find((item) =>
+      (item.sessions ?? []).some((session) => session.id === normalizedSessionId),
+    );
+    const session = course?.sessions?.find((item) => item.id === normalizedSessionId);
+    return course && session
+      ? { course, session, instructors: data.instructors ?? [] }
+      : null;
+  }
+
+  try {
+    const context = createReadContext({
+      source: options?.source ?? "getTeachingSessionContext",
+      route: options?.route,
+      requestId: options?.requestId,
+    });
+    const session = await readSessionById(db, normalizedSessionId, context);
+    if (!session) return null;
+
+    const [course, instructorSnapshot] = await Promise.all([
+      readCourseForSession(db, session, context),
+      withReadDiagnostics(
+        "instructors",
+        context,
+        db.collection("instructors").where("isActive", "==", true).get(),
+        "where(isActive == true)",
+      ),
+    ]);
+
+    if (!course) return null;
+
+    return {
+      course,
+      session,
+      instructors: instructorSnapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }) as Instructor),
+    };
+  } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Teaching session context read failed.", error);
+    }
+    console.warn("[DATA_SOURCE] Firestore teaching session context read failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
+    const data = readBookingData();
+    const course = data.courses.find((item) =>
+      (item.sessions ?? []).some((session) => session.id === normalizedSessionId),
+    );
+    const session = course?.sessions?.find((item) => item.id === normalizedSessionId);
+    return course && session
+      ? { course, session, instructors: data.instructors ?? [] }
+      : null;
+  }
+}
+
+export async function findBookedReservationForSessionStudent(
+  sessionId: string,
+  studentId: string,
+  options?: BookingDataReadOptions,
+): Promise<Reservation | null> {
+  const normalizedSessionId = normalizeRouteDocumentId(sessionId);
+  const normalizedStudentId = String(studentId ?? "").trim();
+  if (!normalizedSessionId || !normalizedStudentId) return null;
+
+  const db = getFirestoreDb();
+  if (!db) {
+    const data = readBookingData();
+    return data.reservations.find(
+      (reservation) =>
+        reservation.sessionId === normalizedSessionId &&
+        reservation.studentId === normalizedStudentId &&
+        reservation.status === "booked",
+    ) ?? null;
+  }
+
+  try {
+    const context = createReadContext({
+      source: options?.source ?? "findBookedReservationForSessionStudent",
+      route: options?.route,
+      requestId: options?.requestId,
+    });
+    const snapshot = await withReadDiagnostics(
+      "reservations",
+      context,
+      db.collection("reservations")
+        .where("sessionId", "==", normalizedSessionId)
+        .where("studentId", "==", normalizedStudentId)
+        .where("status", "==", "booked")
+        .limit(1)
+        .get(),
+      "where(sessionId == sessionId && studentId == studentId && status == booked).limit(1)",
+    );
+    const doc = snapshot.docs[0] as any;
+    return doc ? ({ id: doc.id, ...doc.data() } as Reservation) : null;
+  } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Booked reservation lookup failed.", error);
+    }
+    console.warn("[DATA_SOURCE] Firestore booked reservation lookup failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
+    const data = readBookingData();
+    return data.reservations.find(
+      (reservation) =>
+        reservation.sessionId === normalizedSessionId &&
+        reservation.studentId === normalizedStudentId &&
+        reservation.status === "booked",
+    ) ?? null;
+  }
+}
+
 export async function getStudentEligibilityPageData(
   offeringId?: string,
 ): Promise<BookingData> {
@@ -1924,6 +2142,7 @@ export async function updateReservationAttendance(
   reservationId: string,
   attendanceStatus: AttendanceStatus,
   options: ReservationAttendanceUpdateOptions = {},
+  diagnostics?: BookingDataReadOptions,
 ) {
   if (!["pending", "unchecked", "attended", "late", "absent", "leave"].includes(attendanceStatus)) {
     return;
@@ -1949,8 +2168,18 @@ export async function updateReservationAttendance(
   }
 
   try {
+    const context = createReadContext({
+      source: diagnostics?.source ?? "updateReservationAttendance",
+      route: diagnostics?.route,
+      requestId: diagnostics?.requestId,
+    });
     const directRef = db.collection("reservations").doc(reservationId);
-    const directDoc = await directRef.get();
+    const directDoc = await withDocumentReadDiagnostics(
+      "reservations",
+      context,
+      directRef.get(),
+      "doc(reservationId)",
+    );
 
     if (directDoc.exists) {
       const currentReservation = { ...(directDoc.data() ?? {}), id: directDoc.id } as Partial<Reservation>;
@@ -1963,13 +2192,18 @@ export async function updateReservationAttendance(
     // that does not match the reservation.id field stored inside the document.
     // The attendance page uses reservation.id from getBookingData(), so direct doc(id)
     // can miss the real Firestore document. Query by the stored id before falling back.
-    const legacySnapshot = await db
-      .collection("reservations")
-      .where("id", "==", reservationId)
-      .limit(1)
-      .get();
+    const legacySnapshot = await withReadDiagnostics(
+      "reservations",
+      context,
+      db
+        .collection("reservations")
+        .where("id", "==", reservationId)
+        .limit(1)
+        .get(),
+      "where(id == reservationId).limit(1)",
+    );
 
-    const legacyDoc = legacySnapshot.docs[0];
+    const legacyDoc = legacySnapshot.docs[0] as any;
     if (legacyDoc) {
       const currentReservation = { ...(legacyDoc.data() ?? {}), id: legacyDoc.id } as Partial<Reservation>;
       const updatePayload = computeReservationAttendanceUpdate(currentReservation, attendanceStatus, options);
@@ -1998,9 +2232,10 @@ export async function updateReservationAttendanceBySessionStudent(
   studentId: string | undefined,
   attendanceStatus: AttendanceStatus,
   options: ReservationAttendanceUpdateOptions = {},
+  diagnostics?: BookingDataReadOptions,
 ) {
   if (!studentId || !sessionId) {
-    await updateReservationAttendance(reservationId, attendanceStatus, options);
+    await updateReservationAttendance(reservationId, attendanceStatus, options, diagnostics);
     return;
   }
 
@@ -2036,8 +2271,18 @@ export async function updateReservationAttendanceBySessionStudent(
   }
 
   try {
+    const context = createReadContext({
+      source: diagnostics?.source ?? "updateReservationAttendanceBySessionStudent",
+      route: diagnostics?.route,
+      requestId: diagnostics?.requestId,
+    });
     const directRef = db.collection("reservations").doc(reservationId);
-    const directDoc = await directRef.get();
+    const directDoc = await withDocumentReadDiagnostics(
+      "reservations",
+      context,
+      directRef.get(),
+      "doc(reservationId)",
+    );
 
     if (directDoc.exists) {
       const currentReservation = { ...(directDoc.data() ?? {}), id: directDoc.id } as Partial<Reservation>;
@@ -2046,13 +2291,18 @@ export async function updateReservationAttendanceBySessionStudent(
       return;
     }
 
-    const legacySnapshot = await db
-      .collection("reservations")
-      .where("id", "==", reservationId)
-      .limit(1)
-      .get();
+    const legacySnapshot = await withReadDiagnostics(
+      "reservations",
+      context,
+      db
+        .collection("reservations")
+        .where("id", "==", reservationId)
+        .limit(1)
+        .get(),
+      "where(id == reservationId).limit(1)",
+    );
 
-    const legacyDoc = legacySnapshot.docs[0];
+    const legacyDoc = legacySnapshot.docs[0] as any;
     if (legacyDoc) {
       const currentReservation = { ...(legacyDoc.data() ?? {}), id: legacyDoc.id } as Partial<Reservation>;
       const updatePayload = computeReservationAttendanceUpdate(currentReservation, attendanceStatus, options);
@@ -2060,12 +2310,17 @@ export async function updateReservationAttendanceBySessionStudent(
       return;
     }
 
-    const sessionStudentSnapshot = await db
-      .collection("reservations")
-      .where("sessionId", "==", sessionId)
-      .where("studentId", "==", studentId)
-      .limit(5)
-      .get();
+    const sessionStudentSnapshot = await withReadDiagnostics(
+      "reservations",
+      context,
+      db
+        .collection("reservations")
+        .where("sessionId", "==", sessionId)
+        .where("studentId", "==", studentId)
+        .limit(5)
+        .get(),
+      "where(sessionId == sessionId && studentId == studentId).limit(5)",
+    );
 
     const sessionStudentDoc = sessionStudentSnapshot.docs.find((doc) => {
       const data = doc.data() as Partial<Reservation>;
@@ -2097,7 +2352,10 @@ export async function updateReservationAttendanceBySessionStudent(
 
 
 
-export async function markSessionReservationsAttended(sessionId: string) {
+export async function markSessionReservationsAttended(
+  sessionId: string,
+  diagnostics?: BookingDataReadOptions,
+) {
   const now = buildTimestamp();
   const payload: Record<string, unknown> = {
     attendanceStatus: "attended",
@@ -2135,11 +2393,21 @@ export async function markSessionReservationsAttended(sessionId: string) {
   }
 
   try {
-    const snapshot = await db
-      .collection("reservations")
-      .where("sessionId", "==", sessionId)
-      .where("status", "==", "booked")
-      .get();
+    const context = createReadContext({
+      source: diagnostics?.source ?? "markSessionReservationsAttended",
+      route: diagnostics?.route,
+      requestId: diagnostics?.requestId,
+    });
+    const snapshot = await withReadDiagnostics(
+      "reservations",
+      context,
+      db
+        .collection("reservations")
+        .where("sessionId", "==", sessionId)
+        .where("status", "==", "booked")
+        .get(),
+      "where(sessionId == sessionId && status == booked)",
+    );
 
     await Promise.all(snapshot.docs.map((doc) => doc.ref.set(payload, { merge: true })));
   } catch (error) {
@@ -2309,6 +2577,124 @@ export async function ensureSessionRosterReservation(studentId: string, courseId
       writeBookingData(data);
     }
     return result;
+  }
+}
+
+export async function ensureSessionRosterReservationNarrow(
+  studentId: string,
+  courseId: string,
+  sessionId: string,
+  options?: BookingDataReadOptions,
+) {
+  const normalizedStudentId = String(studentId ?? "").trim();
+  const normalizedCourseId = String(courseId ?? "").trim();
+  const normalizedSessionId = normalizeRouteDocumentId(sessionId);
+  const now = buildTimestamp();
+
+  if (!normalizedStudentId || !normalizedCourseId || !normalizedSessionId) {
+    return { ok: false as const, reason: "invalid" as const };
+  }
+
+  const db = getFirestoreDb();
+  if (!db) {
+    return ensureSessionRosterReservation(normalizedStudentId, normalizedCourseId, normalizedSessionId);
+  }
+
+  try {
+    const context = createReadContext({
+      source: options?.source ?? "ensureSessionRosterReservationNarrow",
+      route: options?.route,
+      requestId: options?.requestId,
+    });
+    const [studentDoc, session] = await Promise.all([
+      withDocumentReadDiagnostics(
+        "students",
+        context,
+        db.collection("students").doc(normalizedStudentId).get(),
+        "doc(studentId)",
+      ),
+      readSessionById(db, normalizedSessionId, context),
+    ]);
+
+    if (!studentDoc.exists || !session) {
+      return { ok: false as const, reason: "invalid" as const };
+    }
+
+    const student = normalizeFirestoreStudent(
+      studentDoc.id,
+      studentDoc.data() as FirestoreStudentDocument,
+    );
+    if (student.isActive === false) {
+      return { ok: false as const, reason: "invalid" as const };
+    }
+
+    const course = await readCourseForSession(db, session, context);
+    if (!course || (course.id !== normalizedCourseId && course.offeringId !== normalizedCourseId)) {
+      return { ok: false as const, reason: "invalid" as const };
+    }
+
+    const existingSnapshot = await withReadDiagnostics(
+      "reservations",
+      context,
+      db.collection("reservations")
+        .where("sessionId", "==", session.id)
+        .where("studentId", "==", student.id)
+        .where("status", "==", "booked")
+        .limit(1)
+        .get(),
+      "where(sessionId == sessionId && studentId == studentId && status == booked).limit(1)",
+    );
+    const existingDoc = existingSnapshot.docs[0] as any;
+    if (existingDoc) {
+      return {
+        ok: true as const,
+        reservation: { id: existingDoc.id, ...(existingDoc.data() as Record<string, unknown>) } as Reservation,
+        courseId: course.id,
+        sessionId: session.id,
+      };
+    }
+
+    const seriesId =
+      course.seriesId ||
+      course.courseMasterId ||
+      course.courseSeriesId ||
+      course.offeringId ||
+      course.id;
+    const studentLast3 =
+      cleanIdentityLast3(student.idNumberLast3) ||
+      cleanIdentityLast3(student.phone).slice(-3);
+    const reservation: Reservation = {
+      id: `roster-${String(session.id).replace(/[\/]/g, "~")}-${student.id}`,
+      courseId: course.id,
+      sessionId: session.id,
+      studentId: student.id,
+      studentName: student.name,
+      phoneLastThree: studentLast3,
+      idNumberLast3: cleanIdentityLast3(student.idNumberLast3) || studentLast3,
+      offeringId: session.offeringId ?? course.offeringId,
+      seriesId,
+      bookedAt: now,
+      status: "booked",
+      attendanceStatus: "unchecked",
+      source: "manual",
+      note: "manual roster reservation",
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const batch = db.batch();
+    batch.set(db.collection("reservations").doc(reservation.id), removeUndefinedFields(reservation), { merge: true });
+    batch.set(db.collection("sessions").doc(session.id), { updatedAt: now }, { merge: true });
+    await batch.commit();
+    await invalidateStaticBookingCache();
+
+    return { ok: true as const, reservation, courseId: course.id, sessionId: session.id };
+  } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Narrow roster reservation ensure failed.", error);
+    }
+    console.warn("[DATA_SOURCE] Firestore narrow roster reservation ensure failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
+    return ensureSessionRosterReservation(normalizedStudentId, normalizedCourseId, normalizedSessionId);
   }
 }
 
@@ -4036,23 +4422,35 @@ export async function getDataSourceStatus(
   const bookingDataSource = process.env.BOOKING_DATA_SOURCE || "local-json";
   const usingFirestore = db !== null;
 
-  let counts = {
-    courses: 0,
-    students: 0,
-    reservations: 0,
-    enrollments: 0,
+  let counts: {
+    courses: number | null;
+    students: number | null;
+    reservations: number | null;
+    enrollments: number | null;
+  } = {
+    courses: null,
+    students: null,
+    reservations: null,
+    enrollments: null,
   };
 
-  try {
-    const data = dataForCounts ?? await getBookingData();
+  if (dataForCounts) {
     counts = {
-      courses: data.courses?.length || 0,
-      students: data.students?.length || 0,
-      reservations: data.reservations?.length || 0,
-      enrollments: data.enrollments?.length || 0,
+      courses: dataForCounts.courses?.length || 0,
+      students: dataForCounts.students?.length || 0,
+      reservations: dataForCounts.reservations?.length || 0,
+      enrollments: dataForCounts.enrollments?.length || 0,
     };
-  } catch (err) {
-    console.error("Failed to load booking data counts for status banner", err);
+  } else if (isFirestoreReadDebugEnabled()) {
+    console.info("[firestore-read-skipped]", {
+      source: "getDataSourceStatus",
+      route: "/admin",
+      requestId: randomUUID(),
+      at: new Date().toISOString(),
+      reason: "dataForCounts not provided; refusing full getBookingData count fallback",
+      collections: ["courses", "students", "reservations", "enrollments"],
+      docs: 0,
+    });
   }
 
   return {

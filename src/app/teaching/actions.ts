@@ -3,8 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import {
-  ensureSessionRosterReservation,
-  getBookingData,
+  ensureSessionRosterReservationNarrow,
+  findBookedReservationForSessionStudent,
+  getTeachingSessionContext,
   markSessionReservationsAttended,
   updateReservationAttendanceBySessionStudent,
   upsertSession,
@@ -104,21 +105,20 @@ function computeLeaveHoursFromTimeRange(start?: string, end?: string) {
 }
 
 async function resolveAuthorizedTeachingSession(sessionId: string, teacherName: string) {
-  const data = await getBookingData();
-  const course = (data.courses ?? []).find((item) =>
-    (item.sessions ?? []).some((session) => session.id === sessionId),
-  );
-  const session = course?.sessions?.find((item) => item.id === sessionId);
+  const context = await getTeachingSessionContext(sessionId, {
+    source: "resolveAuthorizedTeachingSession",
+    route: "/teaching/sessions/[sessionId]",
+  });
 
-  if (!course || !session) {
-    return { ok: false as const, reason: "not-found" as const, data };
+  if (!context) {
+    return { ok: false as const, reason: "not-found" as const };
   }
 
-  if (!teacherName || !isTeachingSessionForName(course, session, data.instructors ?? [], teacherName)) {
-    return { ok: false as const, reason: "forbidden" as const, data, course, session };
+  if (!teacherName || !isTeachingSessionForName(context.course, context.session, context.instructors ?? [], teacherName)) {
+    return { ok: false as const, reason: "forbidden" as const, course: context.course, session: context.session };
   }
 
-  return { ok: true as const, data, course, session };
+  return { ok: true as const, course: context.course, session: context.session };
 }
 
 export async function updateTeachingAttendanceAction(formData: FormData) {
@@ -147,19 +147,22 @@ export async function updateTeachingAttendanceAction(formData: FormData) {
     redirect(appendTeachingQuery(redirectTo, `attendance=${resolved.reason}`));
   }
 
-  const existing = (resolved.data.reservations ?? []).find(
-    (reservation) =>
-      reservation.sessionId === resolved.session.id &&
-      reservation.studentId === studentId &&
-      reservation.status === "booked",
-  );
-
   let targetReservationId = reservationId.startsWith("roster-") ? "" : reservationId;
+  const existing = !targetReservationId
+    ? await findBookedReservationForSessionStudent(resolved.session.id, studentId, {
+        source: "updateTeachingAttendanceAction:find-existing-reservation",
+        route: "/teaching/sessions/[sessionId]",
+      })
+    : null;
+
   if (!targetReservationId && existing) {
     targetReservationId = existing.id;
   }
   if (!targetReservationId && courseId) {
-    const result = await ensureSessionRosterReservation(studentId, courseId, resolved.session.id);
+    const result = await ensureSessionRosterReservationNarrow(studentId, courseId, resolved.session.id, {
+      source: "updateTeachingAttendanceAction:ensure-roster-reservation",
+      route: "/teaching/sessions/[sessionId]",
+    });
     if (result.ok) targetReservationId = result.reservation.id;
   }
 
@@ -172,6 +175,9 @@ export async function updateTeachingAttendanceAction(formData: FormData) {
     leaveStartTime,
     leaveEndTime,
     lateTime,
+  }, {
+    source: "updateTeachingAttendanceAction:update-attendance",
+    route: "/teaching/sessions/[sessionId]",
   });
 
   revalidatePath("/teaching");
@@ -192,7 +198,10 @@ export async function completeTeachingAttendanceAction(formData: FormData) {
     redirect(appendTeachingQuery(redirectTo, `attendance=${resolved.reason}`));
   }
 
-  await markSessionReservationsAttended(resolved.session.id);
+  await markSessionReservationsAttended(resolved.session.id, {
+    source: "completeTeachingAttendanceAction",
+    route: "/teaching/sessions/[sessionId]",
+  });
   revalidatePath("/teaching");
   revalidatePath(buildTeachingSessionPath(resolved.session.id, teacherName));
   redirect(redirectTo);

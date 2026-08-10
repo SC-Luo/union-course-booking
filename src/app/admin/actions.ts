@@ -16,6 +16,7 @@ import {
   deleteStudentIdentityDocument,
   findStudentIdentityForUpsert,
   getBookingData,
+  getCourseSessionById,
   getStudentImportLookupData,
   setDocumentActive,
   updateReservationAttendance,
@@ -648,10 +649,10 @@ export async function saveSessionJournalInlineAction(formData: FormData) {
     return { ok: false as const, reason: "invalid-field" as const };
   }
 
-  const data = await getBookingData();
-  const session = data.courses
-    .flatMap((course) => course.sessions ?? [])
-    .find((item) => item.id === sessionId);
+  const session = await getCourseSessionById(sessionId, {
+    source: "saveSessionJournalInlineAction",
+    route: "/admin/sessions/[sessionId]/reservations",
+  });
   if (!session) {
     return { ok: false as const, reason: "session-not-found" as const };
   }
