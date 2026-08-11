@@ -72,6 +72,18 @@ export type AdminDashboardData = Pick<
   statusCounts: DataSourceStatusCounts;
 };
 
+export type AdminSessionReservationPageData = Pick<
+  BookingData,
+  | "categories"
+  | "courses"
+  | "courseSeries"
+  | "courseOfferings"
+  | "reservations"
+  | "students"
+  | "enrollments"
+  | "instructors"
+>;
+
 type StudentImportLookupInput = {
   identities: Array<{ name: string; idNumberLast3: string }>;
   memberNos?: string[];
@@ -170,6 +182,40 @@ async function withDocumentReadDiagnostics<T extends { exists: boolean }>(
   }
 
   return snapshot;
+}
+
+async function withDocumentBatchReadDiagnostics<T extends { exists: boolean }>(
+  collection: string,
+  context: string | FirestoreReadContext,
+  read: Promise<T[]>,
+  queryShape?: string,
+): Promise<T[]> {
+  const start = performance.now();
+  const snapshots = await read;
+
+  if (isFirestoreReadDebugEnabled()) {
+    const details =
+      typeof context === "string"
+        ? {
+            source: context,
+            route: undefined,
+            requestId: randomUUID(),
+          }
+        : context;
+    console.info("[firestore-read]", {
+      collection,
+      source: details.source,
+      route: details.route,
+      requestId: details.requestId,
+      at: new Date().toISOString(),
+      queryShape,
+      docs: snapshots.filter((snapshot) => snapshot.exists).length,
+      requestedDocs: snapshots.length,
+      durationMs: Math.round(performance.now() - start),
+    });
+  }
+
+  return snapshots;
 }
 
 async function withCountDiagnostics<T extends { data: () => { count?: number } }>(
@@ -1784,6 +1830,404 @@ export async function getTeachingSessionContext(
     return course && session
       ? { course, session, instructors: data.instructors ?? [] }
       : null;
+  }
+}
+
+async function readDocumentsByIds(
+  db: NonNullable<ReturnType<typeof getFirestoreDb>>,
+  collection: string,
+  ids: unknown[],
+  context: FirestoreReadContext,
+  queryShape: string,
+) {
+  const uniqueIds = uniqueNonEmpty(ids);
+  if (uniqueIds.length === 0) return [];
+
+  const snapshots = await Promise.all(
+    chunkList(uniqueIds, 100).map((chunk) =>
+      withDocumentBatchReadDiagnostics(
+        collection,
+        context,
+        db.getAll(...chunk.map((id) => db.collection(collection).doc(id))),
+        `${queryShape}.getAll(${chunk.length})`,
+      ),
+    ),
+  );
+
+  return snapshots.flat();
+}
+
+function dataFromExistingDocs<T>(docs: Array<{ id: string; exists: boolean; data(): unknown }>) {
+  return docs
+    .filter((doc) => doc.exists)
+    .map((doc) => ({ id: doc.id, ...(doc.data() as Record<string, unknown>) }) as T);
+}
+
+function getSessionOfferingCandidateIds(course: Course, session: CourseSession) {
+  return uniqueNonEmpty([
+    session.offeringId,
+    course.offeringId,
+    (course as Course & { courseOfferingId?: string; legacyCourseId?: string }).courseOfferingId,
+    (course as Course & { legacyCourseId?: string }).legacyCourseId,
+  ]);
+}
+
+function getSessionSeriesCandidateIds(
+  course: Course,
+  session: CourseSession,
+  offering?: CourseOffering | null,
+) {
+  return uniqueNonEmpty([
+    session.seriesId,
+    course.seriesId,
+    course.courseMasterId,
+    (course as Course & { courseSeriesId?: string }).courseSeriesId,
+    offering?.seriesId,
+    offering?.courseMasterId,
+    offering?.courseSeriesId,
+  ]);
+}
+
+function getSessionEnrollmentOfferingCandidateIds(
+  course: Course,
+  session: CourseSession,
+  offering?: CourseOffering | null,
+) {
+  return uniqueNonEmpty([
+    course.id,
+    course.offeringId,
+    (course as Course & { courseOfferingId?: string; legacyCourseId?: string }).courseOfferingId,
+    (course as Course & { legacyCourseId?: string }).legacyCourseId,
+    session.offeringId,
+    offering?.id,
+    offering?.legacyCourseId,
+  ]);
+}
+
+async function readOfferingForAdminSession(
+  db: NonNullable<ReturnType<typeof getFirestoreDb>>,
+  course: Course,
+  session: CourseSession,
+  context: FirestoreReadContext,
+) {
+  const directDocs = await readDocumentsByIds(
+    db,
+    "courseOfferings",
+    getSessionOfferingCandidateIds(course, session),
+    context,
+    "session-offering-candidates",
+  );
+  const directOfferings = dataFromExistingDocs<CourseOffering>(directDocs);
+  if (directOfferings[0]) return directOfferings[0];
+
+  const legacySnapshot = await withReadDiagnostics(
+    "courseOfferings",
+    context,
+    db.collection("courseOfferings").where("legacyCourseId", "==", course.id).limit(1).get(),
+    "where(legacyCourseId == course.id).limit(1)",
+  );
+  const legacyDoc = legacySnapshot.docs[0] as any;
+  return legacyDoc ? ({ id: legacyDoc.id, ...legacyDoc.data() } as CourseOffering) : null;
+}
+
+async function readSeriesForAdminSession(
+  db: NonNullable<ReturnType<typeof getFirestoreDb>>,
+  course: Course,
+  session: CourseSession,
+  offering: CourseOffering | null,
+  context: FirestoreReadContext,
+) {
+  const docs = await readDocumentsByIds(
+    db,
+    "courseSeries",
+    getSessionSeriesCandidateIds(course, session, offering),
+    context,
+    "session-series-candidates",
+  );
+  return dataFromExistingDocs<CourseSeries>(docs)[0] ?? null;
+}
+
+async function readCategoryForAdminSession(
+  db: NonNullable<ReturnType<typeof getFirestoreDb>>,
+  course: Course,
+  offering: CourseOffering | null,
+  series: CourseSeries | null,
+  context: FirestoreReadContext,
+) {
+  const docs = await readDocumentsByIds(
+    db,
+    "categories",
+    [course.categoryId, offering?.categoryId, series?.categoryId],
+    context,
+    "session-category-candidates",
+  );
+  return dataFromExistingDocs<CourseCategory>(docs)[0] ?? null;
+}
+
+async function readReservationsForAdminSession(
+  db: NonNullable<ReturnType<typeof getFirestoreDb>>,
+  session: CourseSession,
+  context: FirestoreReadContext,
+) {
+  const snapshot = await withReadDiagnostics(
+    "reservations",
+    context,
+    db.collection("reservations").where("sessionId", "==", session.id).get(),
+    "where(sessionId == session.id)",
+  );
+  return snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }) as Reservation);
+}
+
+async function readEnrollmentsForAdminSession(
+  db: NonNullable<ReturnType<typeof getFirestoreDb>>,
+  course: Course,
+  session: CourseSession,
+  offering: CourseOffering | null,
+  context: FirestoreReadContext,
+) {
+  const offeringIds = getSessionEnrollmentOfferingCandidateIds(course, session, offering);
+  const seriesIds = getSessionSeriesCandidateIds(course, session, offering);
+  const queryGroups: Array<Promise<FirebaseFirestore.QuerySnapshot>[]> = [];
+
+  for (const chunk of chunkList(offeringIds, 10)) {
+    queryGroups.push([
+      withReadDiagnostics(
+        "enrollments",
+        context,
+        db.collection("enrollments").where("offeringId", "in", chunk).get(),
+        `where(offeringId in ${chunk.length} sessionOfferingIds)`,
+      ),
+      withReadDiagnostics(
+        "enrollments",
+        context,
+        db.collection("enrollments").where("courseOfferingId", "in", chunk).get(),
+        `where(courseOfferingId in ${chunk.length} sessionOfferingIds)`,
+      ),
+      withReadDiagnostics(
+        "enrollments",
+        context,
+        db.collection("enrollments").where("courseId", "in", chunk).get(),
+        `where(courseId in ${chunk.length} sessionOfferingIds)`,
+      ),
+    ]);
+  }
+
+  for (const chunk of chunkList(seriesIds, 10)) {
+    queryGroups.push([
+      withReadDiagnostics(
+        "enrollments",
+        context,
+        db.collection("enrollments").where("seriesId", "in", chunk).get(),
+        `where(seriesId in ${chunk.length} sessionSeriesIds)`,
+      ),
+      withReadDiagnostics(
+        "enrollments",
+        context,
+        db.collection("enrollments").where("courseMasterId", "in", chunk).get(),
+        `where(courseMasterId in ${chunk.length} sessionSeriesIds)`,
+      ),
+    ]);
+  }
+
+  const snapshots = (await Promise.all(queryGroups.flat())).flat();
+  return Array.from(
+    new Map(
+      snapshots
+        .flatMap((snapshot) => snapshot.docs)
+        .map((doc: any) => [doc.id, { id: doc.id, ...doc.data() } as Enrollment]),
+    ).values(),
+  );
+}
+
+async function readStudentsForAdminSession(
+  db: NonNullable<ReturnType<typeof getFirestoreDb>>,
+  studentIds: unknown[],
+  context: FirestoreReadContext,
+) {
+  const docs = await readDocumentsByIds(
+    db,
+    "students",
+    studentIds,
+    context,
+    "session-related-students",
+  );
+  return docs
+    .filter((doc) => doc.exists)
+    .map((doc) =>
+      normalizeFirestoreStudent(
+        doc.id,
+        doc.data() as FirestoreStudentDocument,
+      ),
+    )
+    .sort(compareStudentsForRoster);
+}
+
+async function readInstructorsForAdminSession(
+  db: NonNullable<ReturnType<typeof getFirestoreDb>>,
+  course: Course,
+  session: CourseSession,
+  offering: CourseOffering | null,
+  series: CourseSeries | null,
+  context: FirestoreReadContext,
+) {
+  const referencedInstructorIds = uniqueNonEmpty([
+    session.instructorId,
+    ...(session.assistantInstructorIds ?? []),
+    offering?.primaryInstructorId,
+    ...(offering?.assistantInstructorIds ?? []),
+    course.primaryInstructorId,
+    (course as Course & { defaultInstructorId?: string }).defaultInstructorId,
+    ...(course.assistantInstructorIds ?? []),
+    series?.defaultInstructorId,
+  ]);
+  const [activeSnapshot, referencedDocs] = await Promise.all([
+    withReadDiagnostics(
+      "instructors",
+      context,
+      db.collection("instructors").where("isActive", "==", true).get(),
+      "where(isActive == true)",
+    ),
+    readDocumentsByIds(
+      db,
+      "instructors",
+      referencedInstructorIds,
+      context,
+      "session-referenced-instructors",
+    ),
+  ]);
+
+  return Array.from(
+    new Map(
+      [
+        ...activeSnapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }) as Instructor),
+        ...dataFromExistingDocs<Instructor>(referencedDocs),
+      ].map((instructor) => [instructor.id, instructor]),
+    ).values(),
+  );
+}
+
+function buildJsonAdminSessionReservationData(sessionId: string): AdminSessionReservationPageData | null {
+  const normalizedSessionId = normalizeRouteDocumentId(sessionId);
+  const data = readBookingData();
+  const course = data.courses.find((item) =>
+    (item.sessions ?? []).some((session) => session.id === normalizedSessionId),
+  );
+  const session = course?.sessions?.find((item) => item.id === normalizedSessionId);
+  if (!course || !session) return null;
+
+  const offering = data.courseOfferings.find(
+    (item) =>
+      getSessionOfferingCandidateIds(course, session).includes(item.id) ||
+      item.legacyCourseId === course.id,
+  );
+  const series = data.courseSeries.find((item) =>
+    getSessionSeriesCandidateIds(course, session, offering).includes(item.id),
+  );
+  const enrollmentCandidateIds = new Set(
+    getSessionEnrollmentOfferingCandidateIds(course, session, offering),
+  );
+  const seriesCandidateIds = new Set(
+    getSessionSeriesCandidateIds(course, session, offering),
+  );
+  const reservations = (data.reservations ?? []).filter(
+    (reservation) => reservation.sessionId === session.id,
+  );
+  const enrollments = (data.enrollments ?? []).filter((enrollment) => {
+    const offeringIds = [
+      enrollment.offeringId,
+      enrollment.courseOfferingId,
+      enrollment.courseId,
+    ].filter(Boolean).map(String);
+    const enrollmentSeriesIds = [
+      enrollment.seriesId,
+      enrollment.courseMasterId,
+    ].filter(Boolean).map(String);
+    return (
+      offeringIds.some((id) => enrollmentCandidateIds.has(id)) ||
+      enrollmentSeriesIds.some((id) => seriesCandidateIds.has(id))
+    );
+  });
+  const studentIds = new Set(
+    [...reservations, ...enrollments]
+      .map((item) => item.studentId)
+      .filter(Boolean)
+      .map(String),
+  );
+  const categoryIds = new Set(
+    [course.categoryId, offering?.categoryId, series?.categoryId]
+      .filter(Boolean)
+      .map(String),
+  );
+
+  return normalizeBookingData({
+    categories: data.categories.filter((category) => categoryIds.has(category.id)),
+    courses: [{ ...course, sessions: [session] }],
+    courseSeries: series ? [series] : [],
+    courseOfferings: offering ? [offering] : [],
+    reservations,
+    students: data.students.filter((student) => studentIds.has(student.id)),
+    enrollments,
+    instructors: data.instructors ?? [],
+  }) as AdminSessionReservationPageData;
+}
+
+export async function getAdminSessionReservationPageData(
+  sessionId: string,
+  options?: BookingDataReadOptions,
+): Promise<AdminSessionReservationPageData | null> {
+  const normalizedSessionId = normalizeRouteDocumentId(sessionId);
+  if (!normalizedSessionId) return null;
+
+  const db = getFirestoreDb();
+  if (!db) {
+    return buildJsonAdminSessionReservationData(normalizedSessionId);
+  }
+
+  try {
+    const context = createReadContext({
+      source: options?.source ?? "getAdminSessionReservationPageData",
+      route: options?.route ?? "/admin/sessions/[sessionId]/reservations",
+      requestId: options?.requestId,
+    });
+    const session = await readSessionById(db, normalizedSessionId, context);
+    if (!session) return null;
+
+    const course = await readCourseForSession(db, session, context);
+    if (!course) return null;
+
+    const offering = await readOfferingForAdminSession(db, course, session, context);
+    const series = await readSeriesForAdminSession(db, course, session, offering, context);
+    const [category, reservations, enrollments, instructors] = await Promise.all([
+      readCategoryForAdminSession(db, course, offering, series, context),
+      readReservationsForAdminSession(db, session, context),
+      readEnrollmentsForAdminSession(db, course, session, offering, context),
+      readInstructorsForAdminSession(db, course, session, offering, series, context),
+    ]);
+    const students = await readStudentsForAdminSession(
+      db,
+      [
+        ...reservations.map((reservation) => reservation.studentId),
+        ...enrollments.map((enrollment) => enrollment.studentId),
+      ],
+      context,
+    );
+
+    return normalizeBookingData({
+      categories: category ? [category] : [],
+      courses: [course],
+      courseSeries: series ? [series] : [],
+      courseOfferings: offering ? [offering] : [],
+      reservations,
+      students,
+      enrollments,
+      instructors,
+    }) as AdminSessionReservationPageData;
+  } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Admin session reservation page read failed.", error);
+    }
+    console.warn("[DATA_SOURCE] Firestore admin session reservation page read failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
+    return buildJsonAdminSessionReservationData(normalizedSessionId);
   }
 }
 

@@ -10,8 +10,7 @@ import { ReservationNoteAutosave } from "./reservation-note-autosave";
 import { SessionInfoModalCard } from "./session-info-modal-card";
 import { SessionJournalAutosave } from "./session-journal-autosave";
 import { AdminShell } from "@/components/page-shell";
-import { getBookingData } from "@/lib/booking-repository";
-import { getCourse } from "@/lib/course-utils";
+import { getAdminSessionReservationPageData } from "@/lib/booking-repository";
 import type {
   Course,
   CourseSession,
@@ -28,48 +27,6 @@ type PageProps = {
     rosterBooking?: string;
   }>;
 };
-
-function safeDecodeURIComponent(value: string) {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-}
-
-function getSessionRouteCandidates(value: string) {
-  const restored = value.replace(/~2F/gi, "%2F").replace(/~5C/gi, "%5C");
-  const onceDecoded = safeDecodeURIComponent(restored);
-  const twiceDecoded = safeDecodeURIComponent(onceDecoded);
-
-  return Array.from(
-    new Set(
-      [
-        value,
-        restored,
-        onceDecoded,
-        twiceDecoded,
-        value.replace(/~2F/gi, "/").replace(/~5C/gi, "\\"),
-      ].filter(Boolean),
-    ),
-  );
-}
-
-function resolveSessionFromRouteParam(sessionId: string, courses: any[]) {
-  const candidates = getSessionRouteCandidates(sessionId);
-  const allSessions = courses.flatMap((course) => course.sessions ?? []);
-
-  return allSessions.find((session) => {
-    const id = String(session.id ?? "");
-    return (
-      candidates.includes(id) ||
-      candidates.includes(encodeURIComponent(id)) ||
-      candidates.includes(
-        encodeURIComponent(id).replace(/%2F/gi, "~2F").replace(/%5C/gi, "~5C"),
-      )
-    );
-  });
-}
 
 function encodeRouteSegment(value: string) {
   return encodeURIComponent(value)
@@ -777,6 +734,11 @@ export default async function AdminReservationsPage({
 }: PageProps) {
   const { sessionId } = await params;
   const { attendance = "all", q = "", rosterBooking = "" } = await searchParams;
+  const data = await getAdminSessionReservationPageData(sessionId);
+  if (!data) {
+    notFound();
+  }
+
   const {
     courses,
     reservations,
@@ -786,9 +748,9 @@ export default async function AdminReservationsPage({
     courseSeries = [],
     instructors = [],
     categories = [],
-  } = await getBookingData();
-  const session = resolveSessionFromRouteParam(sessionId, courses);
-  const course = session ? getCourse(session.courseId, courses) : undefined;
+  } = data;
+  const course = courses[0];
+  const session = course?.sessions?.[0];
 
   if (!session || !course) {
     notFound();
