@@ -14,7 +14,7 @@ import { AdminShell } from "@/components/page-shell";
 import { RosterFlowNav } from "@/components/roster-flow-nav";
 import {
   getBookingData,
-  getStudentDirectoryData,
+  getStudentDirectoryPageData,
   getStudentEligibilityPageData,
 } from "@/lib/booking-repository";
 import type {
@@ -47,6 +47,7 @@ type PageProps = {
     enrolled?: string;
     filter?: string;
     message?: string;
+    pageCursor?: string;
   }>;
 };
 
@@ -438,12 +439,24 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
     enrolled,
     filter: queryFilter,
     message,
+    pageCursor,
   } = await searchParams;
-  const currentMode = MODES.some(([key]) => key === mode) ? mode : "students";
+  const directoryMode = mode === "class" ? "class" : q.trim() ? "search" : "browse";
+  const currentMode =
+    mode === "class"
+      ? "students"
+      : MODES.some(([key]) => key === mode)
+        ? mode
+        : "students";
   let bookingData;
   try {
     if (currentMode === "students") {
-      bookingData = await getStudentDirectoryData({
+      bookingData = await getStudentDirectoryPageData({
+        mode: directoryMode,
+        q,
+        status,
+        offeringId: queryOfferingId,
+        pageCursor,
         source: "AdminStudentsPage",
         route: "/admin/students",
       });
@@ -476,28 +489,23 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
   }
 
   if (currentMode === "students") {
-    const { students = [] } = bookingData;
-    const studentListRows = students
-      .filter((student) => studentMatches(student, q))
-      .filter((student) => {
-        const rosterStatus = getRosterStatus(student).key;
-        if (status === "all") return true;
-        return rosterStatus === status;
-      })
-      .sort(compareStudentsByMemberNo);
+    const directoryData = bookingData as Awaited<
+      ReturnType<typeof getStudentDirectoryPageData>
+    >;
+    const { students = [] } = directoryData;
 
     logStudentDirectoryDebug({
       students,
-      filteredStudents: studentListRows,
-      status,
+      filteredStudents: students,
+      status: directoryData.status,
       q,
     });
 
     return (
       <StudentDirectoryPage
-        students={studentListRows}
+        data={directoryData}
         q={q}
-        status={status}
+        status={directoryData.status}
         saved={saved}
         error={error}
         imported={imported}

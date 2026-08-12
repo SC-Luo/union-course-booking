@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { AdminShell } from "@/components/page-shell";
 import { RosterFlowNav } from "@/components/roster-flow-nav";
-import type { Student } from "@/lib/types";
+import type { StudentDirectoryPageData } from "@/lib/booking-repository";
 import {
   formatDate,
   getStudentCompleteness,
@@ -15,7 +15,7 @@ import {
 } from "@/app/admin/actions";
 
 type StudentDirectoryPageProps = {
-  students: Student[];
+  data: StudentDirectoryPageData;
   q: string;
   status: string;
   saved?: string;
@@ -24,13 +24,14 @@ type StudentDirectoryPageProps = {
 };
 
 export function StudentDirectoryPage({
-  students,
+  data,
   q,
   status,
   saved,
   error,
   imported,
 }: StudentDirectoryPageProps) {
+  const students = data.students;
   const statusFilters = [
     ["all", "全部"],
     ["active", "啟用中"],
@@ -46,6 +47,21 @@ export function StudentDirectoryPage({
     const qs = query.toString();
     return `/admin/students${qs ? `?${qs}` : ""}`;
   };
+  const classOptionLabel = (
+    offering: StudentDirectoryPageData["courseOfferings"][number],
+  ) =>
+    [
+      offering.displayTitle ??
+        offering.displayName ??
+        offering.classDisplayName ??
+        offering.title ??
+        offering.id,
+      offering.year ? `${offering.year}` : "",
+      offering.termLabel ?? (offering.term ? `${offering.term}` : ""),
+    ]
+      .filter(Boolean)
+      .join(" / ");
+  const activeView = data.mode;
 
   return (
     <AdminShell currentSection="roster.students">
@@ -82,6 +98,92 @@ export function StudentDirectoryPage({
         </div>
       </section>
 
+      <section className="mt-6 rounded-[1.75rem] border border-[#ead7c6] bg-white p-5 shadow-sm">
+        <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
+          <div>
+            <p className="text-sm font-semibold text-[#a65f3b]">學員總數</p>
+            <p className="mt-2 text-3xl font-black text-zinc-950">
+              {data.totalCount.toLocaleString("zh-TW")}
+            </p>
+            <p className="mt-2 text-sm leading-6 text-zinc-500">
+              固定上限查詢；搜尋採 exact match，瀏覽採游標分頁。
+            </p>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            {[
+              ["browse", "分頁瀏覽", buildHref({ status })],
+              ["search", "搜尋學生", buildHref({ q, status })],
+              [
+                "class",
+                "班級名冊",
+                buildHref({
+                  mode: "class",
+                  offeringId: data.selectedOfferingId,
+                  status,
+                }),
+              ],
+            ].map(([key, label, href]) => (
+              <Link
+                key={key}
+                href={href}
+                className={`rounded-2xl border px-4 py-3 text-sm font-black ${
+                  activeView === key
+                    ? "border-[#ef6c00] bg-[#ef6c00] text-white"
+                    : "border-[#ead7c6] bg-[#fffaf5] text-[#6b3b25]"
+                }`}
+              >
+                {label}
+              </Link>
+            ))}
+          </div>
+        </div>
+        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          <form className="grid gap-3 md:grid-cols-[1fr_auto]">
+            <input
+              name="q"
+              defaultValue={q}
+              placeholder="會員編號、完整姓名、電話或身分末碼"
+              className="h-12 rounded-2xl border border-[#ead7c6] bg-white px-4 text-sm text-[#4a2a1a] shadow-sm outline-none focus:border-[#ef6c00]"
+            />
+            <button className="rounded-2xl bg-[#ef6c00] px-5 py-3 text-sm font-bold text-white">
+              搜尋
+            </button>
+          </form>
+          {activeView === "class" ? (
+            <form className="grid gap-3 md:grid-cols-[1fr_auto]">
+              <input type="hidden" name="mode" value="class" />
+              <select
+                name="offeringId"
+                defaultValue={data.selectedOfferingId ?? ""}
+                className="h-12 rounded-2xl border border-[#ead7c6] bg-white px-4 text-sm font-bold text-[#4a2a1a] shadow-sm outline-none focus:border-[#ef6c00]"
+              >
+                <option value="">選擇班級</option>
+                {data.courseOfferings.map((offering) => (
+                  <option key={offering.id} value={offering.id}>
+                    {classOptionLabel(offering)}
+                  </option>
+                ))}
+              </select>
+              <button className="rounded-2xl bg-[#6b3b25] px-5 py-3 text-sm font-bold text-white">
+                查看班級
+              </button>
+            </form>
+          ) : (
+            <Link
+              href="/admin/students?mode=class"
+              className="flex h-12 items-center justify-center rounded-2xl bg-[#6b3b25] px-5 py-3 text-sm font-bold text-white"
+            >
+              進入班級名冊
+            </Link>
+          )}
+        </div>
+        {data.invalidCursor ? (
+          <p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-700">
+            分頁游標無效，已改顯示第一頁。
+          </p>
+        ) : null}
+      </section>
+
       {/* student list */}
       <section className="mt-6 rounded-[1.75rem] border border-[#ead7c6] bg-white shadow-sm">
         <div className="border-b border-[#ead7c6] p-5">
@@ -104,7 +206,12 @@ export function StudentDirectoryPage({
             {statusFilters.map(([key, label]) => (
               <Link
                 key={key}
-                href={buildHref({ q, status: key })}
+                href={buildHref({
+                  mode: activeView === "class" ? "class" : undefined,
+                  q,
+                  offeringId: activeView === "class" ? data.selectedOfferingId : undefined,
+                  status: key,
+                })}
                 className={`rounded-full border px-4 py-2 text-xs font-bold ${
                   status === key ? "border-[#ef6c00] bg-[#ef6c00] text-white" : "border-[#ead7c6] bg-white text-[#6b3b25]"
                 }`}
@@ -136,7 +243,11 @@ export function StudentDirectoryPage({
                 className="grid gap-3 px-5 py-4 transition hover:bg-[#fffaf5] md:grid-cols-[1.2fr_160px_140px_160px_110px_130px_170px] md:items-center"
               >
                 <div>
-                  <Link href={`/admin/students/${student.id}`} className="font-black text-zinc-950 hover:text-[#6b3b25]">
+                  <Link
+                    href={`/admin/students/${student.id}`}
+                    prefetch={false}
+                    className="font-black text-zinc-950 hover:text-[#6b3b25]"
+                  >
                     {student.name}
                   </Link>
                   <p className="mt-1 text-xs text-zinc-500">
@@ -159,12 +270,14 @@ export function StudentDirectoryPage({
                 <div className="flex flex-wrap gap-x-2 gap-y-1">
                   <Link
                     href={`/admin/students/${student.id}`}
+                    prefetch={false}
                     className="rounded-full border border-[#ead7c6] bg-white px-3 py-1 text-xs font-bold text-[#6b3b25]"
                   >
                     查看
                   </Link>
                   <Link
                     href={`/admin/students/${student.id}/edit`}
+                    prefetch={false}
                     className="rounded-full border border-[#ead7c6] bg-white px-3 py-1 text-xs font-bold text-[#6b3b25]"
                   >
                     編輯
@@ -180,7 +293,17 @@ export function StudentDirectoryPage({
                   >
                     <input type="hidden" name="studentId" value={student.id} />
                     <input type="hidden" name="status" value={isInactive ? "active" : "inactive"} />
-                    <input type="hidden" name="redirectTo" value={buildHref({ q, status })} />
+                    <input
+                      type="hidden"
+                      name="redirectTo"
+                      value={buildHref({
+                        mode: activeView === "class" ? "class" : undefined,
+                        q,
+                        offeringId:
+                          activeView === "class" ? data.selectedOfferingId : undefined,
+                        status,
+                      })}
+                    />
                     <button
                       type="submit"
                       className={`rounded-full border px-3 py-1 text-xs font-bold ${
@@ -201,7 +324,17 @@ export function StudentDirectoryPage({
                     }}
                   >
                     <input type="hidden" name="studentId" value={student.id} />
-                    <input type="hidden" name="redirectTo" value={buildHref({ q, status })} />
+                    <input
+                      type="hidden"
+                      name="redirectTo"
+                      value={buildHref({
+                        mode: activeView === "class" ? "class" : undefined,
+                        q,
+                        offeringId:
+                          activeView === "class" ? data.selectedOfferingId : undefined,
+                        status,
+                      })}
+                    />
                     <button
                       type="submit"
                       className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-bold text-red-600 hover:bg-red-100"
@@ -217,6 +350,27 @@ export function StudentDirectoryPage({
             <p className="p-6 text-sm text-zinc-500">目前沒有符合條件的學員，請調整搜尋條件或先新增 / 匯入資料。</p>
           ) : null}
         </div>
+        {activeView === "browse" ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#ead7c6] px-5 py-4">
+            <p className="text-sm text-zinc-500">每頁最多 {data.pageSize} 筆</p>
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href={buildHref({ status })}
+                className="rounded-full border border-[#ead7c6] bg-white px-4 py-2 text-sm font-bold text-[#6b3b25]"
+              >
+                第一頁
+              </Link>
+              {data.nextPageCursor ? (
+                <Link
+                  href={buildHref({ status, pageCursor: data.nextPageCursor })}
+                  className="rounded-full bg-[#6b3b25] px-4 py-2 text-sm font-bold text-white"
+                >
+                  下一頁
+                </Link>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
       </section>
     </AdminShell>
   );

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { FieldPath } from "firebase-admin/firestore";
 import { unstable_cache } from "next/cache";
 import { normalizeBookingData, readBookingData, writeBookingData } from "./data-store";
 import { getAdminDb } from "./firebase-admin";
@@ -83,6 +84,58 @@ export type AdminSessionReservationPageData = Pick<
   | "enrollments"
   | "instructors"
 >;
+
+export type StudentDirectoryMode = "browse" | "search" | "class";
+
+export type StudentDirectoryStatus = "all" | "active" | "inactive" | "review";
+
+export type StudentDirectoryCourseOption = Pick<
+  CourseOffering,
+  | "id"
+  | "seriesId"
+  | "courseSeriesId"
+  | "courseMasterId"
+  | "legacyCourseId"
+  | "title"
+  | "displayTitle"
+  | "displayName"
+  | "shortName"
+  | "year"
+  | "term"
+  | "termNumber"
+  | "termLabel"
+  | "classDisplayName"
+  | "status"
+  | "isActive"
+>;
+
+export type StudentDirectoryPageInput = BookingDataReadOptions & {
+  mode?: StudentDirectoryMode;
+  q?: string;
+  status?: string;
+  offeringId?: string;
+  pageCursor?: string;
+  pageSize?: number;
+};
+
+export type StudentDirectoryPageData = {
+  students: Student[];
+  totalCount: number;
+  mode: StudentDirectoryMode;
+  status: StudentDirectoryStatus;
+  q: string;
+  pageSize: number;
+  pageCursor?: string;
+  nextPageCursor?: string;
+  invalidCursor?: boolean;
+  queryShape: string;
+  courseOfferings: StudentDirectoryCourseOption[];
+  selectedOfferingId?: string;
+  selectedOffering?: StudentDirectoryCourseOption;
+  classEnrollmentCount?: number;
+  searchFields: string[];
+  searchType?: "empty" | "exact";
+};
 
 type StudentImportLookupInput = {
   identities: Array<{ name: string; idNumberLast3: string }>;
@@ -455,6 +508,152 @@ function compareStudentsForRoster(a: Student, b: Student) {
   const keyA = String(a.memberNo || a.studentNo || a.name || a.id);
   const keyB = String(b.memberNo || b.studentNo || b.name || b.id);
   return keyA.localeCompare(keyB, "zh-Hant", { numeric: true });
+}
+
+const STUDENT_DIRECTORY_DEFAULT_PAGE_SIZE = 30;
+const STUDENT_DIRECTORY_MAX_PAGE_SIZE = 50;
+const STUDENT_DIRECTORY_CLASS_ENROLLMENT_LIMIT = 100;
+const STUDENT_DIRECTORY_SEARCH_LIMIT = 30;
+const STUDENT_DIRECTORY_COURSE_OPTION_LIMIT = 120;
+
+const STUDENT_DIRECTORY_SEARCH_FIELDS = [
+  "memberNo",
+  "memberNumber",
+  "memberId",
+  "externalMemberNo",
+  "studentNo",
+  "name",
+  "phone",
+  "idNumberLast3",
+  "phoneLastThree",
+] as const;
+
+function getStudentDirectorySearchFieldsForQuery(q: string) {
+  const value = q.trim();
+  const digits = value.replace(/\D/g, "");
+
+  if (/^ST\d{2,}-\d{3,}$/i.test(value)) {
+    return ["memberNo", "memberNumber", "memberId", "externalMemberNo", "studentNo"];
+  }
+
+  if (digits.length >= 8 && digits === value) {
+    return ["phone"];
+  }
+
+  if (digits.length > 0 && digits.length <= 4 && digits === value) {
+    return ["idNumberLast3", "phoneLastThree", "memberNo", "studentNo"];
+  }
+
+  return ["name", "memberNo", "memberNumber", "studentNo", "phone"];
+}
+
+function normalizeStudentDirectoryStatus(value: unknown): StudentDirectoryStatus {
+  const status = String(value ?? "").trim();
+  if (status === "active" || status === "inactive" || status === "review") {
+    return status;
+  }
+  return "all";
+}
+
+function clampStudentDirectoryPageSize(value: unknown) {
+  const size = Number(value);
+  if (!Number.isFinite(size) || size <= 0) return STUDENT_DIRECTORY_DEFAULT_PAGE_SIZE;
+  return Math.min(STUDENT_DIRECTORY_MAX_PAGE_SIZE, Math.max(1, Math.floor(size)));
+}
+
+function getStudentDirectoryRosterStatus(student: Student): StudentDirectoryStatus {
+  if (student.needsReview) return "review";
+  if (student.isActive === false) return "inactive";
+  return "active";
+}
+
+function filterStudentsByDirectoryStatus(
+  students: Student[],
+  status: StudentDirectoryStatus,
+) {
+  if (status === "all") return students;
+  return students.filter((student) => getStudentDirectoryRosterStatus(student) === status);
+}
+
+function encodeStudentDirectoryCursor(studentId: string) {
+  return Buffer.from(JSON.stringify({ lastId: studentId }), "utf8").toString("base64url");
+}
+
+function decodeStudentDirectoryCursor(cursor: unknown) {
+  const value = String(cursor ?? "").trim();
+  if (!value) return { lastId: undefined, invalid: false };
+
+  try {
+    const decoded = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as {
+      lastId?: unknown;
+    };
+    const lastId = String(decoded.lastId ?? "").trim();
+    return {
+      lastId: lastId || undefined,
+      invalid: !lastId,
+    };
+  } catch {
+    return { lastId: undefined, invalid: true };
+  }
+}
+
+function toStudentDirectoryCourseOption(
+  offering: CourseOffering,
+): StudentDirectoryCourseOption {
+  return {
+    id: offering.id,
+    seriesId: offering.seriesId,
+    courseSeriesId: offering.courseSeriesId,
+    courseMasterId: offering.courseMasterId,
+    legacyCourseId: offering.legacyCourseId,
+    title: offering.title,
+    displayTitle: offering.displayTitle,
+    displayName: offering.displayName,
+    shortName: offering.shortName,
+    year: offering.year,
+    term: offering.term,
+    termNumber: offering.termNumber,
+    termLabel: offering.termLabel,
+    classDisplayName: offering.classDisplayName,
+    status: offering.status,
+    isActive: offering.isActive,
+  };
+}
+
+function sortStudentDirectoryCourseOptions(
+  a: StudentDirectoryCourseOption,
+  b: StudentDirectoryCourseOption,
+) {
+  const yearA = Number(a.year ?? 0);
+  const yearB = Number(b.year ?? 0);
+  if (yearA !== yearB) return yearB - yearA;
+
+  const termA = Number(a.termNumber ?? a.term ?? 0);
+  const termB = Number(b.termNumber ?? b.term ?? 0);
+  if (termA !== termB) return termB - termA;
+
+  const titleA = String(a.displayTitle ?? a.displayName ?? a.title ?? a.id);
+  const titleB = String(b.displayTitle ?? b.displayName ?? b.title ?? b.id);
+  return titleA.localeCompare(titleB, "zh-Hant", { numeric: true });
+}
+
+function sortStudentsForClassRoster(students: Student[], enrollments: Enrollment[]) {
+  const enrollmentByStudentId = new Map(enrollments.map((item) => [item.studentId, item]));
+
+  return [...students].sort((a, b) => {
+    const enrollmentA = enrollmentByStudentId.get(a.id);
+    const enrollmentB = enrollmentByStudentId.get(b.id);
+    const seatA = Number(enrollmentA?.seatNumber ?? enrollmentA?.seatNo);
+    const seatB = Number(enrollmentB?.seatNumber ?? enrollmentB?.seatNo);
+
+    if (Number.isFinite(seatA) && Number.isFinite(seatB) && seatA !== seatB) {
+      return seatA - seatB;
+    }
+    if (Number.isFinite(seatA)) return -1;
+    if (Number.isFinite(seatB)) return 1;
+
+    return compareStudentsForRoster(a, b);
+  });
 }
 
 function removeUndefinedFields<T>(value: T): T {
@@ -885,46 +1084,422 @@ export async function getAdminDashboardData(
   }
 }
 
-export async function getStudentDirectoryData(
-  options?: BookingDataReadOptions,
-): Promise<Pick<BookingData, "students">> {
+async function getStudentDirectoryCourseOptions(
+  db: NonNullable<ReturnType<typeof getFirestoreDb>>,
+  context: FirestoreReadContext,
+  selectedOfferingId?: string,
+) {
+  const snapshot = await withReadDiagnostics(
+    "courseOfferings",
+    context,
+    db
+      .collection("courseOfferings")
+      .orderBy("year", "desc")
+      .limit(STUDENT_DIRECTORY_COURSE_OPTION_LIMIT)
+      .get(),
+    `courseOfferings.orderBy(year desc).limit(${STUDENT_DIRECTORY_COURSE_OPTION_LIMIT})`,
+  );
+  const options = snapshot.docs
+    .map((doc) => toStudentDirectoryCourseOption({ id: doc.id, ...doc.data() } as CourseOffering))
+    .filter((offering) => offering.isActive !== false && offering.status !== "archived")
+    .sort(sortStudentDirectoryCourseOptions);
+
+  if (selectedOfferingId && !options.some((offering) => offering.id === selectedOfferingId)) {
+    const selectedDoc = await withDocumentReadDiagnostics(
+      "courseOfferings",
+      context,
+      db.collection("courseOfferings").doc(selectedOfferingId).get(),
+      "courseOfferings.doc(offeringId)",
+    );
+    if (selectedDoc.exists) {
+      options.unshift(
+        toStudentDirectoryCourseOption({
+          id: selectedDoc.id,
+          ...selectedDoc.data(),
+        } as CourseOffering),
+      );
+    }
+  }
+
+  return Array.from(new Map(options.map((offering) => [offering.id, offering])).values());
+}
+
+async function getStudentPage(
+  db: NonNullable<ReturnType<typeof getFirestoreDb>>,
+  input: {
+    context: FirestoreReadContext;
+    status: StudentDirectoryStatus;
+    pageSize: number;
+    pageCursor?: string;
+  },
+) {
+  const decodedCursor = decodeStudentDirectoryCursor(input.pageCursor);
+  let query: FirebaseFirestore.Query = db
+    .collection("students")
+    .orderBy(FieldPath.documentId());
+  let queryShape = "students.orderBy(__name__).limit(pageSize)";
+
+  if (input.status === "active") {
+    query = db
+      .collection("students")
+      .where("isActive", "==", true)
+      .orderBy(FieldPath.documentId());
+    queryShape = "students.where(isActive == true).orderBy(__name__).limit(pageSize)";
+  } else if (input.status === "inactive") {
+    query = db
+      .collection("students")
+      .where("isActive", "==", false)
+      .orderBy(FieldPath.documentId());
+    queryShape = "students.where(isActive == false).orderBy(__name__).limit(pageSize)";
+  } else if (input.status === "review") {
+    query = db
+      .collection("students")
+      .where("needsReview", "==", true)
+      .orderBy(FieldPath.documentId());
+    queryShape = "students.where(needsReview == true).orderBy(__name__).limit(pageSize)";
+  }
+
+  if (decodedCursor.lastId) {
+    query = query.startAfter(decodedCursor.lastId);
+    queryShape = `${queryShape}.startAfter(cursor)`;
+  }
+
+  const snapshot = await withReadDiagnostics(
+    "students",
+    input.context,
+    query.limit(input.pageSize + 1).get(),
+    queryShape.replace("pageSize", String(input.pageSize + 1)),
+  );
+  const docs = snapshot.docs.slice(0, input.pageSize);
+  const students = docs.map((doc) =>
+    normalizeFirestoreStudent(doc.id, doc.data() as FirestoreStudentDocument),
+  );
+  const hasMore = snapshot.docs.length > input.pageSize;
+  const lastDoc = docs[docs.length - 1];
+
+  return {
+    students,
+    nextPageCursor: hasMore && lastDoc ? encodeStudentDirectoryCursor(lastDoc.id) : undefined,
+    invalidCursor: decodedCursor.invalid,
+    queryShape,
+  };
+}
+
+async function searchStudents(
+  db: NonNullable<ReturnType<typeof getFirestoreDb>>,
+  input: {
+    context: FirestoreReadContext;
+    q: string;
+    status: StudentDirectoryStatus;
+  },
+) {
+  const q = input.q.trim();
+  if (!q) {
+    return {
+      students: [],
+      queryShape: "students.search(empty)",
+      searchType: "empty" as const,
+    };
+  }
+
+  const searchFields = getStudentDirectorySearchFieldsForQuery(q);
+  const snapshots = await Promise.all(
+    searchFields.map((field) =>
+      withReadDiagnostics(
+        "students",
+        input.context,
+        db
+          .collection("students")
+          .where(field, "==", q)
+          .limit(STUDENT_DIRECTORY_SEARCH_LIMIT)
+          .get(),
+        `students.where(${field} == exact).limit(${STUDENT_DIRECTORY_SEARCH_LIMIT})`,
+      ),
+    ),
+  );
+  const students = Array.from(
+    new Map(
+      snapshots
+        .flatMap((snapshot) => snapshot.docs)
+        .map((doc) => [
+          doc.id,
+          normalizeFirestoreStudent(doc.id, doc.data() as FirestoreStudentDocument),
+        ]),
+    ).values(),
+  ).sort(compareStudentsForRoster);
+
+  return {
+    students: filterStudentsByDirectoryStatus(students, input.status),
+    queryShape: `students.exactSearch(${searchFields.join("|")})`,
+    searchType: "exact" as const,
+    searchFields,
+  };
+}
+
+async function getClassRosterStudents(
+  db: NonNullable<ReturnType<typeof getFirestoreDb>>,
+  input: {
+    context: FirestoreReadContext;
+    offeringId: string;
+    selectedOffering?: StudentDirectoryCourseOption;
+    status: StudentDirectoryStatus;
+  },
+) {
+  const offeringId = input.offeringId.trim();
+  if (!offeringId) {
+    return {
+      students: [],
+      enrollments: [] as Enrollment[],
+      queryShape: "classRoster(no offeringId)",
+    };
+  }
+
+  const enrollmentQueries = [
+    withReadDiagnostics(
+      "enrollments",
+      input.context,
+      db
+        .collection("enrollments")
+        .where("offeringId", "==", offeringId)
+        .limit(STUDENT_DIRECTORY_CLASS_ENROLLMENT_LIMIT)
+        .get(),
+      `enrollments.where(offeringId == offeringId).limit(${STUDENT_DIRECTORY_CLASS_ENROLLMENT_LIMIT})`,
+    ),
+    withReadDiagnostics(
+      "enrollments",
+      input.context,
+      db
+        .collection("enrollments")
+        .where("courseOfferingId", "==", offeringId)
+        .limit(STUDENT_DIRECTORY_CLASS_ENROLLMENT_LIMIT)
+        .get(),
+      `enrollments.where(courseOfferingId == offeringId).limit(${STUDENT_DIRECTORY_CLASS_ENROLLMENT_LIMIT})`,
+    ),
+  ];
+
+  if (input.selectedOffering?.legacyCourseId) {
+    enrollmentQueries.push(
+      withReadDiagnostics(
+        "enrollments",
+        input.context,
+        db
+          .collection("enrollments")
+          .where("courseId", "==", input.selectedOffering.legacyCourseId)
+          .limit(STUDENT_DIRECTORY_CLASS_ENROLLMENT_LIMIT)
+          .get(),
+        `enrollments.where(courseId == legacyCourseId).limit(${STUDENT_DIRECTORY_CLASS_ENROLLMENT_LIMIT})`,
+      ),
+    );
+  }
+
+  const enrollmentSnapshots = await Promise.all(enrollmentQueries);
+  const enrollments = Array.from(
+    new Map(
+      enrollmentSnapshots
+        .flatMap((snapshot) => snapshot.docs)
+        .map((doc) => [doc.id, { id: doc.id, ...doc.data() } as Enrollment]),
+    ).values(),
+  ).filter((enrollment) => !["withdrawn", "cancelled", "inactive"].includes(String(enrollment.status ?? "")));
+  const studentIds = uniqueNonEmpty(enrollments.map((enrollment) => enrollment.studentId));
+  const studentDocs = await readDocumentsByIds(
+    db,
+    "students",
+    studentIds,
+    input.context,
+    "classRoster.studentsByEnrollmentStudentIds",
+  );
+  const students = dataFromExistingDocs<FirestoreStudentDocument>(studentDocs)
+    .map((student) => normalizeFirestoreStudent(student.id ?? "", student))
+    .filter((student) => studentIds.includes(student.id));
+
+  return {
+    students: filterStudentsByDirectoryStatus(
+      sortStudentsForClassRoster(students, enrollments),
+      input.status,
+    ),
+    enrollments,
+    queryShape: "enrollments.offeringId/courseOfferingId/courseId -> students.getAll(studentIds)",
+  };
+}
+
+export async function getStudentDirectoryPageData(
+  input?: StudentDirectoryPageInput,
+): Promise<StudentDirectoryPageData> {
+  const mode = input?.mode === "class" ? "class" : input?.q?.trim() ? "search" : "browse";
+  const status = normalizeStudentDirectoryStatus(input?.status);
+  const pageSize = clampStudentDirectoryPageSize(input?.pageSize);
+  const q = String(input?.q ?? "").trim();
+  const selectedOfferingId = String(input?.offeringId ?? "").trim();
   const db = getFirestoreDb();
 
   if (!db) {
     const data = readBookingData();
-    return { students: data.students };
+    const needsCourseOptions = mode === "class" || Boolean(selectedOfferingId);
+    const courseOfferings = needsCourseOptions
+      ? data.courseOfferings
+          .map(toStudentDirectoryCourseOption)
+          .filter((offering) => offering.isActive !== false && offering.status !== "archived")
+          .sort(sortStudentDirectoryCourseOptions)
+      : [];
+    const selectedOffering = courseOfferings.find((offering) => offering.id === selectedOfferingId);
+    let students: Student[] = [];
+    let classEnrollmentCount: number | undefined;
+
+    if (mode === "class" && selectedOfferingId) {
+      const enrollments = data.enrollments.filter(
+        (enrollment) =>
+          !["withdrawn", "cancelled", "inactive"].includes(String(enrollment.status ?? "")) &&
+          (enrollment.offeringId === selectedOfferingId ||
+            enrollment.courseOfferingId === selectedOfferingId ||
+            (selectedOffering?.legacyCourseId && enrollment.courseId === selectedOffering.legacyCourseId)),
+      );
+      classEnrollmentCount = enrollments.length;
+      const studentIds = uniqueNonEmpty(enrollments.map((enrollment) => enrollment.studentId));
+      students = data.students.filter((student) => studentIds.includes(student.id));
+      students = sortStudentsForClassRoster(students, enrollments);
+    } else if (mode === "search" && q) {
+      students = data.students
+        .filter((student) =>
+          STUDENT_DIRECTORY_SEARCH_FIELDS.some((field) =>
+            String((student as Student & Record<string, unknown>)[field] ?? "").trim() === q,
+          ),
+        )
+        .sort(compareStudentsForRoster);
+    } else {
+      students = data.students.sort(compareStudentsForRoster).slice(0, pageSize);
+    }
+
+    return {
+      students: filterStudentsByDirectoryStatus(students, status),
+      totalCount: data.students.length,
+      mode,
+      status,
+      q,
+      pageSize,
+      queryShape: mode === "browse" ? "json.students.slice(pageSize)" : `json.${mode}`,
+      courseOfferings,
+      selectedOfferingId,
+      selectedOffering,
+      classEnrollmentCount,
+      searchFields: [...STUDENT_DIRECTORY_SEARCH_FIELDS],
+      searchType: q ? "exact" : "empty",
+    };
   }
 
   try {
     const context = createReadContext({
-      source: options?.source ?? "getStudentDirectoryData",
-      route: options?.route,
-      requestId: options?.requestId,
+      source: input?.source ?? "getStudentDirectoryPageData",
+      route: input?.route,
+      requestId: input?.requestId,
     });
-    const studentSnapshot = await withReadDiagnostics(
+    const needsCourseOptions = mode === "class" || Boolean(selectedOfferingId);
+    const totalCount = await withCountDiagnostics(
       "students",
       context,
-      db.collection("students").get(),
+      db.collection("students").count().get(),
+      "students.count()",
     );
+    const courseOfferings = needsCourseOptions
+      ? await getStudentDirectoryCourseOptions(db, context, selectedOfferingId)
+      : [];
+    const selectedOffering = courseOfferings.find((offering) => offering.id === selectedOfferingId);
 
+    if (mode === "class") {
+      const roster = await getClassRosterStudents(db, {
+        context,
+        offeringId: selectedOfferingId,
+        selectedOffering,
+        status,
+      });
+      return {
+        students: roster.students,
+        totalCount,
+        mode,
+        status,
+        q,
+        pageSize,
+        queryShape: roster.queryShape,
+        courseOfferings,
+        selectedOfferingId,
+        selectedOffering,
+        classEnrollmentCount: roster.enrollments.length,
+        searchFields: q
+          ? getStudentDirectorySearchFieldsForQuery(q)
+          : [...STUDENT_DIRECTORY_SEARCH_FIELDS],
+      };
+    }
+
+    if (mode === "search") {
+      const search = await searchStudents(db, { context, q, status });
+      return {
+        students: search.students,
+        totalCount,
+        mode,
+        status,
+        q,
+        pageSize,
+        queryShape: search.queryShape,
+        courseOfferings,
+        selectedOfferingId,
+        selectedOffering,
+        searchFields: getStudentDirectorySearchFieldsForQuery(q),
+        searchType: search.searchType,
+      };
+    }
+
+    const page = await getStudentPage(db, {
+      context,
+      status,
+      pageSize,
+      pageCursor: input?.pageCursor,
+    });
     return {
-      students: studentSnapshot.docs
-        .map((doc) =>
-          normalizeFirestoreStudent(
-            doc.id,
-            doc.data() as FirestoreStudentDocument,
-          ),
-        )
-        .sort(compareStudentsForRoster),
+      students: page.students,
+      totalCount,
+      mode,
+      status,
+      q,
+      pageSize,
+      pageCursor: input?.pageCursor,
+      nextPageCursor: page.nextPageCursor,
+      invalidCursor: page.invalidCursor,
+      queryShape: page.queryShape,
+      courseOfferings,
+      selectedOfferingId,
+      selectedOffering,
+      searchFields: [...STUDENT_DIRECTORY_SEARCH_FIELDS],
     };
   } catch (error) {
     if (!shouldFallbackToJson()) {
-      throw createFirestoreRequiredError("Student directory read failed.", error);
+      throw createFirestoreRequiredError("Student directory page read failed.", error);
     }
-    console.warn("[DATA_SOURCE] ⚠️ Firestore student directory read failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
+    console.warn("[DATA_SOURCE] Firestore student directory page read failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     const data = readBookingData();
-    return { students: data.students };
+    return {
+      students: filterStudentsByDirectoryStatus(data.students.sort(compareStudentsForRoster).slice(0, pageSize), status),
+      totalCount: data.students.length,
+      mode: "browse",
+      status,
+      q,
+      pageSize,
+      queryShape: "json.fallback.students.slice(pageSize)",
+      courseOfferings: [],
+      selectedOfferingId,
+      searchFields: [...STUDENT_DIRECTORY_SEARCH_FIELDS],
+      searchType: q ? "exact" : "empty",
+    };
   }
+}
+
+export async function getStudentDirectoryData(
+  options?: BookingDataReadOptions,
+): Promise<Pick<BookingData, "students">> {
+  const pageData = await getStudentDirectoryPageData({
+    ...options,
+    mode: "browse",
+    pageSize: STUDENT_DIRECTORY_DEFAULT_PAGE_SIZE,
+  });
+  return { students: pageData.students };
 }
 
 export async function getStudentImportPageData(
