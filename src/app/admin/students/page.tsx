@@ -16,6 +16,7 @@ import {
   getBookingData,
   getStudentDirectoryPageData,
   getStudentEligibilityPageData,
+  getStudentHistoryPageData,
 } from "@/lib/booking-repository";
 import type {
   CourseOffering,
@@ -38,6 +39,7 @@ type PageProps = {
     offeringId?: string;
     status?: string;
     q?: string;
+    studentId?: string;
     instructorId?: string;
     saved?: string;
     error?: string;
@@ -430,6 +432,7 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
     offeringId: queryOfferingId,
     status = "all",
     q = "",
+    studentId = "",
     instructorId: editingInstructorId,
     saved,
     error,
@@ -449,6 +452,9 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
         ? mode
         : "students";
   let bookingData;
+  let historyPageData: Awaited<
+    ReturnType<typeof getStudentHistoryPageData>
+  > | null = null;
   try {
     if (currentMode === "students") {
       bookingData = await getStudentDirectoryPageData({
@@ -457,6 +463,13 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
         status,
         offeringId: queryOfferingId,
         pageCursor,
+        source: "AdminStudentsPage",
+        route: "/admin/students",
+      });
+    } else if (currentMode === "history") {
+      historyPageData = await getStudentHistoryPageData({
+        q,
+        studentId,
         source: "AdminStudentsPage",
         route: "/admin/students",
       });
@@ -513,7 +526,8 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
     );
   }
 
-  const fullBookingData = bookingData as Awaited<ReturnType<typeof getBookingData>>;
+  const fullBookingData = (bookingData ??
+    {}) as Awaited<ReturnType<typeof getBookingData>>;
   const {
     students = [],
     courseSeries = [],
@@ -592,8 +606,20 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
       recordByStudentId.set(record.studentId, record);
     }
   });
-  const seriesById = new Map(courseSeries.map((item) => [item.id, item]));
-  const offeringById = new Map(courseOfferings.map((item) => [item.id, item]));
+  const seriesById = new Map(
+    (
+      currentMode === "history" && historyPageData
+        ? Object.values(historyPageData.courseSeriesById)
+        : courseSeries
+    ).map((item) => [item.id, item]),
+  );
+  const offeringById = new Map(
+    (
+      currentMode === "history" && historyPageData
+        ? Object.values(historyPageData.courseOfferingsById)
+        : courseOfferings
+    ).map((item) => [item.id, item]),
+  );
 
   const selectedEnrollmentStatusByStudentId = new Map<string, string>();
   const activeClassChipsByStudentId = new Map<string, ActiveClassChip[]>();
@@ -658,7 +684,13 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
           .some((item) => item.includes(norm(q)))
       );
     });
-  const sessionById = new Map(courseSessions.map((item) => [item.id, item]));
+  const sessionById = new Map(
+    (
+      currentMode === "history" && historyPageData
+        ? Object.values(historyPageData.courseSessionsById)
+        : courseSessions
+    ).map((item) => [item.id, item]),
+  );
 
   const visibleInstructors = instructors
     .filter((instructor) => instructor.isActive !== false)
@@ -667,31 +699,59 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
   const editingInstructor =
     instructors.find((instructor) => instructor.id === editingInstructorId) ?? null;
 
-  const historyStudentCandidates = currentMode === "history" && norm(q)
-    ? students
-        .filter((student) => student.isActive !== false)
-        .filter((student) => studentMatches(student, q))
-        .sort(compareStudentsByMemberNo)
-    : [];
-  const selectedHistoryStudent = historyStudentCandidates[0];
+  const historyStudentCandidates =
+    currentMode === "history" && historyPageData
+      ? historyPageData.students
+      : norm(q)
+        ? students
+            .filter((student) => student.isActive !== false)
+            .filter((student) => studentMatches(student, q))
+            .sort(compareStudentsByMemberNo)
+        : [];
+  const selectedHistoryStudent =
+    currentMode === "history" && historyPageData
+      ? historyPageData.selectedStudent
+      : (historyStudentCandidates[0] ?? null);
   const selectedHistoryStudentId = selectedHistoryStudent?.id ?? "";
 
-  const selectedHistoryRecords = selectedHistoryStudent
-    ? studentCourseRecords.filter((record) => record.studentId === selectedHistoryStudentId)
-    : [];
-  const selectedHistoryEnrollments = selectedHistoryStudent
-    ? enrollments.filter((enrollment) => enrollment.studentId === selectedHistoryStudentId)
-    : [];
+  const selectedHistoryRecords =
+    currentMode === "history" && historyPageData
+      ? historyPageData.studentCourseRecords
+      : selectedHistoryStudent
+        ? studentCourseRecords.filter(
+            (record) => record.studentId === selectedHistoryStudentId,
+          )
+        : [];
+  const selectedHistoryEnrollments =
+    currentMode === "history" && historyPageData
+      ? historyPageData.enrollments
+      : selectedHistoryStudent
+        ? enrollments.filter(
+            (enrollment) =>
+              enrollment.studentId === selectedHistoryStudentId,
+          )
+        : [];
   const visibleHistoryEnrollments = selectedHistoryEnrollments.filter((enrollment) => {
     const enrollmentStatus = norm(enrollment.status);
     return !["withdrawn", "cancelled", "inactive"].includes(enrollmentStatus);
   });
-  const selectedHistoryReservations = selectedHistoryStudent
-    ? reservations.filter((reservation) => reservation.studentId === selectedHistoryStudentId)
-    : [];
-  const selectedHistoryAttendance = selectedHistoryStudent
-    ? attendanceRecords.filter((attendance) => attendance.studentId === selectedHistoryStudentId)
-    : [];
+  const selectedHistoryReservations =
+    currentMode === "history" && historyPageData
+      ? historyPageData.reservations
+      : selectedHistoryStudent
+        ? reservations.filter(
+            (reservation) => reservation.studentId === selectedHistoryStudentId,
+          )
+        : [];
+  const selectedHistoryAttendance =
+    currentMode === "history" && historyPageData
+      ? historyPageData.attendanceRecords
+      : selectedHistoryStudent
+        ? attendanceRecords.filter(
+            (attendance) =>
+              attendance.studentId === selectedHistoryStudentId,
+          )
+        : [];
 
   const historyCourseCards = [
     ...visibleHistoryEnrollments.map((enrollment) => {
@@ -1437,7 +1497,7 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
                     <Link
                       href={buildHref({
                         mode: "history",
-                        q: student.memberNo || student.name || student.phone,
+                        studentId: student.id,
                       })}
                       className="w-fit rounded-full border border-[#ead7c6] bg-white px-3 py-1 text-xs font-bold text-[#6b3b25] hover:border-[#ef6c00] hover:text-[#ef6c00]"
                     >
@@ -2177,14 +2237,14 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
 
       {currentMode === "history" ? (
         <section className="mt-6 space-y-5">
-          {!norm(q) ? (
+          {!norm(q) && !selectedHistoryStudent ? (
             <div className="rounded-[1.75rem] border border-[#ead7c6] bg-white p-6 shadow-sm">
               <p className="text-sm font-semibold text-[#a65f3b]">學習履歷查詢</p>
               <h2 className="mt-2 text-2xl font-black text-zinc-950">
                 先搜尋一位學員
               </h2>
               <p className="mt-2 text-sm leading-7 text-zinc-500">
-                請使用上方搜尋框輸入學員姓名、會員編號或手機。這一頁只顯示單一學員的課程狀態、出席與最近紀錄，避免全部紀錄混在一起。
+                請使用上方搜尋框輸入學員姓名、會員編號或手機，或從名冊點選學員的「履歷」連結。這一頁只顯示單一學員的課程狀態、出席與最近紀錄，避免全部紀錄混在一起。
               </p>
             </div>
           ) : selectedHistoryStudent ? (
@@ -2199,6 +2259,15 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
                     <p className="mt-2 text-sm text-zinc-500">
                       會員編號：{selectedHistoryStudent.memberNo || "未填"}｜手機：{selectedHistoryStudent.phone || "未填"}
                     </p>
+                    <Link
+                      href={buildHref({
+                        mode: "history",
+                        studentId: selectedHistoryStudentId,
+                      })}
+                      className="mt-3 inline-block w-fit rounded-full border border-[#ead7c6] bg-[#fffaf5] px-3 py-1 text-xs font-bold text-[#6b3b25] hover:border-[#ef6c00] hover:text-[#ef6c00]"
+                    >
+                      履歷固定連結
+                    </Link>
                   </div>
                   <span className={`w-fit rounded-full border px-4 py-2 text-sm font-bold ${getRosterStatus(selectedHistoryStudent).className}`}>
                     {getRosterStatus(selectedHistoryStudent).label}
@@ -2288,10 +2357,14 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
             <div className="rounded-[1.75rem] border border-[#ead7c6] bg-white p-6 shadow-sm">
               <p className="text-sm font-semibold text-[#a65f3b]">查無學員</p>
               <h2 className="mt-2 text-2xl font-black text-zinc-950">
-                沒有找到符合「{q}」的學員
+                {norm(q)
+                  ? `沒有找到符合「${q}」的學員`
+                  : "找不到指定的學員"}
               </h2>
               <p className="mt-2 text-sm text-zinc-500">
-                請改用姓名、會員編號或手機搜尋。
+                {norm(q)
+                  ? "請改用姓名、會員編號或手機搜尋。"
+                  : "該學員可能已不存在，請改用姓名、會員編號或手機搜尋。"}
               </p>
             </div>
           )}

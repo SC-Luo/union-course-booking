@@ -13,7 +13,7 @@ import {
   getSession,
   resolveEffectiveBookingPolicy,
 } from "./course-utils";
-import type { AttendanceRecord, AttendanceStatus, BookingData, Course, CourseCategory, CourseOffering, CourseSeries, CourseSession, Enrollment, Reservation, Student, StudentCourseRecord, Instructor } from "./types";
+import type { AttendanceRecord, AttendanceStatus, BookingData, Course, CourseCategory, CourseOffering, CourseSeries, CourseSession, CourseSessionRecord, Enrollment, Reservation, Student, StudentCourseRecord, Instructor } from "./types";
 
 type BookingDataSourceMode = "firestore" | "json" | "unset" | "invalid";
 
@@ -3009,6 +3009,335 @@ export async function getStudentEligibilityPageData(
           )
         : [],
     });
+  }
+}
+
+export type StudentHistoryPageInput = BookingDataReadOptions & {
+  q?: string;
+  studentId?: string;
+};
+
+export type StudentHistoryPageData = {
+  students: Student[];
+  selectedStudent: Student | null;
+  studentCourseRecords: StudentCourseRecord[];
+  enrollments: Enrollment[];
+  reservations: Reservation[];
+  attendanceRecords: AttendanceRecord[];
+  courseSeriesById: Record<string, CourseSeries>;
+  courseOfferingsById: Record<string, CourseOffering>;
+  courseSessionsById: Record<string, CourseSessionRecord>;
+  queryShape: string;
+};
+
+function normalizeHistoryMetadataById<T extends { id: string }>(
+  docs: Array<{ id: string; exists: boolean; data(): unknown }>,
+): Record<string, T> {
+  const map: Record<string, T> = {};
+  dataFromExistingDocs<T>(docs).forEach((item) => {
+    map[item.id] = item;
+  });
+  return map;
+}
+
+export async function getStudentHistoryPageData(
+  input?: StudentHistoryPageInput,
+): Promise<StudentHistoryPageData> {
+  const q = String(input?.q ?? "").trim();
+  const canonicalStudentId = String(input?.studentId ?? "").trim();
+  const db = getFirestoreDb();
+
+  if (!db) {
+    const data = readBookingData();
+    const candidates = q
+      ? data.students
+          .filter((student) => student.isActive !== false)
+          .filter((student) =>
+            STUDENT_DIRECTORY_SEARCH_FIELDS.some(
+              (field) =>
+                String(
+                  (student as Student & Record<string, unknown>)[field] ?? "",
+                ).trim() === q,
+            ),
+          )
+          .sort(compareStudentsForRoster)
+      : [];
+    const selectedStudent =
+      (canonicalStudentId
+        ? data.students.find((student) => student.id === canonicalStudentId) ??
+          null
+        : null) ?? candidates[0] ?? null;
+    const studentId = selectedStudent?.id ?? "";
+    const studentCourseRecords = selectedStudent
+      ? data.studentCourseRecords.filter(
+          (record) => record.studentId === studentId,
+        )
+      : [];
+    const enrollments = selectedStudent
+      ? data.enrollments.filter((item) => item.studentId === studentId)
+      : [];
+    const reservations = selectedStudent
+      ? data.reservations.filter((item) => item.studentId === studentId)
+      : [];
+    const attendanceRecords = selectedStudent
+      ? data.attendanceRecords.filter((item) => item.studentId === studentId)
+      : [];
+
+    return {
+      students: candidates,
+      selectedStudent,
+      studentCourseRecords,
+      enrollments,
+      reservations,
+      attendanceRecords,
+      courseSeriesById: normalizeHistoryMetadataById(
+        data.courseSeries.map((item) => ({
+          id: item.id,
+          exists: true,
+          data: () => item,
+        })),
+      ),
+      courseOfferingsById: normalizeHistoryMetadataById(
+        data.courseOfferings.map((item) => ({
+          id: item.id,
+          exists: true,
+          data: () => item,
+        })),
+      ),
+      courseSessionsById: normalizeHistoryMetadataById(
+        data.courseSessions.map((item) => ({
+          id: item.id,
+          exists: true,
+          data: () => item,
+        })),
+      ),
+      queryShape: selectedStudent
+        ? `json.studentHistory(studentId:${studentId})`
+        : `json.studentHistory(no student)`,
+    };
+  }
+
+  try {
+    const context = createReadContext({
+      source: input?.source ?? "getStudentHistoryPageData",
+      route: input?.route,
+      requestId: input?.requestId,
+    });
+
+    let selectedStudent: Student | null = null;
+    let candidates: Student[] = [];
+    const visibleCandidates = (students: Student[]) =>
+      students.filter((student) => student.isActive !== false);
+
+    if (canonicalStudentId) {
+      const studentDoc = await withDocumentReadDiagnostics(
+        "students",
+        context,
+        db.collection("students").doc(canonicalStudentId).get(),
+        "students.doc(studentId)",
+      );
+      selectedStudent = studentDoc.exists
+        ? normalizeFirestoreStudent(
+            studentDoc.id,
+            studentDoc.data() as FirestoreStudentDocument,
+          )
+        : null;
+      if (q) {
+        const search = await searchStudents(db, {
+          context,
+          q,
+          status: "all",
+        });
+        candidates = visibleCandidates(search.students);
+        selectedStudent ??= candidates[0] ?? null;
+      }
+    } else if (q) {
+      const search = await searchStudents(db, {
+        context,
+        q,
+        status: "all",
+      });
+      candidates = visibleCandidates(search.students);
+      selectedStudent = candidates[0] ?? null;
+    }
+
+    const studentId = selectedStudent?.id ?? "";
+    const studentName = String(selectedStudent?.name ?? "").trim();
+    const courseSeriesById: Record<string, CourseSeries> = {};
+    const courseOfferingsById: Record<string, CourseOffering> = {};
+    const courseSessionsById: Record<string, CourseSessionRecord> = {};
+    let studentCourseRecords: StudentCourseRecord[] = [];
+    let enrollments: Enrollment[] = [];
+    let reservations: Reservation[] = [];
+    let attendanceRecords: AttendanceRecord[] = [];
+
+    if (studentId) {
+      const [recordSnapshot, enrollmentSnapshot, reservationSnapshot, attendanceSnapshot] =
+        await Promise.all([
+          withReadDiagnostics(
+            "studentCourseRecords",
+            context,
+            db
+              .collection("studentCourseRecords")
+              .where("studentId", "==", studentId)
+              .get(),
+            "studentCourseRecords.where(studentId == sid)",
+          ),
+          withReadDiagnostics(
+            "enrollments",
+            context,
+            db.collection("enrollments").where("studentId", "==", studentId).get(),
+            "enrollments.where(studentId == sid)",
+          ),
+          withReadDiagnostics(
+            "reservations",
+            context,
+            db.collection("reservations").where("studentId", "==", studentId).get(),
+            "reservations.where(studentId == sid)",
+          ),
+          withReadDiagnostics(
+            "attendanceRecords",
+            context,
+            db
+              .collection("attendanceRecords")
+              .where("studentId", "==", studentId)
+              .get(),
+            "attendanceRecords.where(studentId == sid)",
+          ),
+        ]);
+
+      studentCourseRecords = recordSnapshot.docs.map(
+        (doc) => ({ id: doc.id, ...doc.data() }) as StudentCourseRecord,
+      );
+      enrollments = enrollmentSnapshot.docs.map(
+        (doc) => ({ id: doc.id, ...doc.data() }) as Enrollment,
+      );
+      reservations = reservationSnapshot.docs.map(
+        (doc) => ({ id: doc.id, ...doc.data() }) as Reservation,
+      );
+      attendanceRecords = attendanceSnapshot.docs.map(
+        (doc) => ({ id: doc.id, ...doc.data() }) as AttendanceRecord,
+      );
+
+      const legacyReservationIds = new Set(
+        reservations.map((item) => item.id),
+      );
+      if (studentName) {
+        const studentLast3 =
+          cleanIdentityLast3(selectedStudent?.idNumberLast3) ||
+          cleanIdentityLast3(selectedStudent?.phone).slice(-3);
+        const legacySnapshot = await withReadDiagnostics(
+          "reservations",
+          context,
+          db
+            .collection("reservations")
+            .where("studentName", "==", studentName)
+            .limit(50)
+            .get(),
+          "reservations.where(studentName == name) legacy",
+        );
+        legacySnapshot.docs.forEach((doc) => {
+          if (legacyReservationIds.has(doc.id)) return;
+          const data = doc.data();
+          if (
+            studentLast3 &&
+            normalizeName(data.studentName) === normalizeName(studentName) &&
+            cleanIdentityLast3(data.idNumberLast3 ?? data.phoneLastThree) ===
+              studentLast3
+          ) {
+            legacyReservationIds.add(doc.id);
+            reservations.push({ id: doc.id, ...data } as Reservation);
+          }
+        });
+      }
+
+      const offeringIds = uniqueNonEmpty([
+        ...enrollments.flatMap((item) => [
+          item.offeringId,
+          item.courseOfferingId,
+        ]),
+        ...studentCourseRecords.map((item) => item.offeringId),
+        ...reservations.map((item) => item.offeringId),
+        ...attendanceRecords.map((item) => item.offeringId),
+      ]);
+      const sessionIds = uniqueNonEmpty([
+        ...reservations.map((item) => item.sessionId),
+        ...attendanceRecords.flatMap((item) => [
+          item.sessionId,
+          item.courseSessionId,
+        ]),
+      ]);
+      const seriesIds = uniqueNonEmpty([
+        ...studentCourseRecords.flatMap((item) => [
+          item.seriesId,
+          item.courseMasterId,
+        ]),
+        ...enrollments.flatMap((item) => [item.seriesId, item.courseMasterId]),
+        ...attendanceRecords.map((item) => item.seriesId),
+      ]);
+
+      const [offeringDocs, sessionDocs, seriesDocs] = await Promise.all([
+        readDocumentsByIds(
+          db,
+          "courseOfferings",
+          offeringIds,
+          context,
+          "studentHistory.courseOfferings",
+        ),
+        readDocumentsByIds(
+          db,
+          "courseSessions",
+          sessionIds,
+          context,
+          "studentHistory.courseSessions",
+        ),
+        readDocumentsByIds(
+          db,
+          "courseSeries",
+          seriesIds,
+          context,
+          "studentHistory.courseSeries",
+        ),
+      ]);
+
+      Object.assign(
+        courseOfferingsById,
+        normalizeHistoryMetadataById<CourseOffering>(offeringDocs),
+      );
+      Object.assign(
+        courseSessionsById,
+        normalizeHistoryMetadataById<CourseSessionRecord>(sessionDocs),
+      );
+      Object.assign(
+        courseSeriesById,
+        normalizeHistoryMetadataById<CourseSeries>(seriesDocs),
+      );
+    }
+
+    return {
+      students: candidates,
+      selectedStudent,
+      studentCourseRecords,
+      enrollments,
+      reservations,
+      attendanceRecords,
+      courseSeriesById,
+      courseOfferingsById,
+      courseSessionsById,
+      queryShape: studentId
+        ? `studentHistory: students.doc(studentId) -> studentCourseRecords/enrollments/reservations/attendanceRecords.where(studentId == sid)${studentName ? " + reservations.where(studentName == name) legacy" : ""} -> metadata.getAll(ids)`
+        : canonicalStudentId
+          ? "studentHistory: students.doc(studentId) (not found)"
+          : q
+            ? "studentHistory: students.exactSearch(q) -> first candidate"
+            : "studentHistory(no query)",
+    };
+  } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Student history page read failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore student history page read failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
+    return getStudentHistoryPageData({ ...input, requestId: undefined });
   }
 }
 
