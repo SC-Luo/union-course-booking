@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import { AdminShell } from "@/components/page-shell";
-import { getBookingData } from "@/lib/booking-repository";
+import { getStudentProfilePageData } from "@/lib/booking-repository";
+import type { StudentProfilePageData } from "@/lib/booking-repository";
 import type { Student } from "@/lib/types";
 import { formatDate, getStudentCompleteness, getStudentStatus, text, maskNationalId } from "../student-profile-utils";
 import { deleteStudentIdentityAction } from "@/app/admin/actions";
@@ -58,13 +59,9 @@ function infoGrid(items: Array<[string, string]>) {
   );
 }
 
-function getRecentCourseSummary(student: Student, data: Awaited<ReturnType<typeof getBookingData>>) {
+function getRecentCourseSummary(student: Student, data: StudentProfilePageData) {
   const enrollments = data.enrollments.filter((item) => item.studentId === student.id);
-  const reservations = data.reservations.filter(
-    (item) => item.studentId === student.id || item.studentName === student.name,
-  );
-  const offeringMap = new Map(data.courseOfferings.map((item) => [item.id, item]));
-  const courseMap = new Map(data.courses.map((item) => [item.id, item]));
+  const reservations = data.reservations;
 
   return {
     enrollmentCount: enrollments.length,
@@ -72,8 +69,12 @@ function getRecentCourseSummary(student: Student, data: Awaited<ReturnType<typeo
     courseNames: enrollments
       .slice(0, 5)
       .map((enrollment) => {
-        const offering = offeringMap.get(enrollment.offeringId);
-        const course = enrollment.courseId ? courseMap.get(enrollment.courseId) : undefined;
+        const offering = enrollment.offeringId
+          ? data.courseOfferingById[enrollment.offeringId]
+          : undefined;
+        const course = enrollment.courseId
+          ? data.courseById[enrollment.courseId]
+          : undefined;
         return (
           offering?.displayTitle ??
           offering?.displayName ??
@@ -89,8 +90,12 @@ function getRecentCourseSummary(student: Student, data: Awaited<ReturnType<typeo
 
 export default async function AdminStudentProfilePage({ params }: PageProps) {
   const { studentId } = await params;
-  const data = await getBookingData();
-  const student = data.students.find((item) => item.id === studentId);
+  const data = await getStudentProfilePageData({
+    studentId,
+    source: "getStudentProfilePageData",
+    route: "/admin/students/[studentId]",
+  });
+  const student = data.student;
 
   if (!student) notFound();
 

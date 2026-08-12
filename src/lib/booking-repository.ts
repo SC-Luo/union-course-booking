@@ -13,7 +13,7 @@ import {
   getSession,
   resolveEffectiveBookingPolicy,
 } from "./course-utils";
-import type { AttendanceRecord, AttendanceStatus, BookingData, Course, CourseCategory, CourseOffering, CourseSeries, CourseSession, CourseSessionRecord, Enrollment, Reservation, Student, StudentCourseRecord, Instructor } from "./types";
+import type { AttendanceRecord, AttendanceStatus, BookingData, Course, CourseCategory, CourseOffering, CourseSeries, CourseSession, CourseSessionRecord, Enrollment, ImportBatch, Reservation, Student, StudentCourseRecord, Instructor } from "./types";
 
 type BookingDataSourceMode = "firestore" | "json" | "unset" | "invalid";
 
@@ -3172,7 +3172,7 @@ export async function getStudentHistoryPageData(
     let attendanceRecords: AttendanceRecord[] = [];
 
     if (studentId) {
-      const [recordSnapshot, enrollmentSnapshot, reservationSnapshot, attendanceSnapshot] =
+      const [recordSnapshot, enrollmentSnapshot, attendanceSnapshot, reservationsResult] =
         await Promise.all([
           withReadDiagnostics(
             "studentCourseRecords",
@@ -3190,12 +3190,6 @@ export async function getStudentHistoryPageData(
             "enrollments.where(studentId == sid)",
           ),
           withReadDiagnostics(
-            "reservations",
-            context,
-            db.collection("reservations").where("studentId", "==", studentId).get(),
-            "reservations.where(studentId == sid)",
-          ),
-          withReadDiagnostics(
             "attendanceRecords",
             context,
             db
@@ -3203,6 +3197,14 @@ export async function getStudentHistoryPageData(
               .where("studentId", "==", studentId)
               .get(),
             "attendanceRecords.where(studentId == sid)",
+          ),
+          fetchStudentReservationsIdentitySafe(
+            db,
+            context,
+            studentId,
+            studentName,
+            cleanIdentityLast3(selectedStudent?.idNumberLast3) ||
+              cleanIdentityLast3(selectedStudent?.phone).slice(-3),
           ),
         ]);
 
@@ -3212,44 +3214,10 @@ export async function getStudentHistoryPageData(
       enrollments = enrollmentSnapshot.docs.map(
         (doc) => ({ id: doc.id, ...doc.data() }) as Enrollment,
       );
-      reservations = reservationSnapshot.docs.map(
-        (doc) => ({ id: doc.id, ...doc.data() }) as Reservation,
-      );
+      reservations = reservationsResult;
       attendanceRecords = attendanceSnapshot.docs.map(
         (doc) => ({ id: doc.id, ...doc.data() }) as AttendanceRecord,
       );
-
-      const legacyReservationIds = new Set(
-        reservations.map((item) => item.id),
-      );
-      if (studentName) {
-        const studentLast3 =
-          cleanIdentityLast3(selectedStudent?.idNumberLast3) ||
-          cleanIdentityLast3(selectedStudent?.phone).slice(-3);
-        const legacySnapshot = await withReadDiagnostics(
-          "reservations",
-          context,
-          db
-            .collection("reservations")
-            .where("studentName", "==", studentName)
-            .limit(50)
-            .get(),
-          "reservations.where(studentName == name) legacy",
-        );
-        legacySnapshot.docs.forEach((doc) => {
-          if (legacyReservationIds.has(doc.id)) return;
-          const data = doc.data();
-          if (
-            studentLast3 &&
-            normalizeName(data.studentName) === normalizeName(studentName) &&
-            cleanIdentityLast3(data.idNumberLast3 ?? data.phoneLastThree) ===
-              studentLast3
-          ) {
-            legacyReservationIds.add(doc.id);
-            reservations.push({ id: doc.id, ...data } as Reservation);
-          }
-        });
-      }
 
       const offeringIds = uniqueNonEmpty([
         ...enrollments.flatMap((item) => [
@@ -3339,6 +3307,229 @@ export async function getStudentHistoryPageData(
     console.warn("[DATA_SOURCE] ⚠️ Firestore student history page read failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
     return getStudentHistoryPageData({ ...input, requestId: undefined });
   }
+}
+
+export type StudentProfilePageData = {
+  student: Student | null;
+  enrollments: Enrollment[];
+  reservations: Reservation[];
+  courseOfferingById: Record<string, CourseOffering>;
+  courseById: Record<string, Course>;
+  importBatches: ImportBatch[];
+  queryShape: string;
+};
+
+export async function getStudentProfilePageData(
+  input: BookingDataReadOptions & { studentId: string },
+): Promise<StudentProfilePageData> {
+  const studentId = String(input.studentId ?? "").trim();
+  const db = getFirestoreDb();
+
+  if (!db) {
+    const data = readBookingData();
+    const student = data.students.find((item) => item.id === studentId) ?? null;
+    const enrollments = student
+      ? data.enrollments.filter((item) => item.studentId === student.id)
+      : [];
+    const studentName = String(student?.name ?? "").trim();
+    const studentLast3 =
+      cleanIdentityLast3(student?.idNumberLast3) ||
+      cleanIdentityLast3(student?.phone).slice(-3);
+    const reservations = student
+      ? data.reservations.filter(
+          (item) =>
+            item.studentId === student.id ||
+            (studentLast3 &&
+              normalizeName(item.studentName) === normalizeName(studentName) &&
+              cleanIdentityLast3(item.idNumberLast3 ?? item.phoneLastThree) ===
+                studentLast3),
+        )
+      : [];
+    return {
+      student,
+      enrollments,
+      reservations,
+      courseOfferingById: normalizeHistoryMetadataById<CourseOffering>(
+        data.courseOfferings.map((item) => ({
+          id: item.id,
+          exists: true,
+          data: () => item,
+        })),
+      ),
+      courseById: normalizeHistoryMetadataById<Course>(
+        data.courses.map((item) => ({
+          id: item.id,
+          exists: true,
+          data: () => item,
+        })),
+      ),
+      importBatches: data.importBatches ?? [],
+      queryShape: student
+        ? `json.studentProfile(studentId:${student.id})`
+        : "json.studentProfile(not found)",
+    };
+  }
+
+  try {
+    const context = createReadContext({
+      source: input.source ?? "getStudentProfilePageData",
+      route: input.route,
+      requestId: input.requestId,
+    });
+
+    const studentDoc = await withDocumentReadDiagnostics(
+      "students",
+      context,
+      db.collection("students").doc(studentId).get(),
+      "students.doc(studentId)",
+    );
+    const student = studentDoc.exists
+      ? normalizeFirestoreStudent(
+          studentDoc.id,
+          studentDoc.data() as FirestoreStudentDocument,
+        )
+      : null;
+    const studentName = String(student?.name ?? "").trim();
+    const studentLast3 =
+      cleanIdentityLast3(student?.idNumberLast3) ||
+      cleanIdentityLast3(student?.phone).slice(-3);
+
+    let enrollments: Enrollment[] = [];
+    let reservations: Reservation[] = [];
+    let courseOfferingById: Record<string, CourseOffering> = {};
+    let courseById: Record<string, Course> = {};
+
+    if (student) {
+      const enrollmentSnapshot = await withReadDiagnostics(
+        "enrollments",
+        context,
+        db
+          .collection("enrollments")
+          .where("studentId", "==", student.id)
+          .get(),
+        "enrollments.where(studentId == sid)",
+      );
+      enrollments = enrollmentSnapshot.docs.map(
+        (doc) => ({ id: doc.id, ...doc.data() }) as Enrollment,
+      );
+      reservations = await fetchStudentReservationsIdentitySafe(
+        db,
+        context,
+        student.id,
+        studentName,
+        studentLast3,
+      );
+
+      const offeringIds = uniqueNonEmpty(
+        enrollments.flatMap((item) => [
+          item.offeringId,
+          item.courseOfferingId,
+        ]),
+      );
+      const courseIds = uniqueNonEmpty(
+        enrollments.map((item) => item.courseId),
+      );
+
+      const [offeringDocs, courseDocs] = await Promise.all([
+        readDocumentsByIds(
+          db,
+          "courseOfferings",
+          offeringIds,
+          context,
+          "studentProfile.courseOfferings",
+        ),
+        readDocumentsByIds(
+          db,
+          "courses",
+          courseIds,
+          context,
+          "studentProfile.courses",
+        ),
+      ]);
+      courseOfferingById =
+        normalizeHistoryMetadataById<CourseOffering>(offeringDocs);
+      courseById = normalizeHistoryMetadataById<Course>(courseDocs);
+      Object.keys(courseById).forEach((courseId) => {
+        const course = courseById[courseId];
+        courseById[courseId] = {
+          ...course,
+          displayTitle:
+            course.displayTitle ??
+            `${course.title}｜${course.termLabel ?? ""}`.replace(/｜$/, ""),
+        };
+      });
+    }
+
+    return {
+      student,
+      enrollments,
+      reservations,
+      courseOfferingById,
+      courseById,
+      importBatches: [],
+      queryShape: student
+        ? `studentProfile: students.doc(studentId) -> enrollments.where(studentId == sid) + reservations.where(studentId == sid)${studentName ? " + reservations.where(studentName == name) legacy" : ""} -> courseOfferings/courses.getAll(ids)`
+        : "studentProfile: students.doc(studentId) (not found)",
+    };
+  } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError(
+        "Student profile page read failed.",
+        error,
+      );
+    }
+    console.warn(
+      "[DATA_SOURCE] ⚠️ Firestore student profile page read failed, falling back to local JSON. Error: " +
+        (error instanceof Error ? error.message : String(error)),
+    );
+    return getStudentProfilePageData({ ...input, requestId: undefined });
+  }
+}
+
+async function fetchStudentReservationsIdentitySafe(
+  db: NonNullable<ReturnType<typeof getFirestoreDb>>,
+  context: FirestoreReadContext,
+  studentId: string,
+  studentName: string,
+  studentLast3: string,
+): Promise<Reservation[]> {
+  const reservationSnapshot = await withReadDiagnostics(
+    "reservations",
+    context,
+    db.collection("reservations").where("studentId", "==", studentId).get(),
+    "reservations.where(studentId == sid)",
+  );
+  const reservations = reservationSnapshot.docs.map(
+    (doc) => ({ id: doc.id, ...doc.data() }) as Reservation,
+  );
+
+  const legacyReservationIds = new Set(reservations.map((item) => item.id));
+  if (studentName && studentLast3) {
+    const legacySnapshot = await withReadDiagnostics(
+      "reservations",
+      context,
+      db
+        .collection("reservations")
+        .where("studentName", "==", studentName)
+        .limit(50)
+        .get(),
+      "reservations.where(studentName == name) legacy",
+    );
+    legacySnapshot.docs.forEach((doc) => {
+      if (legacyReservationIds.has(doc.id)) return;
+      const data = doc.data();
+      if (
+        normalizeName(data.studentName) === normalizeName(studentName) &&
+        cleanIdentityLast3(data.idNumberLast3 ?? data.phoneLastThree) ===
+          studentLast3
+      ) {
+        legacyReservationIds.add(doc.id);
+        reservations.push({ id: doc.id, ...data } as Reservation);
+      }
+    });
+  }
+
+  return reservations;
 }
 
 export async function findReservationsByStudent(studentName: string, phoneLastThree: string): Promise<Reservation[]> {

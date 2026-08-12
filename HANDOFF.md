@@ -34,6 +34,10 @@ related:
 
 ## 最近處理
 
+- 2026-08-12 Firestore 讀取優化 Preview 線 Phase 1E / 1F 實作：
+  - **Phase 1E（已整合進 preview）**：`/admin/students?mode=history` 學員歷程改為 narrow loader（`getStudentHistoryPageData`），以 `students.doc(studentId)` + `where(studentId == sid)` 查 enrollments / reservations / attendanceRecords / studentCourseRecords，並以 bounded `reservations.where(studentName == name).limit(50)` 補 legacy 資料（需通過完整姓名 + 末三碼 identity-safe 驗證）。guard：`node tools/check-phase-1e-student-history.mjs`。
+  - **Phase 1F（實作完成 + 靜態驗證通過，Preview Firestore 驗證 pending）**：`/admin/students/[studentId]` 學員詳細頁改為 narrow loader（`getStudentProfilePageData`），不再走 `getBookingData()` 完整資料流；學生單筆讀取、enrollments / reservations narrow queries、metadata 用 `readDocumentsByIds` batch 讀 courseOfferings / courses，legacy reservations 統一 reuse Phase 1E 的 identity-safe helper（`fetchStudentReservationsIdentitySafe`），頁面輸出與原 UI 完全一致。guard：`node tools/check-phase-1f-student-profile.mjs`。
+  - **靜態驗證已通過**：`node tools/check-phase-1e-student-history.mjs`、`node tools/check-phase-1f-student-profile.mjs`、`npm.cmd run lint`、`npx.cmd tsc --noEmit` 與 `npx.cmd next build --webpack` 均通過。`next build`（Turbopack 標準建置）因本 repo 的 `node_modules` 是 junction 指向外部目錄而失敗，屬環境問題（`BLOCKED_BY_PREEXISTING_NODE_MODULES_JUNCTION`），`--webpack` 可正常完成；production-like 建置待 Vercel Preview 驗證。
 - 2026-08-12 完成 Firestore 讀取優化 Preview 線 Phase 1A / 1C / 1D 串接：
   - **Authoritative preview branch**：`firestore-diagnostics-preview`
   - **目前 Preview branch HEAD**：`95261e21bba17f4f6c7214121c53fb38b9dcbb09`
@@ -111,14 +115,14 @@ related:
    - `pageCursor` 下一頁應使用 cursor pagination，不使用 offset。
 2. 用 `BOOKING_FIRESTORE_READ_DEBUG=true` 的 Preview/測試環境觀察 Firestore diagnostics log；不要用 Production 反覆測。
 3. 若 Preview 驗收通過，再決定是否把 `firestore-diagnostics-preview` 合併進正式流程；不要直接碰 `main` 或 Production。
-4. 下一個 hot path 候選是 Phase 1E，但目前不要開始：`/admin/students/[studentId]`、`/admin/students?mode=eligibility`、`/admin/students?mode=instructors` 與部分 server actions 仍可能走完整資料讀取。
+4. 下一個 hot path 候選是 Phase 1E 之後的後續（Phase 1E / 1F 已處理 `/admin/students?mode=history` 與 `/admin/students/[studentId]`）：`/admin/students?mode=eligibility`、`/admin/students?mode=instructors` 與部分 server actions 仍可能走完整資料讀取。
 5. 核對 9 筆 `needsReview` 名冊資料。
 6. 完成 Vercel GitHub integration 自動部署；目前本次 Preview 是用 Vercel CLI 手動建立。
 
 ## 風險與注意
 
 - 接手本輪 Firestore optimization 時，優先從 `firestore-diagnostics-preview` 或 `codex/phase-1d-student-directory` 讀，不要用原始 dirty workspace 當 source of truth。
-- Phase 1D 僅處理 `/admin/students` default/search/class/pagination；沒有重寫 student detail、eligibility、instructor mode，也沒有開始 Phase 1E。
+- Phase 1D 僅處理 `/admin/students` default/search/class/pagination；Phase 1E 處理 `mode=history`，Phase 1F 處理 `[studentId]` 詳細頁；eligibility、instructor mode 仍未處理。
 - Phase 1D 搜尋語意有刻意收斂：Firestore native 不支援 contains search，因此姓名/電話/會員編號/身分末碼走 exact match，不下載全體學生做 fuzzy filter。
 - `tools/check-phase-1d-student-directory.mjs` 是 Phase 1D scoped guard，用來防止 `/admin/students` 回歸到 `students.get()` 或 `getBookingData()`。
 - 目前 Firestore 內的學員資料均為模擬/測試資料，已直接實作新版學員完整度規則；正式上線生產環境前，必須清理所有測試資料並重新確認正式資料導入流程。

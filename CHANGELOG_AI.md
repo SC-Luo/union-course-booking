@@ -38,11 +38,18 @@ related:
 - **新增 scoped guard**：`tools/check-phase-1d-student-directory.mjs`，防止 `/admin/students` 回歸到 `students.get()`、`getBookingData()`、client-side pagination/search 或 sequential N+1。
 - **已驗證**：`npm.cmd run lint`、`npm.cmd run build`、`node tools/check-phase-1d-student-directory.mjs` 均通過。
 
+### Phase 1F變更
+
+- **`/admin/students/[studentId]` 詳細頁改為 narrow loader**：新增 `getStudentProfilePageData()`，不再走 `getBookingData()`。Firestore 路徑為 `students.doc(studentId)` + `enrollments.where(studentId == sid)` + identity-safe reservations + `readDocumentsByIds` batch 讀 courseOfferings / courses；JSON fallback 維持同一輸出 shape。
+- **統一 reuse identity-safe reservations 邏輯**：把 Phase 1E 在 `getStudentHistoryPageData` 內的 canonical + legacy reservation compatibility（bounded `studentName` query + `limit(50)` + 姓名/末三碼驗證 + doc id dedupe）抽為共用 helper `fetchStudentReservationsIdentitySafe()`，Phase 1F 的 profile loader 與 Phase 1E 的 history loader 共用同一份。
+- **新增 scoped guard**：`tools/check-phase-1f-student-profile.mjs`，防止 profile 頁回歸到 `getBookingData()`、full-read collections、per-enrollment N+1 metadata 讀取或移除 identity-safe legacy 補讀。
+- **狀態**：實作完成 + 靜態驗證通過（guards / lint / tsc / `next build --webpack`）。Preview Firestore runtime 驗證 pending；標準 `next build`（Turbopack）在本機因 `node_modules` junction 指向外部目錄而無法執行（環境問題），production-like 建置待 Vercel Preview 驗證。
+
 ### 後續注意
 
 - Phase 1D 僅處理 `/admin/students` directory path。不要把它誤解成完整 student system rewrite。
 - 搜尋 UX 已從原本 JS contains filter 收斂為 Firestore exact match；若業務需要模糊搜尋，應另開 Phase 設計搜尋索引，不要 fallback 讀完整 students。
-- Remaining hot paths：`/admin/students/[studentId]` 仍走 `getBookingData()`；`/admin/students?mode=eligibility` 仍有 `students.get()`；`/admin/students?mode=instructors` 仍走完整資料流；部分 server actions 也待 Phase 1E 或後續階段審查。
+- Remaining hot paths：`/admin/students?mode=eligibility` 仍有 `students.get()`；`/admin/students?mode=instructors` 仍走完整資料流；部分 server actions 也待後續階段審查（Phase 1E 已處理 `mode=history`，Phase 1F 已處理 `/admin/students/[studentId]`）。
 - 接手時以 `firestore-diagnostics-preview` 或 `codex/phase-1d-student-directory` 為 source of truth；不要用原始 dirty workspace。
 
 ## 2026-07-06
