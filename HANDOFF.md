@@ -9,7 +9,7 @@ tags:
   - project-memory
   - codex
 created: 2026-05-27
-updated: 2026-06-08
+updated: 2026-08-12
 status: active
 summary: 本 repo 的 AI 接手短摘要，記錄目前健康狀態、最新 UI 整理進度、下一步與風險。
 related:
@@ -34,6 +34,17 @@ related:
 
 ## 最近處理
 
+- 2026-08-12 完成 Firestore 讀取優化 Preview 線 Phase 1A / 1C / 1D 串接：
+  - **Authoritative preview branch**：`firestore-diagnostics-preview`
+  - **目前 Preview branch HEAD**：`95261e21bba17f4f6c7214121c53fb38b9dcbb09`
+  - **已發布 Preview 測試網址**：`https://union-course-booking-ohdc6rtfo-sc-luos-projects.vercel.app`
+  - **commit chain**：
+    - Phase 1A：`65c057f2de624b13080a87a98c7aa2bad2ddcc1d`，`/admin` 首頁改為窄讀取，約 1471 reads 降到約 88 reads。
+    - Phase 1C：`8ec3cf79eba7b976d8c902eb960e6db91ba643e0`，`/admin/sessions/[sessionId]/reservations` 改用單堂 narrow loader。
+    - Phase 1D：`95261e21bba17f4f6c7214121c53fb38b9dcbb09`，`/admin/students` 學員名冊改為 bounded query architecture。
+  - **Phase 1D 重點**：`/admin/students` default 不再 `students.get()` 全讀 1428 位學生；新增 `getStudentDirectoryPageData()`，支援 default pagination、exact search、class roster batch reads 與 count aggregation。
+  - **Preview branch 已 fast-forward**：`origin/firestore-diagnostics-preview` 已從 Phase 1A fast-forward 到 Phase 1D，沒有 force push、沒有碰 `main`、沒有部署 Production。
+  - **本輪驗證**：`npm.cmd run lint`、`npm.cmd run build`、`node tools/check-phase-1d-student-directory.mjs` 均通過；Vercel Preview deployment 狀態 Ready，HTTP 200。
 - 2026-07-06 建立 Firestore 診斷與 schema 檢查工具：
   - **診斷模式**：支援 `STRICT_FIRESTORE=true` 變數以在開發中停用 JSON 備援，便於線上除錯。
   - **Schema 檢查工具**：新增 [`tools/check-firestore-schema.mjs`](file:///c:/Users/User/codex-projects/union-course-booking/tools/check-firestore-schema.mjs) 只讀欄位統計工具。
@@ -93,15 +104,23 @@ related:
 
 ## 下一步
 
-1. 先驗收授課工作台 `/teaching` 與 `/teaching/sessions/[sessionId]`：確認桌機入口、手機版摘要 / 點名 / 紀錄分頁、課堂設定 Modal、課堂紀錄 Modal 與點名流程是否順。
-2. 驗收秘書處後台 `/admin`：確認首頁定位是否像行政中控台，並檢查左側導覽與角色切換是否還需要重新分組。
-3. 回頭驗收年度課程頁 `/admin/course-offerings`：確認課程類別 + 狀態兩階段篩選、管理 Modal、狀態切換、封存與恢復流程是否符合工作流程。
-4. 驗收課堂日誌總覽 `/admin/course-sessions`：確認已封存課程不再進入排課流程，日常管理課程仍可正常新增與排課。
+1. 先做 Preview Verification：打開 `https://union-course-booking-ohdc6rtfo-sc-luos-projects.vercel.app`，登入後台並測 `/admin/students`：
+   - default 進入名冊不應隨學生總數線性讀取，預期只讀 count aggregation + 約 30 筆 student docs。
+   - `?q=...` 搜尋應走 exact query，不應 full-read students。
+   - `?mode=class` 班級名冊應先查 enrollments，再 batch get 對應 students。
+   - `pageCursor` 下一頁應使用 cursor pagination，不使用 offset。
+2. 用 `BOOKING_FIRESTORE_READ_DEBUG=true` 的 Preview/測試環境觀察 Firestore diagnostics log；不要用 Production 反覆測。
+3. 若 Preview 驗收通過，再決定是否把 `firestore-diagnostics-preview` 合併進正式流程；不要直接碰 `main` 或 Production。
+4. 下一個 hot path 候選是 Phase 1E，但目前不要開始：`/admin/students/[studentId]`、`/admin/students?mode=eligibility`、`/admin/students?mode=instructors` 與部分 server actions 仍可能走完整資料讀取。
 5. 核對 9 筆 `needsReview` 名冊資料。
-6. 完成 Vercel GitHub integration 與部署驗收。
+6. 完成 Vercel GitHub integration 自動部署；目前本次 Preview 是用 Vercel CLI 手動建立。
 
 ## 風險與注意
 
+- 接手本輪 Firestore optimization 時，優先從 `firestore-diagnostics-preview` 或 `codex/phase-1d-student-directory` 讀，不要用原始 dirty workspace 當 source of truth。
+- Phase 1D 僅處理 `/admin/students` default/search/class/pagination；沒有重寫 student detail、eligibility、instructor mode，也沒有開始 Phase 1E。
+- Phase 1D 搜尋語意有刻意收斂：Firestore native 不支援 contains search，因此姓名/電話/會員編號/身分末碼走 exact match，不下載全體學生做 fuzzy filter。
+- `tools/check-phase-1d-student-directory.mjs` 是 Phase 1D scoped guard，用來防止 `/admin/students` 回歸到 `students.get()` 或 `getBookingData()`。
 - 目前 Firestore 內的學員資料均為模擬/測試資料，已直接實作新版學員完整度規則；正式上線生產環境前，必須清理所有測試資料並重新確認正式資料導入流程。
 - 工作區仍有大量未提交變更與未追蹤檔案；接手前務必先看 `git status --short`。
 - 目前 `data/booking-data.json` 有在地資料變更；暫時不要假設這是可直接提交的測試資料。

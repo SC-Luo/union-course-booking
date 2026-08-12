@@ -8,7 +8,7 @@ tags:
   - tasks
   - project-memory
 created: 2026-05-27
-updated: 2026-06-08
+updated: 2026-08-12
 status: active
 summary: 目前任務、已完成事項、待確認事項與不處理範圍，包含 2026-06-08 UI / UX 架構整理後的接續驗收項目。
 related:
@@ -22,6 +22,12 @@ related:
 
 ## 下一步
 
+- [ ] Preview Verification：使用 `https://union-course-booking-ohdc6rtfo-sc-luos-projects.vercel.app` 驗收 `firestore-diagnostics-preview`。
+- [ ] Preview 驗收 `/admin/students` default：進入學員名冊時不應讀完整 students collection，預期固定成本為 count aggregation + 約 30 筆 student docs。
+- [ ] Preview 驗收 `/admin/students?q=...` exact search：確認會員編號、完整姓名、電話、身分末碼搜尋不會 full-read students；若需要模糊搜尋，另開設計，不在 Phase 1D 內補。
+- [ ] Preview 驗收 `/admin/students?mode=class`：確認班級名冊由 enrollments 取得 studentIds，再 batch get 對應 students，避免 sequential N+1 與 full students fallback。
+- [ ] Preview 驗收 `/admin/students?pageCursor=...`：確認使用 cursor pagination，不使用 offset 或 client-side pagination。
+- [ ] Phase 1E candidate 評估，不要未經確認直接開始：`/admin/students/[studentId]`、`/admin/students?mode=eligibility`、`/admin/students?mode=instructors`、相關 server actions。
 - [ ] 驗收授課工作台 `/teaching` 與 `/teaching/sessions/[sessionId]`：桌機入口、手機版摘要 / 點名 / 紀錄分頁、課堂設定 Modal、課堂紀錄 Modal、點名流程。
 - [ ] 驗收秘書處後台 `/admin`：首頁定位、角色切換、左側導覽分組是否需要再收斂。
 - [ ] 驗收年度課程頁 `/admin/course-offerings`：課程類別 + 課程狀態兩階段篩選、狀態切換、封存與恢復流程、管理 Modal。
@@ -44,6 +50,10 @@ related:
 
 ## 已完成
 
+- [x] 2026-08-12 Firestore read optimization Phase 1A：`/admin` 首頁改為窄讀取，commit `65c057f2de624b13080a87a98c7aa2bad2ddcc1d`。
+- [x] 2026-08-12 Firestore read optimization Phase 1C：`/admin/sessions/[sessionId]/reservations` 建立單堂 narrow loader，commit `8ec3cf79eba7b976d8c902eb960e6db91ba643e0`。
+- [x] 2026-08-12 Firestore read optimization Phase 1D：`/admin/students` 改為 bounded query architecture，commit `95261e21bba17f4f6c7214121c53fb38b9dcbb09`。
+- [x] 2026-08-12 已將 `origin/firestore-diagnostics-preview` fast-forward 到 Phase 1D HEAD，並用 Vercel CLI 建立 Preview deployment：`https://union-course-booking-ohdc6rtfo-sc-luos-projects.vercel.app`。
 - [x] 2026-07-06 建立 Firestore 診斷與 schema 檢查工具（新增 `STRICT_FIRESTORE` 模式、唯讀 schema 檢查工具，保留測試用驗收腳本並加強防呆，下一步仍需資料 normalizer 與初始資料導入評估）。
 - [x] 2026-06-30 建立正式上線後開發流程指南與資料庫保護機制（安全分流與鐵則限制、三層確認鎖及節流限速寫入、自動快照備份防護、以及 git 排除真實個資 JSON 追蹤）。
 - [x] 2026-06-29 將前台學員預約與預約查詢改回「姓名 + 身分證後三碼」（支援預約資格多重過濾與 mismatch 理由回顯，取消預約資格加鎖）。
@@ -85,6 +95,9 @@ related:
 
 ## 待確認
 
+- [ ] Preview deployment 是否在後台登入後能完整測 `/admin/students` 三種 query path。
+- [ ] Preview / Vercel 環境是否已設定 `BOOKING_FIRESTORE_READ_DEBUG=true` 以便看 read diagnostics；不要在 Production 開啟或反覆壓測。
+- [ ] Vercel GitHub integration 是否會自動部署 `firestore-diagnostics-preview`；本次 Preview URL 是手動 Vercel CLI deployment。
 - [ ] 年度課程頁狀態切換、封存與恢復流程是否完全符合工作流程。
 - [ ] 年度課程頁課程類別數量與狀態數量是否正確。
 - [ ] 授課工作台手機版摘要 / 點名 / 紀錄分頁是否順手，是否仍有重複入口。

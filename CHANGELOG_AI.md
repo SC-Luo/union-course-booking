@@ -8,7 +8,7 @@ tags:
   - ai-changelog
   - project-memory
 created: 2026-05-27
-updated: 2026-06-08
+updated: 2026-08-12
 status: active
 summary: 影響後續 AI 接手、產品方向、技術架構、資料結構或開發流程的重要變更。
 related:
@@ -20,6 +20,30 @@ related:
 # CHANGELOG_AI
 
 本文件只記錄會影響後續 AI 接手、產品方向、技術架構、資料結構或開發流程的重要變更。不要貼完整聊天紀錄，也不要記錄每一行小改動。
+
+## 2026-08-12
+
+### Firestore read optimization Preview 線
+
+- **Preview branch 已串起 Phase 1A / 1C / 1D**：`origin/firestore-diagnostics-preview` 目前 HEAD 是 `95261e21bba17f4f6c7214121c53fb38b9dcbb09`。完整 chain：
+  - Phase 1A：`65c057f2de624b13080a87a98c7aa2bad2ddcc1d`
+  - Phase 1C：`8ec3cf79eba7b976d8c902eb960e6db91ba643e0`
+  - Phase 1D：`95261e21bba17f4f6c7214121c53fb38b9dcbb09`
+- **已建立可測 Preview deployment**：`https://union-course-booking-ohdc6rtfo-sc-luos-projects.vercel.app`，Vercel 狀態 Ready，HTTP 200。本次是 Vercel CLI 手動 Preview deployment，尚未代表 GitHub integration 已自動完成。
+- **Phase 1D `/admin/students` 資料流變更**：`/admin/students` default 不再進頁就 `students.get()` 全讀所有學生；新增 `getStudentDirectoryPageData()`，提供 route-specific bounded query：
+  - default browse：`students.count()` + `orderBy(__name__).limit(pageSize + 1)`，預設約 30 筆 student docs。
+  - exact search：依輸入型態選 1-5 個欄位做 `where(field, "==", q).limit(30)`，不做 contains full scan。
+  - class roster：查相關 `enrollments` 後 dedupe `studentIds`，再用 `getAll` batch 讀 students。
+  - pagination：使用 base64url cursor `{ lastId }` + `startAfter(lastId)`，不使用 offset。
+- **新增 scoped guard**：`tools/check-phase-1d-student-directory.mjs`，防止 `/admin/students` 回歸到 `students.get()`、`getBookingData()`、client-side pagination/search 或 sequential N+1。
+- **已驗證**：`npm.cmd run lint`、`npm.cmd run build`、`node tools/check-phase-1d-student-directory.mjs` 均通過。
+
+### 後續注意
+
+- Phase 1D 僅處理 `/admin/students` directory path。不要把它誤解成完整 student system rewrite。
+- 搜尋 UX 已從原本 JS contains filter 收斂為 Firestore exact match；若業務需要模糊搜尋，應另開 Phase 設計搜尋索引，不要 fallback 讀完整 students。
+- Remaining hot paths：`/admin/students/[studentId]` 仍走 `getBookingData()`；`/admin/students?mode=eligibility` 仍有 `students.get()`；`/admin/students?mode=instructors` 仍走完整資料流；部分 server actions 也待 Phase 1E 或後續階段審查。
+- 接手時以 `firestore-diagnostics-preview` 或 `codex/phase-1d-student-directory` 為 source of truth；不要用原始 dirty workspace。
 
 ## 2026-07-06
 
