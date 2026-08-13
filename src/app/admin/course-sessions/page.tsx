@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { bulkCreateSessionsAction, saveSessionAction } from "@/app/admin/actions";
 import { AdminShell } from "@/components/page-shell";
-import { getBookingData } from "@/lib/booking-repository";
+import { getAdminCourseSessionsPageData } from "@/lib/booking-repository";
 
 export const dynamic = "force-dynamic";
 
@@ -370,7 +370,9 @@ function GlobalCalendar({ sessionRows, monthParam, reservations }: { sessionRows
 
 export default async function CourseSessionsPage({ searchParams }: PageProps) {
   const { saved, error, month, offeringId, categoryId, schedule, bulkUpdated } = await searchParams;
-  const { categories, courses, courseOfferings, courseSeries, instructors = [], reservations = [] } = await getBookingData();
+  const { categories, courses, courseOfferings, courseSeries, instructors = [], reservations = [] } = await getAdminCourseSessionsPageData({
+    route: "/admin/course-sessions",
+  });
   const allCourses = courses as any[];
   const offerings = courseOfferings as any[];
   const seriesList = courseSeries as any[];

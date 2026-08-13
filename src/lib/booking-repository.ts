@@ -73,6 +73,16 @@ export type AdminDashboardData = Pick<
   statusCounts: DataSourceStatusCounts;
 };
 
+export type AdminCourseSessionsPageData = Pick<
+  BookingData,
+  | "categories"
+  | "courses"
+  | "courseSeries"
+  | "courseOfferings"
+  | "instructors"
+  | "reservations"
+>;
+
 export type AdminSessionReservationPageData = Pick<
   BookingData,
   | "categories"
@@ -1080,6 +1090,106 @@ export async function getAdminDashboardData(
         reservations: data.reservations.length,
         enrollments: data.enrollments.length,
       },
+    };
+  }
+}
+
+export async function getAdminCourseSessionsPageData(
+  options?: BookingDataReadOptions,
+): Promise<AdminCourseSessionsPageData> {
+  const db = getFirestoreDb();
+
+  if (!db) {
+    const data = readBookingData();
+    return {
+      categories: data.categories,
+      courses: data.courses,
+      courseSeries: data.courseSeries,
+      courseOfferings: data.courseOfferings,
+      instructors: data.instructors,
+      reservations: data.reservations,
+    };
+  }
+
+  try {
+    const context = createReadContext({
+      source: options?.source ?? "getAdminCourseSessionsPageData",
+      route: options?.route ?? "/admin/course-sessions",
+      requestId: options?.requestId,
+    });
+    const staticCollections = await getStaticBookingCollections();
+    const normalizedStatic = normalizeBookingData({
+      ...staticCollections,
+      reservations: [],
+      students: [],
+    });
+
+    const sessionIds = uniqueNonEmpty(
+      normalizedStatic.courses.flatMap((course) =>
+        (course.sessions ?? []).map((session) => session.id),
+      ),
+    );
+
+    const reservationSnapshots =
+      sessionIds.length > 0
+        ? await Promise.all(
+            chunkList(sessionIds, 30).map((chunk) =>
+              withReadDiagnostics(
+                "reservations",
+                context,
+                db
+                  .collection("reservations")
+                  .where("sessionId", "in", chunk)
+                  .where("status", "==", "booked")
+                  .get(),
+                `where(sessionId in ${chunk.length} sessionIds && status == booked)`,
+              ),
+            ),
+          )
+        : [];
+
+    const reservations = reservationSnapshots.flatMap((snapshot) =>
+      snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Reservation),
+    );
+
+    const normalized = normalizeBookingData({
+      categories: normalizedStatic.categories,
+      courses: normalizedStatic.courses,
+      courseSeries: normalizedStatic.courseSeries,
+      courseOfferings: normalizedStatic.courseOfferings,
+      courseSessions: normalizedStatic.courseSessions,
+      instructors: normalizedStatic.instructors,
+      reservations,
+      students: [],
+    });
+
+    return {
+      categories: normalized.categories,
+      courses: normalized.courses,
+      courseSeries: normalized.courseSeries,
+      courseOfferings: normalized.courseOfferings,
+      instructors: normalized.instructors,
+      reservations: normalized.reservations,
+    };
+  } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError(
+        "Course sessions page data read failed.",
+        error,
+      );
+    }
+    console.warn(
+      "[DATA_SOURCE] Firestore course sessions read failed, falling back to local JSON. Error: " +
+        (error instanceof Error ? error.message : String(error)),
+    );
+    const data = readBookingData();
+    return {
+      categories: data.categories,
+      courses: data.courses,
+      courseSeries: data.courseSeries,
+      courseOfferings: data.courseOfferings,
+      instructors: data.instructors,
+      reservations: data.reservations,
     };
   }
 }
