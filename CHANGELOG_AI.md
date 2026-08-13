@@ -8,7 +8,7 @@ tags:
   - ai-changelog
   - project-memory
 created: 2026-05-27
-updated: 2026-08-12
+updated: 2026-08-13
 status: active
 summary: 影響後續 AI 接手、產品方向、技術架構、資料結構或開發流程的重要變更。
 related:
@@ -25,10 +25,13 @@ related:
 
 ### Firestore read optimization Preview 線
 
-- **Preview branch 已串起 Phase 1A / 1C / 1D**：`origin/firestore-diagnostics-preview` 目前 HEAD 是 `95261e21bba17f4f6c7214121c53fb38b9dcbb09`。完整 chain：
+- **Preview branch 已串起 Phase 1A / 1C / 1D / 1E / 1F / 1G**：`origin/firestore-diagnostics-preview` 目前 HEAD 是 `7b931f9a797de65fc229df290f58fdef86f799b0`。完整 chain：
   - Phase 1A：`65c057f2de624b13080a87a98c7aa2bad2ddcc1d`
   - Phase 1C：`8ec3cf79eba7b976d8c902eb960e6db91ba643e0`
   - Phase 1D：`95261e21bba17f4f6c7214121c53fb38b9dcbb09`
+  - Phase 1E：`3b43920`（`fix(firestore): narrow single student history reads`）
+  - Phase 1F：`207e58c880ebebf427c0c3e679c8996e8703841f`（`fix(firestore): narrow single student profile reads`）
+  - Phase 1G：`7b931f9a797de65fc229df290f58fdef86f799b0`（`fix(firestore): narrow course sessions reads`）
 - **已建立可測 Preview deployment**：`https://union-course-booking-ohdc6rtfo-sc-luos-projects.vercel.app`，Vercel 狀態 Ready，HTTP 200。本次是 Vercel CLI 手動 Preview deployment，尚未代表 GitHub integration 已自動完成。
 - **Phase 1D `/admin/students` 資料流變更**：`/admin/students` default 不再進頁就 `students.get()` 全讀所有學生；新增 `getStudentDirectoryPageData()`，提供 route-specific bounded query：
   - default browse：`students.count()` + `orderBy(__name__).limit(pageSize + 1)`，預設約 30 筆 student docs。
@@ -43,14 +46,26 @@ related:
 - **`/admin/students/[studentId]` 詳細頁改為 narrow loader**：新增 `getStudentProfilePageData()`，不再走 `getBookingData()`。Firestore 路徑為 `students.doc(studentId)` + `enrollments.where(studentId == sid)` + identity-safe reservations + `readDocumentsByIds` batch 讀 courseOfferings / courses；JSON fallback 維持同一輸出 shape。
 - **統一 reuse identity-safe reservations 邏輯**：把 Phase 1E 在 `getStudentHistoryPageData` 內的 canonical + legacy reservation compatibility（bounded `studentName` query + `limit(50)` + 姓名/末三碼驗證 + doc id dedupe）抽為共用 helper `fetchStudentReservationsIdentitySafe()`，Phase 1F 的 profile loader 與 Phase 1E 的 history loader 共用同一份。
 - **新增 scoped guard**：`tools/check-phase-1f-student-profile.mjs`，防止 profile 頁回歸到 `getBookingData()`、full-read collections、per-enrollment N+1 metadata 讀取或移除 identity-safe legacy 補讀。
-- **狀態**：實作完成 + 靜態驗證通過（guards / lint / tsc / `next build --webpack`）。Preview Firestore runtime 驗證 pending；標準 `next build`（Turbopack）在本機因 `node_modules` junction 指向外部目錄而無法執行（環境問題），production-like 建置待 Vercel Preview 驗證。
+- **狀態**：實作完成 + 靜態驗證通過 + Vercel Preview runtime 驗證通過。標準 `next build`（Turbopack）在本機因 `node_modules` junction 指向外部目錄而無法執行（環境問題），production-like 建置以 Vercel Preview 驗證為準。
+
+### Phase 1G變更
+
+- **`/admin/course-sessions` 課堂日誌總覽改為 narrow loader**：新增 `getAdminCourseSessionsPageData()`，不再走 `getBookingData()`。Firestore 路徑為 `getStaticBookingCollections()`（reuse 既有 unstable_cache）+ `normalizeBookingData`（static only）→ 由 `courses[].sessions` 取 distinct sessionIds → `chunkList(sessionIds, 30)` 分批 `reservations.where(sessionId in chunk).where(status == booked)`；`sessionIds` 為空時直接回傳空 reservations。`students` / `studentCourseRecords` / `enrollments` / `attendanceRecords` 完全不讀。JSON fallback 維持同一輸出 shape。
+- **diagnostics 固定**：`source: getAdminCourseSessionsPageData`（page 不覆寫）、`route: /admin/course-sessions`、shared `requestId`；guard 新增「page 不得覆寫 source」斷言。
+- **新增 scoped guard**：`tools/check-phase-1g-course-sessions.mjs`，防止 course-sessions 頁回歸到 `getBookingData()`、full-read students/records/enrollments/attendance、`reservations.get()` 或移除 chunked bounded query。
+- **真實 Vercel Preview runtime 證據**（`/admin/course-sessions`，同一 request）：
+  - query #1：`where(sessionId in 30 sessionIds && status == booked)` docs=0
+  - query #2：`where(sessionId in 26 sessionIds && status == booked)` docs=0
+  - 同 request：`students=0`、`studentCourseRecords=0`、`enrollments=0`、`attendanceRecords=0`、`getBookingData=0`
+  - Before 約為 1400～1500+ reads / page load；After warm-cache Preview = 2 bounded queries、0 returned docs。
+- **注意**：估算式（warm = ceil(distinctSessionIds / 30) queries + B returned docs）與實測證據（2 bounded queries、docs=0）分開記錄；不要把「2 queries」描述成永遠精確等於 2 billable reads。
 
 ### 後續注意
 
 - Phase 1D 僅處理 `/admin/students` directory path。不要把它誤解成完整 student system rewrite。
 - 搜尋 UX 已從原本 JS contains filter 收斂為 Firestore exact match；若業務需要模糊搜尋，應另開 Phase 設計搜尋索引，不要 fallback 讀完整 students。
-- Remaining hot paths：`/admin/students?mode=eligibility` 仍有 `students.get()`；`/admin/students?mode=instructors` 仍走完整資料流；部分 server actions 也待後續階段審查（Phase 1E 已處理 `mode=history`，Phase 1F 已處理 `/admin/students/[studentId]`）。
-- 接手時以 `firestore-diagnostics-preview` 或 `codex/phase-1d-student-directory` 為 source of truth；不要用原始 dirty workspace。
+- Remaining hot paths：Phase 1E / 1F / 1G 已處理 `mode=history`、`[studentId]`、`/admin/course-sessions`；`/admin/students?mode=eligibility`（Phase 1H Readiness Audit 進行中）仍有 `students.get()`；`/admin/students?mode=instructors` 仍走完整資料流；部分 server actions 也待後續階段審查。
+- 接手時以 `firestore-diagnostics-preview` 或 `codex/phase-1g-course-sessions` 為 source of truth；不要用原始 dirty workspace。
 
 ## 2026-07-06
 
