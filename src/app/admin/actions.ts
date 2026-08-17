@@ -10,6 +10,7 @@ import { syncGoogleSheets } from "@/lib/google-sheets-sync";
 import {
   buildSessionDeadline,
   cancelReservationByStaff,
+  checkStudentCanBeHardDeleted,
   deleteCourseSessionsAndReservations,
   deleteSessionsByIds,
   deleteManagedDocument,
@@ -2653,53 +2654,27 @@ export async function hardDeleteStudentIdentityAction(formData: FormData) {
     redirect(appendAdminQuery(redirectTo, "error=invalid"));
   }
 
-  const data = await getBookingData();
-  const student = data.students.find((s) => s.id === studentId);
-  if (!student) {
+  const result = await checkStudentCanBeHardDeleted(studentId, {
+    source: "deleteStudent",
+    route: "/admin/students",
+  });
+  if (!result.student) {
     redirect(appendAdminQuery(redirectTo, "error=student_not_found"));
   }
 
-  // 檢查 reservations，防止手機末三碼與證件末三碼錯配
-  const studentPhoneLast3 = student.phone ? student.phone.replace(/\D/g, "").slice(-3) : "";
-  const hasReservations = data.reservations.some(
-    (r) => {
-      if (r.studentId === studentId) return true;
-      const nameMatches = r.studentName === student.name;
-      if (!nameMatches) return false;
-
-      // A. 姓名 + 手機末三碼
-      const phoneMatches = studentPhoneLast3 && r.phoneLastThree === studentPhoneLast3;
-
-      // B. 姓名 + 證件末三碼
-      const idMatches = student.idNumberLast3 && r.idNumberLast3 && r.idNumberLast3 === student.idNumberLast3;
-
-      return Boolean(phoneMatches || idMatches);
-    }
-  );
-
-  // 檢查 enrollments
-  const hasEnrollments = data.enrollments.some(
-    (e) => e.studentId === studentId
-  );
-
-  // 檢查 attendanceRecords
-  const hasAttendance = data.attendanceRecords.some(
-    (a) => a.studentId === studentId
-  );
-
-  // 檢查 studentCourseRecords
-  const hasCourseRecords = data.studentCourseRecords.some(
-    (c) => c.studentId === studentId
-  );
-
-  if (hasReservations || hasEnrollments || hasAttendance || hasCourseRecords) {
+  if (result.hasRelations) {
     redirect(appendAdminQuery(redirectTo, "error=has_relations"));
   }
 
   await deleteStudentIdentityDocument(studentId);
   revalidatePath("/");
   revalidatePath("/admin/students");
-  redirect(appendAdminQuery(redirectTo, "saved=1"));
+  redirect(
+    appendAdminQuery(
+      redirectTo,
+      `deleted=${encodeURIComponent(result.student.name)}`,
+    ),
+  );
 }
 
 export async function deleteStudentIdentityAction(formData: FormData) {

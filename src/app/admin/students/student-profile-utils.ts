@@ -11,6 +11,17 @@ export function formatDate(value?: string | null) {
   return raw;
 }
 
+export function formatDateTime(value?: string | null) {
+  const raw = text(value);
+  if (!raw) return "未紀錄時間";
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return raw;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(
+    date.getDate(),
+  )} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 export function getStudentStatus(student: Student) {
   if (student.isActive === false) {
     return {

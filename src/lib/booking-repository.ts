@@ -95,7 +95,7 @@ export type AdminSessionReservationPageData = Pick<
   | "instructors"
 >;
 
-export type StudentDirectoryMode = "browse" | "search" | "class";
+export type StudentDirectoryMode = "browse" | "search" | "class" | "recent";
 
 export type StudentDirectoryStatus = "all" | "active" | "inactive" | "review";
 
@@ -521,6 +521,8 @@ function compareStudentsForRoster(a: Student, b: Student) {
 }
 
 const STUDENT_DIRECTORY_DEFAULT_PAGE_SIZE = 30;
+
+export const STUDENT_DIRECTORY_RECENT_LIMIT = 30;
 const STUDENT_DIRECTORY_MAX_PAGE_SIZE = 50;
 const STUDENT_DIRECTORY_CLASS_ENROLLMENT_LIMIT = 100;
 const STUDENT_DIRECTORY_SEARCH_LIMIT = 30;
@@ -1435,7 +1437,14 @@ async function getClassRosterStudents(
 export async function getStudentDirectoryPageData(
   input?: StudentDirectoryPageInput,
 ): Promise<StudentDirectoryPageData> {
-  const mode = input?.mode === "class" ? "class" : input?.q?.trim() ? "search" : "browse";
+  const mode =
+    input?.mode === "class"
+      ? "class"
+      : input?.q?.trim()
+        ? "search"
+        : input?.mode === "recent"
+          ? "recent"
+          : "browse";
   const status = normalizeStudentDirectoryStatus(input?.status);
   const pageSize = clampStudentDirectoryPageSize(input?.pageSize);
   const q = String(input?.q ?? "").trim();
@@ -1475,6 +1484,17 @@ export async function getStudentDirectoryPageData(
           ),
         )
         .sort(compareStudentsForRoster);
+    } else if (mode === "recent") {
+      students = [...data.students]
+        .sort((a, b) => {
+          const aTime = String(a.createdAt ?? "");
+          const bTime = String(b.createdAt ?? "");
+          if (aTime === bTime) return 0;
+          if (!aTime) return 1;
+          if (!bTime) return -1;
+          return bTime.localeCompare(aTime);
+        })
+        .slice(0, STUDENT_DIRECTORY_RECENT_LIMIT);
     } else {
       students = data.students.sort(compareStudentsForRoster).slice(0, pageSize);
     }
@@ -1486,7 +1506,12 @@ export async function getStudentDirectoryPageData(
       status,
       q,
       pageSize,
-      queryShape: mode === "browse" ? "json.students.slice(pageSize)" : `json.${mode}`,
+      queryShape:
+        mode === "browse"
+          ? "json.students.slice(pageSize)"
+          : mode === "recent"
+            ? "json.students.sort(createdAt desc).slice(STUDENT_DIRECTORY_RECENT_LIMIT)"
+            : `json.${mode}`,
       courseOfferings,
       selectedOfferingId,
       selectedOffering,
@@ -1557,6 +1582,34 @@ export async function getStudentDirectoryPageData(
       };
     }
 
+    if (mode === "recent") {
+      const recent = await withReadDiagnostics(
+        "students",
+        context,
+        db
+          .collection("students")
+          .orderBy("createdAt", "desc")
+          .limit(STUDENT_DIRECTORY_RECENT_LIMIT)
+          .get(),
+        "orderBy(createdAt desc).limit(STUDENT_DIRECTORY_RECENT_LIMIT)",
+      );
+      return {
+        students: recent.docs.map((doc) =>
+          normalizeFirestoreStudent(doc.id, doc.data() as FirestoreStudentDocument),
+        ),
+        totalCount,
+        mode,
+        status,
+        q,
+        pageSize,
+        queryShape: "orderBy(createdAt desc).limit(STUDENT_DIRECTORY_RECENT_LIMIT)",
+        courseOfferings,
+        selectedOfferingId,
+        selectedOffering,
+        searchFields: [...STUDENT_DIRECTORY_SEARCH_FIELDS],
+      };
+    }
+
     const page = await getStudentPage(db, {
       context,
       status,
@@ -1610,6 +1663,189 @@ export async function getStudentDirectoryData(
     pageSize: STUDENT_DIRECTORY_DEFAULT_PAGE_SIZE,
   });
   return { students: pageData.students };
+}
+
+export type HardDeleteStudentCheckResult = {
+  student: Student | null;
+  hasRelations: boolean;
+  queryShape: string;
+};
+
+export async function checkStudentCanBeHardDeleted(
+  studentId: string,
+  options?: BookingDataReadOptions,
+): Promise<HardDeleteStudentCheckResult> {
+  const id = String(studentId ?? "").trim();
+  const db = getFirestoreDb();
+
+  if (!db) {
+    const data = readBookingData();
+    const student = data.students.find((s) => s.id === id) ?? null;
+    if (!student) {
+      return { student: null, hasRelations: false, queryShape: "json.students.find(id)" };
+    }
+    const studentPhoneLast3 = student.phone
+      ? String(student.phone).replace(/\D/g, "").slice(-3)
+      : "";
+    const hasRelations =
+      data.reservations.some((r) => {
+        if (r.studentId === id) return true;
+        if (r.studentName !== student.name) return false;
+        const phoneMatches =
+          Boolean(studentPhoneLast3) && r.phoneLastThree === studentPhoneLast3;
+        const idMatches =
+          Boolean(student.idNumberLast3) &&
+          Boolean(r.idNumberLast3) &&
+          r.idNumberLast3 === student.idNumberLast3;
+        return Boolean(phoneMatches || idMatches);
+      }) ||
+      data.enrollments.some((e) => e.studentId === id) ||
+      data.attendanceRecords.some((a) => a.studentId === id) ||
+      data.studentCourseRecords.some((c) => c.studentId === id);
+    return {
+      student,
+      hasRelations,
+      queryShape: "json.relations.some(...)",
+    };
+  }
+
+  try {
+    const context = createReadContext({
+      source: options?.source ?? "checkStudentCanBeHardDeleted",
+      route: options?.route,
+      requestId: options?.requestId,
+    });
+
+    const studentDoc = await withDocumentReadDiagnostics(
+      "students",
+      context,
+      db.collection("students").doc(id).get(),
+      "doc(studentId)",
+    );
+    if (!studentDoc.exists) {
+      return { student: null, hasRelations: false, queryShape: "students.doc(studentId)" };
+    }
+    const student = normalizeFirestoreStudent(
+      studentDoc.id,
+      studentDoc.data() as FirestoreStudentDocument,
+    );
+    const studentPhoneLast3 = student.phone
+      ? String(student.phone).replace(/\D/g, "").slice(-3)
+      : "";
+
+    const [enrollments, courseRecords, attendance, reservationsById, reservationsByName] =
+      await Promise.all([
+        withReadDiagnostics(
+          "enrollments",
+          context,
+          db
+            .collection("enrollments")
+            .where("studentId", "==", studentId)
+            .limit(1)
+            .get(),
+          "enrollments.where(studentId == sid).limit(1)",
+        ),
+        withReadDiagnostics(
+          "studentCourseRecords",
+          context,
+          db
+            .collection("studentCourseRecords")
+            .where("studentId", "==", studentId)
+            .limit(1)
+            .get(),
+          "studentCourseRecords.where(studentId == sid).limit(1)",
+        ),
+        withReadDiagnostics(
+          "attendanceRecords",
+          context,
+          db
+            .collection("attendanceRecords")
+            .where("studentId", "==", studentId)
+            .limit(1)
+            .get(),
+          "attendanceRecords.where(studentId == sid).limit(1)",
+        ),
+        withReadDiagnostics(
+          "reservations",
+          context,
+          db
+            .collection("reservations")
+            .where("studentId", "==", studentId)
+            .limit(1)
+            .get(),
+          "reservations.where(studentId == sid).limit(1)",
+        ),
+        student.name
+          ? withReadDiagnostics(
+              "reservations",
+              context,
+              db
+                .collection("reservations")
+                .where("studentName", "==", student.name)
+                .limit(1)
+                .get(),
+              "reservations.where(studentName == name).limit(1)",
+            )
+          : Promise.resolve(null),
+      ]);
+
+    let hasRelations = Boolean(
+      enrollments.docs.length ||
+        courseRecords.docs.length ||
+        attendance.docs.length ||
+        reservationsById.docs.length,
+    );
+    if (!hasRelations && reservationsByName && reservationsByName.docs.length > 0) {
+      const reservation = reservationsByName.docs[0].data() as Partial<Reservation>;
+      const phoneMatches =
+        Boolean(studentPhoneLast3) && reservation.phoneLastThree === studentPhoneLast3;
+      const idMatches =
+        Boolean(student.idNumberLast3) &&
+        Boolean(reservation.idNumberLast3) &&
+        reservation.idNumberLast3 === student.idNumberLast3;
+      hasRelations = Boolean(phoneMatches || idMatches);
+    }
+
+    return {
+      student,
+      hasRelations,
+      queryShape:
+        "enrollments/studentCourseRecords/attendanceRecords/reservations.where(studentId == sid).limit(1); reservations.where(studentName == name).limit(1)",
+    };
+  } catch (error) {
+    if (!shouldFallbackToJson()) {
+      throw createFirestoreRequiredError("Hard delete dependency check failed.", error);
+    }
+    console.warn("[DATA_SOURCE] ⚠️ Firestore hard delete dependency check failed, falling back to local JSON. Error: " + (error instanceof Error ? error.message : String(error)));
+    const data = readBookingData();
+    const student = data.students.find((s) => s.id === id) ?? null;
+    if (!student) {
+      return { student: null, hasRelations: false, queryShape: "json.students.find(id)" };
+    }
+    const studentPhoneLast3 = student.phone
+      ? String(student.phone).replace(/\D/g, "").slice(-3)
+      : "";
+    const hasRelations =
+      data.reservations.some((r) => {
+        if (r.studentId === id) return true;
+        if (r.studentName !== student.name) return false;
+        const phoneMatches =
+          Boolean(studentPhoneLast3) && r.phoneLastThree === studentPhoneLast3;
+        const idMatches =
+          Boolean(student.idNumberLast3) &&
+          Boolean(r.idNumberLast3) &&
+          r.idNumberLast3 === student.idNumberLast3;
+        return Boolean(phoneMatches || idMatches);
+      }) ||
+      data.enrollments.some((e) => e.studentId === id) ||
+      data.attendanceRecords.some((a) => a.studentId === id) ||
+      data.studentCourseRecords.some((c) => c.studentId === id);
+    return {
+      student,
+      hasRelations,
+      queryShape: "json.fallback.relations.some(...)",
+    };
+  }
 }
 
 export async function getStudentImportPageData(

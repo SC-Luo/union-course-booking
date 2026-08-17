@@ -6,13 +6,12 @@ import { RosterFlowNav } from "@/components/roster-flow-nav";
 import type { StudentDirectoryPageData } from "@/lib/booking-repository";
 import {
   formatDate,
+  formatDateTime,
   getStudentCompleteness,
   getStudentStatus,
 } from "./student-profile-utils";
-import {
-  updateStudentIdentityStatusAction,
-  hardDeleteStudentIdentityAction,
-} from "@/app/admin/actions";
+import { updateStudentIdentityStatusAction } from "@/app/admin/actions";
+import { DeleteStudentButton } from "./DeleteStudentButton";
 
 type StudentDirectoryPageProps = {
   data: StudentDirectoryPageData;
@@ -21,6 +20,7 @@ type StudentDirectoryPageProps = {
   saved?: string;
   error?: string;
   imported?: string;
+  deleted?: string;
 };
 
 export function StudentDirectoryPage({
@@ -30,6 +30,7 @@ export function StudentDirectoryPage({
   saved,
   error,
   imported,
+  deleted,
 }: StudentDirectoryPageProps) {
   const students = data.students;
   const statusFilters = [
@@ -74,10 +75,15 @@ export function StudentDirectoryPage({
           已更新學員資料{imported ? `，本次處理 ${imported} 筆` : ""}。
         </p>
       ) : null}
+      {deleted ? (
+        <p className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-bold text-emerald-800">
+          「{decodeURIComponent(deleted)}」已永久刪除。
+        </p>
+      ) : null}
       {error ? (
         <p className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-3 text-sm font-bold text-rose-700">
           {error === "has_relations"
-            ? "此學員已有預約、名冊或點名紀錄，為避免資料不一致，請先停用或清除關聯資料後再刪除。"
+            ? "此學員已有課程、報名、預約、點名或相關紀錄，無法永久刪除。若此學員已不再使用系統，請改用「停用」保留歷史資料。"
             : error === "student_not_found"
             ? "找不到該學員資料。"
             : error === "invalid"
@@ -109,7 +115,7 @@ export function StudentDirectoryPage({
               固定上限查詢；搜尋採 exact match，瀏覽採游標分頁。
             </p>
           </div>
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             {[
               ["browse", "分頁瀏覽", buildHref({ status })],
               ["search", "搜尋學生", buildHref({ q, status })],
@@ -121,6 +127,11 @@ export function StudentDirectoryPage({
                   offeringId: data.selectedOfferingId,
                   status,
                 }),
+              ],
+              [
+                "recent",
+                "近期新增 30 筆",
+                buildHref({ mode: "recent", q: undefined, status: undefined }),
               ],
             ].map(([key, label, href]) => (
               <Link
@@ -213,7 +224,9 @@ export function StudentDirectoryPage({
                   status: key,
                 })}
                 className={`rounded-full border px-4 py-2 text-xs font-bold ${
-                  status === key ? "border-[#ef6c00] bg-[#ef6c00] text-white" : "border-[#ead7c6] bg-white text-[#6b3b25]"
+                  status === key && activeView !== "recent"
+                    ? "border-[#ef6c00] bg-[#ef6c00] text-white"
+                    : "border-[#ead7c6] bg-white text-[#6b3b25]"
                 }`}
               >
                 {label}
@@ -252,6 +265,9 @@ export function StudentDirectoryPage({
                   </Link>
                   <p className="mt-1 text-xs text-zinc-500">
                     末三碼：{student.idNumberLast3 || "未填"}｜來源：{student.source || "學員總表"}
+                    {activeView === "recent"
+                      ? `｜建立：${formatDateTime(student.createdAt)}`
+                      : ""}
                   </p>
                 </div>
                 <div className="text-sm text-zinc-700">{student.phone || "未填"}</div>
@@ -315,33 +331,18 @@ export function StudentDirectoryPage({
                       {isInactive ? "啟用" : "停用"}
                     </button>
                   </form>
-                  <form
-                    action={hardDeleteStudentIdentityAction}
-                    onSubmit={(e) => {
-                      if (!window.confirm("確認刪除這筆學員資料？此操作適合用於建錯資料，刪除後無法復原。")) {
-                        e.preventDefault();
-                      }
-                    }}
-                  >
-                    <input type="hidden" name="studentId" value={student.id} />
-                    <input
-                      type="hidden"
-                      name="redirectTo"
-                      value={buildHref({
-                        mode: activeView === "class" ? "class" : undefined,
-                        q,
-                        offeringId:
-                          activeView === "class" ? data.selectedOfferingId : undefined,
-                        status,
-                      })}
-                    />
-                    <button
-                      type="submit"
-                      className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-bold text-red-600 hover:bg-red-100"
-                    >
-                      刪除
-                    </button>
-                  </form>
+                  <DeleteStudentButton
+                    studentId={student.id}
+                    name={student.name}
+                    createdAt={student.createdAt}
+                    redirectTo={buildHref({
+                      mode: activeView === "class" ? "class" : undefined,
+                      q,
+                      offeringId:
+                        activeView === "class" ? data.selectedOfferingId : undefined,
+                      status,
+                    })}
+                  />
                 </div>
               </div>
             );

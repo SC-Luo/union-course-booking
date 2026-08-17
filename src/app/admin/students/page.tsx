@@ -3,7 +3,6 @@ import {
   assignStudentsToCourseEligibilityAction,
   bulkImportStudentIdentitiesAction,
   bulkUpdateStudentCourseEligibilityAction,
-  hardDeleteStudentIdentityAction,
   updateStudentIdentityStatusAction,
   saveStudentIdentityAction,
   updateStudentCourseEligibilityAction,
@@ -27,6 +26,7 @@ import type {
 } from "@/lib/types";
 import { StudentDirectoryPage } from "./student-directory-page";
 import { WithdrawStudentButton } from "./WithdrawStudentButton";
+import { DeleteStudentButton } from "./DeleteStudentButton";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -44,6 +44,7 @@ type PageProps = {
     saved?: string;
     error?: string;
     imported?: string;
+    deleted?: string;
     skipped?: string;
     linked?: string;
     enrolled?: string;
@@ -437,6 +438,7 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
     saved,
     error,
     imported,
+    deleted,
     skipped,
     linked,
     enrolled,
@@ -444,7 +446,14 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
     message,
     pageCursor,
   } = await searchParams;
-  const directoryMode = mode === "class" ? "class" : q.trim() ? "search" : "browse";
+  const directoryMode =
+    mode === "class"
+      ? "class"
+      : q.trim()
+        ? "search"
+        : mode === "recent"
+          ? "recent"
+          : "browse";
   const currentMode =
     mode === "class"
       ? "students"
@@ -522,6 +531,7 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
         saved={saved}
         error={error}
         imported={imported}
+        deleted={deleted}
       />
     );
   }
@@ -1503,21 +1513,12 @@ export default async function AdminStudentsPage({ searchParams }: PageProps) {
                     >
                       履歷
                     </Link>
-                    <form action={hardDeleteStudentIdentityAction}>
-                      <input
-                        type="hidden"
-                        name="studentId"
-                        value={student.id}
-                      />
-                      <input
-                        type="hidden"
-                        name="redirectTo"
-                        value={buildHref({ mode: "students", q, status })}
-                      />
-                      <button className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-bold text-rose-600 hover:bg-rose-100">
-                        刪除
-                      </button>
-                    </form>
+                    <DeleteStudentButton
+                      studentId={student.id}
+                      name={student.name}
+                      createdAt={student.createdAt}
+                      redirectTo={buildHref({ mode: "students", q, status })}
+                    />
                   </div>
                 );
               })}
